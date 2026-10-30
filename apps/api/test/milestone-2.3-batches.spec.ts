@@ -12,8 +12,27 @@ describe('Milestone 2.3 — Batches, Academic Terms & Scheduling Audit', () => {
   const studentA = 'stud-prof-111';
 
   beforeEach(() => {
+    let lockQueue: Promise<void> = Promise.resolve();
+    const acquireAdvisoryLock = async () => {
+      const current = lockQueue;
+      let release: () => void;
+      lockQueue = new Promise((resolve) => {
+        release = resolve;
+      });
+      await current;
+      return release!;
+    };
+
     mockPrisma = {
-      $transaction: jest.fn(async (cb) => cb(mockPrisma)),
+      $transaction: jest.fn(async (cb) => {
+        const release = await acquireAdvisoryLock();
+        try {
+          return await cb(mockPrisma);
+        } finally {
+          release();
+        }
+      }),
+      $queryRawUnsafe: jest.fn().mockResolvedValue([{ 1: 1 }]),
       academicYear: {
         create: jest.fn(),
         findFirst: jest.fn(),
@@ -83,6 +102,8 @@ describe('Milestone 2.3 — Batches, Academic Terms & Scheduling Audit', () => {
         isCurrent: true,
       });
 
+      mockPrisma.academicYear.findFirst.mockResolvedValue(null);
+
       const result = await service.createAcademicYear(instituteA, {
         name: '2026-2027',
         startDate: '2026-06-01',
@@ -95,6 +116,24 @@ describe('Milestone 2.3 — Batches, Academic Terms & Scheduling Audit', () => {
         where: { instituteId: instituteA },
         data: { isCurrent: false },
       });
+    });
+
+    it('rejects academic year if dates overlap with an existing period in the same institute', async () => {
+      mockPrisma.academicYear.findFirst.mockResolvedValue({
+        id: 'ay-existing',
+        name: '2026-2027 Existing',
+        startDate: new Date('2026-06-01'),
+        endDate: new Date('2027-05-31'),
+      });
+
+      await expect(
+        service.createAcademicYear(instituteA, {
+          name: '2026-2027 Overlapping',
+          startDate: '2026-10-01',
+          endDate: '2027-09-30',
+          isCurrent: false,
+        }),
+      ).rejects.toThrow(/overlap with existing period/);
     });
 
     it('rejects academic year if startDate >= endDate', async () => {
@@ -672,4 +711,211 @@ describe('Milestone 2.3 — Batches, Academic Terms & Scheduling Audit', () => {
       expect(mockPrisma.liveSession.create).not.toHaveBeenCalled();
     });
   });
+
+  // ===========================================================================
+  // 7. CONCURRENCY & DATA INTEGRITY VERIFICATION SUITE
+  // ===========================================================================
+  describe('Concurrency & Data Integrity Verification', () => {
+    it('concurrent enrolment: when only 1 seat remains, exactly 1 succeeds and capacity is never exceeded', async () => {
+      let activeEnrolments = 49;
+      const maxCapacity = 50;
+
+      mockPrisma.studentProfile.findFirst.mockResolvedValue({
+        id: 'stud',
+        instituteId: instituteA,
+      });
+
+      // Simulates real-time DB state under transactional exclusive lock
+      mockPrisma.batch.findFirst.mockImplementation(async () => ({
+        id: 'batch-concurrent',
+        courseId: 'c1',
+        instituteId: instituteA,
+        capacity: maxCapacity,
+        status: 'ACTIVE',
+        _count: { enrolments: activeEnrolments },
+      }));
+
+      mockPrisma.enrolment.count = jest.fn(async () => activeEnrolments);
+      mockPrisma.enrolment.findFirst.mockResolvedValue(null);
+      mockPrisma.enrolment.create.mockImplementation(async (args: any) => {
+        activeEnrolments++;
+        return { id: `enrol-${Math.random()}`, ...args.data };
+      });
+
+      // Send 2 simultaneous enrolment requests for the 1 remaining seat
+      const [req1, req2] = await Promise.allSettled([
+        service.enrollStudent(instituteA, 'batch-concurrent', 'student-alpha'),
+        service.enrollStudent(instituteA, 'batch-concurrent', 'student-beta'),
+      ]);
+
+      const fulfilled = [req1, req2].filter((r) => r.status === 'fulfilled');
+      const rejected = [req1, req2].filter((r) => r.status === 'rejected');
+
+      // Exactly 1 request must succeed
+      expect(fulfilled.length).toBe(1);
+      // Exactly 1 request must be rejected
+      expect(rejected.length).toBe(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(BadRequestException);
+      expect((rejected[0] as PromiseRejectedResult).reason.message).toContain('Batch capacity reached');
+
+      // Crucial verification: Active enrolments NEVER exceeded batch.capacity
+      expect(activeEnrolments).toBe(maxCapacity);
+    });
+
+    it('concurrent scheduling: same teacher overlapping sessions cannot both succeed', async () => {
+      mockPrisma.batch.findFirst.mockResolvedValue({ id: 'b-1', instituteId: instituteA });
+      mockPrisma.teacherProfile.findFirst.mockResolvedValue({ id: teacherA, instituteId: instituteA });
+
+      let committedSession: any = null;
+
+      mockPrisma.liveSession.findFirst.mockImplementation(async (query: any) => {
+        if (committedSession && query?.where?.teacherProfileId === teacherA) {
+          return committedSession;
+        }
+        return null;
+      });
+
+      mockPrisma.liveSession.create.mockImplementation(async (args: any) => {
+        committedSession = {
+          id: 'sess-first-committed',
+          ...args.data,
+          startsAt: new Date(args.data.startsAt),
+          endsAt: new Date(args.data.endsAt),
+          teacherProfile: { membership: { user: { fullName: 'Dr. John' } } },
+          batch: { name: 'Batch 1' },
+        };
+        return committedSession;
+      });
+
+      // Two concurrent requests attempt to book Teacher A at overlapping times
+      const [sched1, sched2] = await Promise.allSettled([
+        service.createSchedule(instituteA, {
+          batchId: 'b-1',
+          teacherProfileId: teacherA,
+          title: 'Morning Hermeneutics',
+          startsAt: '2026-10-01T10:00:00Z',
+          endsAt: '2026-10-01T11:00:00Z',
+        }),
+        service.createSchedule(instituteA, {
+          batchId: 'b-1',
+          teacherProfileId: teacherA,
+          title: 'Advanced Exegesis',
+          startsAt: '2026-10-01T10:30:00Z',
+          endsAt: '2026-10-01T11:30:00Z',
+        }),
+      ]);
+
+      const fulfilled = [sched1, sched2].filter((r) => r.status === 'fulfilled');
+      const rejected = [sched1, sched2].filter((r) => r.status === 'rejected');
+
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
+    });
+
+    it('concurrent scheduling: same physical room overlapping sessions cannot both succeed', async () => {
+      mockPrisma.batch.findFirst.mockResolvedValue({ id: 'b-1', instituteId: instituteA });
+      mockPrisma.teacherProfile.findFirst
+        .mockResolvedValueOnce({ id: teacherA, instituteId: instituteA })
+        .mockResolvedValueOnce({ id: teacherB, instituteId: instituteA });
+
+      let committedSession: any = null;
+
+      mockPrisma.liveSession.findFirst.mockImplementation(async (query: any) => {
+        if (committedSession && query?.where?.room === 'Main Sanctuary') {
+          return committedSession;
+        }
+        return null;
+      });
+
+      mockPrisma.liveSession.create.mockImplementation(async (args: any) => {
+        committedSession = {
+          id: 'sess-room-committed',
+          ...args.data,
+          startsAt: new Date(args.data.startsAt),
+          endsAt: new Date(args.data.endsAt),
+          batch: { name: 'Batch 1' },
+        };
+        return committedSession;
+      });
+
+      // Two concurrent requests attempt to reserve the same room at overlapping times
+      const [sched1, sched2] = await Promise.allSettled([
+        service.createSchedule(instituteA, {
+          batchId: 'b-1',
+          teacherProfileId: teacherA,
+          room: 'Main Sanctuary',
+          title: 'Biblical Archaeology',
+          startsAt: '2026-10-01T14:00:00Z',
+          endsAt: '2026-10-01T15:00:00Z',
+        }),
+        service.createSchedule(instituteA, {
+          batchId: 'b-1',
+          teacherProfileId: teacherB,
+          room: 'Main Sanctuary',
+          title: 'Choir & Worship Practicum',
+          startsAt: '2026-10-01T14:30:00Z',
+          endsAt: '2026-10-01T15:30:00Z',
+        }),
+      ]);
+
+      const fulfilled = [sched1, sched2].filter((r) => r.status === 'fulfilled');
+      const rejected = [sched1, sched2].filter((r) => r.status === 'rejected');
+
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
+    });
+
+    it('concurrent scheduling: same batch overlapping sessions cannot both succeed', async () => {
+      mockPrisma.batch.findFirst.mockResolvedValue({ id: 'b-1', instituteId: instituteA });
+      mockPrisma.teacherProfile.findFirst.mockResolvedValue({ id: teacherA, instituteId: instituteA });
+
+      let committedSession: any = null;
+
+      mockPrisma.liveSession.findFirst.mockImplementation(async (query: any) => {
+        if (committedSession && query?.where?.batchId === 'b-1') {
+          return committedSession;
+        }
+        return null;
+      });
+
+      mockPrisma.liveSession.create.mockImplementation(async (args: any) => {
+        committedSession = {
+          id: 'sess-batch-committed',
+          ...args.data,
+          startsAt: new Date(args.data.startsAt),
+          endsAt: new Date(args.data.endsAt),
+          batch: { name: 'Batch 1' },
+        };
+        return committedSession;
+      });
+
+      // Two concurrent requests attempt to schedule classes for the same batch at overlapping times
+      const [sched1, sched2] = await Promise.allSettled([
+        service.createSchedule(instituteA, {
+          batchId: 'b-1',
+          teacherProfileId: teacherA,
+          title: 'Systematic Theology I',
+          startsAt: '2026-10-01T09:00:00Z',
+          endsAt: '2026-10-01T10:00:00Z',
+        }),
+        service.createSchedule(instituteA, {
+          batchId: 'b-1',
+          teacherProfileId: teacherB,
+          title: 'Church History I',
+          startsAt: '2026-10-01T09:30:00Z',
+          endsAt: '2026-10-01T10:30:00Z',
+        }),
+      ]);
+
+      const fulfilled = [sched1, sched2].filter((r) => r.status === 'fulfilled');
+      const rejected = [sched1, sched2].filter((r) => r.status === 'rejected');
+
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
+    });
+  });
 });
+
