@@ -220,3 +220,128 @@ export const ReorderCurriculumSchema = z.object({
   ),
 });
 export type ReorderCurriculumInput = z.infer<typeof ReorderCurriculumSchema>;
+
+// ----------------------------------------------------
+// MILESTONE 2.3: BATCHES, ACADEMIC TERMS & SCHEDULING
+// ----------------------------------------------------
+
+export const CreateAcademicYearSchema = z.object({
+  name: z.string().min(2, 'Academic year name is required (e.g. 2026-2027)'),
+  startDate: z.string().min(10, 'Start date is required (YYYY-MM-DD)'),
+  endDate: z.string().min(10, 'End date is required (YYYY-MM-DD)'),
+  isCurrent: z.boolean().default(false),
+});
+export type CreateAcademicYearInput = z.infer<typeof CreateAcademicYearSchema>;
+
+export const UpdateAcademicYearSchema = CreateAcademicYearSchema.partial();
+export type UpdateAcademicYearInput = z.infer<typeof UpdateAcademicYearSchema>;
+
+export const CreateAcademicTermSchema = z.object({
+  academicYearId: z.string().min(1, 'Academic year is required'),
+  name: z.string().min(2, 'Term name is required (e.g. Fall 2026 / Semester 1)'),
+  startDate: z.string().min(10, 'Start date is required (YYYY-MM-DD)'),
+  endDate: z.string().min(10, 'End date is required (YYYY-MM-DD)'),
+  isCurrent: z.boolean().default(false),
+});
+export type CreateAcademicTermInput = z.infer<typeof CreateAcademicTermSchema>;
+
+export const UpdateAcademicTermSchema = CreateAcademicTermSchema.partial();
+export type UpdateAcademicTermInput = z.infer<typeof UpdateAcademicTermSchema>;
+
+export const BatchStatusEnum = z.enum([
+  'UPCOMING',
+  'ACTIVE',
+  'COMPLETED',
+  'CANCELLED',
+  'ARCHIVED',
+]);
+
+export const CreateBatchSchema = z.object({
+  courseId: z.string().min(1, 'Course selection is required'),
+  academicYearId: z.string().optional(),
+  termId: z.string().optional(),
+  name: z.string().min(2, 'Batch name is required (e.g. Cohort Alpha 2026)'),
+  code: z.string().optional(),
+  startDate: z.string().min(10, 'Start date is required (YYYY-MM-DD)'),
+  endDate: z.string().min(10, 'End date is required (YYYY-MM-DD)'),
+  capacity: z.coerce.number().int().min(1, 'Batch capacity must be at least 1').default(50),
+  status: BatchStatusEnum.default('ACTIVE'),
+  leadTeacherProfileId: z.string().optional(),
+  assistantTeacherProfileIds: z.array(z.string()).optional(),
+});
+export type CreateBatchInput = z.infer<typeof CreateBatchSchema>;
+
+export const UpdateBatchSchema = CreateBatchSchema.partial();
+export type UpdateBatchInput = z.infer<typeof UpdateBatchSchema>;
+
+export const BatchFilterQuerySchema = z.object({
+  courseId: z.string().optional(),
+  termId: z.string().optional(),
+  academicYearId: z.string().optional(),
+  status: z.string().optional(),
+  search: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type BatchFilterQuery = z.infer<typeof BatchFilterQuerySchema>;
+
+export const AssignBatchTeacherSchema = z.object({
+  teacherProfileId: z.string().min(1, 'Teacher selection is required'),
+  role: z.enum(['LEAD', 'ASSISTANT']).default('LEAD'),
+});
+export type AssignBatchTeacherInput = z.infer<typeof AssignBatchTeacherSchema>;
+
+export const EnrollStudentBatchSchema = z.object({
+  studentProfileId: z.string().min(1, 'Student selection is required'),
+});
+export type EnrollStudentBatchInput = z.infer<typeof EnrollStudentBatchSchema>;
+
+export const TransferStudentBatchSchema = z.object({
+  studentProfileId: z.string().min(1, 'Student selection is required'),
+  sourceBatchId: z.string().min(1, 'Source batch is required'),
+  targetBatchId: z.string().min(1, 'Target batch is required'),
+  reason: z.string().min(3, 'Transfer reason is required'),
+});
+export type TransferStudentBatchInput = z.infer<typeof TransferStudentBatchSchema>;
+
+export const CreateClassScheduleSchema = z.object({
+  batchId: z.string().min(1, 'Batch is required'),
+  teacherProfileId: z.string().min(1, 'Teacher is required'),
+  title: z.string().min(2, 'Class title is required'),
+  description: z.string().optional(),
+  room: z.string().optional(),
+  startsAt: z.string().min(10, 'Start time is required (ISO 8601)'),
+  endsAt: z.string().min(10, 'End time is required (ISO 8601)'),
+  joinUrl: z.string().url().optional().or(z.literal('')),
+  recordingUrl: z.string().url().optional().or(z.literal('')),
+  isRecurring: z.boolean().default(false),
+  recurrenceRule: z.string().optional(),
+});
+export type CreateClassScheduleInput = z.infer<typeof CreateClassScheduleSchema>;
+
+export const CheckScheduleConflictSchema = z.object({
+  batchId: z.string().optional(),
+  teacherProfileId: z.string().optional(),
+  room: z.string().optional(),
+  startsAt: z.string().min(10),
+  endsAt: z.string().min(10),
+  excludeSessionId: z.string().optional(),
+});
+export type CheckScheduleConflictInput = z.infer<typeof CheckScheduleConflictSchema>;
+
+export const RecurringWeeklyScheduleSchema = z.object({
+  batchId: z.string().min(1, 'Batch is required'),
+  teacherProfileId: z.string().min(1, 'Teacher is required'),
+  title: z.string().min(2, 'Class title is required'),
+  description: z.string().optional(),
+  room: z.string().optional(),
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1, 'At least one day must be selected'),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Start time must be HH:mm'),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'End time must be HH:mm'),
+  startDate: z.string().min(10, 'Start date is required (YYYY-MM-DD)'),
+  endDate: z.string().min(10, 'End date is required (YYYY-MM-DD)'),
+  exceptions: z.array(z.string()).optional(),
+  joinUrl: z.string().url().optional().or(z.literal('')),
+});
+export type RecurringWeeklyScheduleInput = z.infer<typeof RecurringWeeklyScheduleSchema>;
+

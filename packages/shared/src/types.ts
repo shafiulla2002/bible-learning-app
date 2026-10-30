@@ -224,3 +224,139 @@ export interface CourseHierarchyDetail extends CourseSummaryItem {
     minAttendancePct: number;
   };
 }
+
+// ----------------------------------------------------
+// BATCHES, ACADEMIC TERMS & SCHEDULING (Milestone 2.3)
+// ----------------------------------------------------
+
+export interface AcademicYearSummary {
+  id: string;
+  instituteId: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  isCurrent: boolean;
+  termCount?: number;
+  batchCount?: number;
+}
+
+export interface AcademicTermSummary {
+  id: string;
+  instituteId: string;
+  academicYearId: string;
+  academicYearName?: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  isCurrent: boolean;
+  batchCount?: number;
+}
+
+export type BatchStatus = 'UPCOMING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED';
+
+export interface BatchTeacherItem {
+  id: string;
+  teacherProfileId: string;
+  name: string;
+  email?: string;
+  photoUrl?: string;
+  role: 'LEAD' | 'ASSISTANT';
+}
+
+export interface BatchSummaryItem {
+  id: string;
+  instituteId: string;
+  courseId: string;
+  courseTitle: string;
+  academicYearId?: string;
+  academicYearName?: string;
+  termId?: string;
+  termName?: string;
+  name: string;
+  code?: string;
+  status: BatchStatus;
+  startDate: string;
+  endDate: string;
+  capacity: number;
+  enrolledCount: number;
+  leadTeacher?: {
+    id: string;
+    name: string;
+    email?: string;
+    photoUrl?: string;
+  };
+  assistantsCount: number;
+  scheduledClassesCount: number;
+  createdAt: string;
+}
+
+export interface BatchEnrolmentItem {
+  id: string;
+  studentProfileId: string;
+  admissionNo: string;
+  studentName: string;
+  email?: string;
+  phoneNumber?: string;
+  enrolledAt: string;
+  status: string;
+}
+
+export interface BatchTransferLogItem {
+  id: string;
+  instituteId: string;
+  studentProfileId: string;
+  studentName?: string;
+  admissionNo?: string;
+  sourceBatchId: string;
+  sourceBatchName: string;
+  targetBatchId: string;
+  targetBatchName: string;
+  reason?: string;
+  transferredBy?: string;
+  transferredAt: string;
+}
+
+export interface ClassScheduleItem {
+  id: string;
+  instituteId: string;
+  batchId: string;
+  batchName?: string;
+  courseTitle?: string;
+  teacherProfileId: string;
+  teacherName?: string;
+  title: string;
+  description?: string;
+  room?: string;
+  startsAt: string;
+  endsAt: string;
+  isRecurring: boolean;
+  recurrenceRule?: string;
+  joinUrl?: string;
+  recordingUrl?: string;
+  status: 'SCHEDULED' | 'LIVE' | 'COMPLETED' | 'CANCELLED';
+}
+
+export interface ScheduleConflictResult {
+  hasConflict: boolean;
+  conflictType?: 'TEACHER_DOUBLE_BOOKED' | 'ROOM_DOUBLE_BOOKED' | 'BATCH_DOUBLE_BOOKED';
+  conflictingSession?: {
+    id: string;
+    title: string;
+    startsAt: string;
+    endsAt: string;
+    teacherName?: string;
+    room?: string;
+    batchName?: string;
+  };
+  message?: string;
+}
+
+export interface RecurringScheduleRule {
+  daysOfWeek: number[]; // 0: Sunday, 1: Monday, ... 6: Saturday
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  exceptions?: string[]; // YYYY-MM-DD dates to skip
+}
+
