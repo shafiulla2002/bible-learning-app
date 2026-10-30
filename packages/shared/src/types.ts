@@ -136,3 +136,91 @@ export interface AssignmentSummary {
   totalSubmissions: number;
   gradedCount: number;
 }
+
+// ----------------------------------------------------
+// COURSE & CURRICULUM MANAGEMENT TYPES (Milestone 2.2)
+// ----------------------------------------------------
+
+export interface CourseSummaryItem {
+  id: string;
+  title: string;
+  slug: string;
+  categoryId: string;
+  categoryName: string;
+  level: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+  language: string;
+  pricing: 'FREE' | 'PAID';
+  price: number;
+  salePrice?: number;
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  coverImage?: string;
+  enrolledCount: number;
+  moduleCount: number;
+  lessonCount: number;
+  durationMinutes: number;
+  leadTeacherName?: string;
+  updatedAt: string;
+}
+
+export interface ResourceItemDetail {
+  id: string;
+  lessonId: string;
+  mediaAssetId: string;
+  kind: string;
+  storageKey: string;
+  mimeType: string;
+  sizeBytes: string;
+  downloadable: boolean;
+  createdAt: string;
+}
+
+export interface LessonItemDetail {
+  id: string;
+  chapterId: string;
+  title: string;
+  type: 'VIDEO' | 'PDF' | 'AUDIO' | 'TEXT' | 'QUIZ' | 'LIVE';
+  body?: string;
+  durationSec: number;
+  isPreview: boolean;
+  isMandatory: boolean;
+  position: number;
+  resources: ResourceItemDetail[];
+}
+
+export interface ChapterItemDetail {
+  id: string;
+  moduleId: string;
+  title: string;
+  position: number;
+  lessons: LessonItemDetail[];
+}
+
+export interface ModuleItemDetail {
+  id: string;
+  courseId: string;
+  title: string;
+  position: number;
+  chapters: ChapterItemDetail[];
+}
+
+export interface CourseInstructorDetail {
+  id: string;
+  courseId: string;
+  teacherProfileId: string;
+  teacherName: string;
+  teacherEmail?: string;
+  role: 'LEAD' | 'ASSISTANT';
+}
+
+export interface CourseHierarchyDetail extends CourseSummaryItem {
+  description: string;
+  accessDays?: number;
+  modules: ModuleItemDetail[];
+  instructors: CourseInstructorDetail[];
+  completionRule?: {
+    minProgressPct: number;
+    allMandatory: boolean;
+    minExamPct: number;
+    minAttendancePct: number;
+  };
+}

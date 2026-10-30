@@ -119,15 +119,104 @@ export const BulkStudentImportRowSchema = z.object({
 export type BulkStudentImportRow = z.infer<typeof BulkStudentImportRowSchema>;
 
 export const CreateCourseSchema = z.object({
-  title: z.string().min(3, 'Course title is required'),
-  slug: z.string().min(3, 'Slug is required').regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric'),
-  category: z.string().min(1, 'Category is required'),
+  title: z.string().min(3, 'Course title must be at least 3 characters'),
+  slug: z
+    .string()
+    .min(3, 'Slug is required')
+    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens')
+    .optional(),
+  categoryId: z.string().optional(),
+  categoryName: z.string().optional(),
   description: z.string().min(10, 'Description must be at least 10 characters'),
-  level: z.enum(['Beginner', 'Intermediate', 'Advanced']).default('Beginner'),
+  level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']).default('BEGINNER'),
   language: z.string().default('English'),
-  price: z.number().int().min(0, 'Price must be non-negative'), // in paise
-  isFree: z.boolean().default(false),
+  pricing: z.enum(['FREE', 'PAID']).default('FREE'),
+  price: z.coerce.number().int().min(0, 'Price must be non-negative').default(0), // in paise
+  salePrice: z.coerce.number().int().min(0).optional(),
+  accessDays: z.coerce.number().int().min(1).optional(),
+  coverImage: z.string().url().optional().or(z.literal('')),
   leadTeacherId: z.string().optional(),
+  status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).default('DRAFT'),
 });
 
 export type CreateCourseInput = z.infer<typeof CreateCourseSchema>;
+
+export const UpdateCourseSchema = CreateCourseSchema.partial();
+export type UpdateCourseInput = z.infer<typeof UpdateCourseSchema>;
+
+export const CourseFilterQuerySchema = z.object({
+  search: z.string().optional(),
+  status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+  level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']).optional(),
+  categoryId: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  sortBy: z.enum(['title', 'createdAt', 'updatedAt', 'price']).default('updatedAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
+export type CourseFilterQuery = z.infer<typeof CourseFilterQuerySchema>;
+
+export const CreateModuleSchema = z.object({
+  title: z.string().min(2, 'Module title is required'),
+  position: z.number().int().min(0).optional(),
+});
+export type CreateModuleInput = z.infer<typeof CreateModuleSchema>;
+
+export const UpdateModuleSchema = z.object({
+  title: z.string().min(2).optional(),
+  position: z.number().int().min(0).optional(),
+});
+export type UpdateModuleInput = z.infer<typeof UpdateModuleSchema>;
+
+export const CreateChapterSchema = z.object({
+  title: z.string().min(2, 'Chapter title is required'),
+  position: z.number().int().min(0).optional(),
+});
+export type CreateChapterInput = z.infer<typeof CreateChapterSchema>;
+
+export const UpdateChapterSchema = z.object({
+  title: z.string().min(2).optional(),
+  position: z.number().int().min(0).optional(),
+});
+export type UpdateChapterInput = z.infer<typeof UpdateChapterSchema>;
+
+export const CreateLessonSchema = z.object({
+  title: z.string().min(2, 'Lesson title is required'),
+  type: z.enum(['VIDEO', 'PDF', 'AUDIO', 'TEXT', 'QUIZ', 'LIVE']).default('VIDEO'),
+  body: z.string().optional(),
+  durationSec: z.number().int().min(0).default(0),
+  isPreview: z.boolean().default(false),
+  isMandatory: z.boolean().default(true),
+  position: z.number().int().min(0).optional(),
+});
+export type CreateLessonInput = z.infer<typeof CreateLessonSchema>;
+
+export const UpdateLessonSchema = CreateLessonSchema.partial();
+export type UpdateLessonInput = z.infer<typeof UpdateLessonSchema>;
+
+export const CreateResourceSchema = z.object({
+  kind: z.enum(['VIDEO', 'PDF', 'AUDIO', 'IMAGE', 'FILE']).default('PDF'),
+  storageKey: z.string().min(1, 'Storage key or file path is required'),
+  mimeType: z.string().default('application/pdf'),
+  sizeBytes: z.coerce.string().default('1024000'),
+  downloadable: z.boolean().default(false),
+});
+export type CreateResourceInput = z.infer<typeof CreateResourceSchema>;
+
+export const AssignCourseInstructorSchema = z.object({
+  teacherProfileId: z.string().min(1, 'Teacher selection is required'),
+  role: z.enum(['LEAD', 'ASSISTANT']).default('LEAD'),
+});
+export type AssignCourseInstructorInput = z.infer<typeof AssignCourseInstructorSchema>;
+
+export const ReorderCurriculumSchema = z.object({
+  entityType: z.enum(['module', 'chapter', 'lesson']),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      position: z.number().int().min(0),
+    }),
+  ),
+});
+export type ReorderCurriculumInput = z.infer<typeof ReorderCurriculumSchema>;
