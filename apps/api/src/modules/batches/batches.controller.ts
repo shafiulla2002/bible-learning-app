@@ -53,6 +53,14 @@ export class BatchesController {
     return this.batchesService.getAcademicYears(instituteId);
   }
 
+  @Patch('academic-years/:id/set-current')
+  async setCurrentAcademicYear(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+  ) {
+    return this.batchesService.setCurrentAcademicYear(instituteId, id);
+  }
+
   @Post('academic-terms')
   @HttpCode(HttpStatus.CREATED)
   async createAcademicTerm(
@@ -69,6 +77,14 @@ export class BatchesController {
     @Query('academicYearId') academicYearId?: string,
   ) {
     return this.batchesService.getAcademicTerms(instituteId, academicYearId);
+  }
+
+  @Patch('academic-terms/:id/set-current')
+  async setCurrentAcademicTerm(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+  ) {
+    return this.batchesService.setCurrentAcademicTerm(instituteId, id);
   }
 
   // ---------------------------------------------------------------------------

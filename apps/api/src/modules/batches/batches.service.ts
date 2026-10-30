@@ -37,38 +37,82 @@ export class BatchesService {
       throw new BadRequestException('Academic year start date must precede end date');
     }
 
-    // Requirement 4: Academic years cannot overlap when the institute's policy prohibits overlap
-    const overlapping = await this.prisma.academicYear.findFirst({
-      where: {
-        instituteId,
-        startDate: { lt: end },
-        endDate: { gt: start },
-      },
-    });
+    const executeCreation = async (tx: any) => {
+      if (typeof tx.$queryRawUnsafe === 'function') {
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `acad_year:${instituteId}`,
+        );
+      }
 
-    if (overlapping) {
-      throw new BadRequestException(
-        `Academic year dates (${input.startDate} to ${input.endDate}) overlap with existing period "${overlapping.name}" (${overlapping.startDate.toISOString().slice(0, 10)} to ${overlapping.endDate.toISOString().slice(0, 10)})`,
-      );
-    }
+      // 1. Overlap validation
+      const overlapping = await tx.academicYear.findFirst({
+        where: {
+          instituteId,
+          startDate: { lt: end },
+          endDate: { gt: start },
+        },
+      });
 
-    // If marked current, deactivate other academic years for this institute
-    if (input.isCurrent) {
-      await this.prisma.academicYear.updateMany({
+      if (overlapping) {
+        throw new BadRequestException(
+          `Academic year dates (${input.startDate} to ${input.endDate}) overlap with existing period "${overlapping.name}" (${overlapping.startDate.toISOString().slice(0, 10)} to ${overlapping.endDate.toISOString().slice(0, 10)})`,
+        );
+      }
+
+      // 2. If marked current, atomically deactivate other academic years for this institute
+      if (input.isCurrent) {
+        await tx.academicYear.updateMany({
+          where: { instituteId },
+          data: { isCurrent: false },
+        });
+      }
+
+      return tx.academicYear.create({
+        data: {
+          instituteId,
+          name: input.name,
+          startDate: start,
+          endDate: end,
+          isCurrent: input.isCurrent ?? false,
+        },
+      });
+    };
+
+    return this.executeWithRetry(executeCreation);
+  }
+
+  async setCurrentAcademicYear(instituteId: string, academicYearId: string) {
+    const executeSwitch = async (tx: any) => {
+      if (typeof tx.$queryRawUnsafe === 'function') {
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `acad_year:${instituteId}`,
+        );
+      }
+
+      const year = await tx.academicYear.findFirst({
+        where: { id: academicYearId, instituteId },
+      });
+
+      if (!year) {
+        throw new NotFoundException('Academic year not found in this institute');
+      }
+
+      // Atomically deactivate all other academic years in this institute
+      await tx.academicYear.updateMany({
         where: { instituteId },
         data: { isCurrent: false },
       });
-    }
 
-    return this.prisma.academicYear.create({
-      data: {
-        instituteId,
-        name: input.name,
-        startDate: start,
-        endDate: end,
-        isCurrent: input.isCurrent ?? false,
-      },
-    });
+      // Activate selected academic year
+      return tx.academicYear.update({
+        where: { id: academicYearId },
+        data: { isCurrent: true },
+      });
+    };
+
+    return this.executeWithRetry(executeSwitch);
   }
 
   async getAcademicYears(instituteId: string) {
@@ -87,14 +131,6 @@ export class BatchesService {
   }
 
   async createAcademicTerm(instituteId: string, input: CreateAcademicTermInput) {
-    const academicYear = await this.prisma.academicYear.findFirst({
-      where: { id: input.academicYearId, instituteId },
-    });
-
-    if (!academicYear) {
-      throw new NotFoundException('Academic year not found in this institute');
-    }
-
     const termStart = new Date(input.startDate);
     const termEnd = new Date(input.endDate);
 
@@ -102,33 +138,102 @@ export class BatchesService {
       throw new BadRequestException('Academic term start date must precede end date');
     }
 
-    // Requirement 6: Ensure each term belongs to its academic year and stays within its date boundaries.
-    const yearStart = new Date(academicYear.startDate);
-    const yearEnd = new Date(academicYear.endDate);
+    const executeCreation = async (tx: any) => {
+      if (typeof tx.$queryRawUnsafe === 'function') {
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `acad_term:${input.academicYearId}`,
+        );
+      }
 
-    if (termStart < yearStart || termEnd > yearEnd) {
-      throw new BadRequestException(
-        `Term dates (${termStart.toISOString().slice(0, 10)} to ${termEnd.toISOString().slice(0, 10)}) must fall within Academic Year boundaries (${yearStart.toISOString().slice(0, 10)} to ${yearEnd.toISOString().slice(0, 10)})`,
-      );
-    }
+      const academicYear = await tx.academicYear.findFirst({
+        where: { id: input.academicYearId, instituteId },
+      });
 
-    if (input.isCurrent) {
-      await this.prisma.academicTerm.updateMany({
-        where: { instituteId },
+      if (!academicYear) {
+        throw new NotFoundException('Academic year not found in this institute');
+      }
+
+      // Validate dates within parent academic year boundaries
+      const yearStart = new Date(academicYear.startDate);
+      const yearEnd = new Date(academicYear.endDate);
+
+      if (termStart < yearStart || termEnd > yearEnd) {
+        throw new BadRequestException(
+          `Term dates (${termStart.toISOString().slice(0, 10)} to ${termEnd.toISOString().slice(0, 10)}) must fall within Academic Year boundaries (${yearStart.toISOString().slice(0, 10)} to ${yearEnd.toISOString().slice(0, 10)})`,
+        );
+      }
+
+      // Check term overlap within this academic year
+      const overlappingTerm = await tx.academicTerm.findFirst({
+        where: {
+          academicYearId: input.academicYearId,
+          startDate: { lt: termEnd },
+          endDate: { gt: termStart },
+        },
+      });
+
+      if (overlappingTerm) {
+        throw new BadRequestException(
+          `Term dates overlap with existing term "${overlappingTerm.name}" (${overlappingTerm.startDate.toISOString().slice(0, 10)} to ${overlappingTerm.endDate.toISOString().slice(0, 10)}) in this academic year`,
+        );
+      }
+
+      // Rule: Only ONE academic term can be current within each academic year.
+      // Deactivate other terms belonging to this academic year ONLY.
+      if (input.isCurrent) {
+        await tx.academicTerm.updateMany({
+          where: { academicYearId: input.academicYearId },
+          data: { isCurrent: false },
+        });
+      }
+
+      return tx.academicTerm.create({
+        data: {
+          instituteId,
+          academicYearId: input.academicYearId,
+          name: input.name,
+          startDate: termStart,
+          endDate: termEnd,
+          isCurrent: input.isCurrent ?? false,
+        },
+      });
+    };
+
+    return this.executeWithRetry(executeCreation);
+  }
+
+  async setCurrentAcademicTerm(instituteId: string, termId: string) {
+    const executeSwitch = async (tx: any) => {
+      const term = await tx.academicTerm.findFirst({
+        where: { id: termId, instituteId },
+      });
+
+      if (!term) {
+        throw new NotFoundException('Academic term not found in this institute');
+      }
+
+      if (typeof tx.$queryRawUnsafe === 'function') {
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `acad_term:${term.academicYearId}`,
+        );
+      }
+
+      // Atomically deactivate other terms in THIS academic year only
+      await tx.academicTerm.updateMany({
+        where: { academicYearId: term.academicYearId },
         data: { isCurrent: false },
       });
-    }
 
-    return this.prisma.academicTerm.create({
-      data: {
-        instituteId,
-        academicYearId: input.academicYearId,
-        name: input.name,
-        startDate: termStart,
-        endDate: termEnd,
-        isCurrent: input.isCurrent ?? false,
-      },
-    });
+      // Activate selected term
+      return tx.academicTerm.update({
+        where: { id: termId },
+        data: { isCurrent: true },
+      });
+    };
+
+    return this.executeWithRetry(executeSwitch);
   }
 
   async getAcademicTerms(instituteId: string, academicYearId?: string) {
@@ -537,19 +642,15 @@ export class BatchesService {
     const executeEnrollment = async (tx: any) => {
       // 1. Acquire PostgreSQL Row-Level Lock and Advisory Lock
       if (typeof tx.$queryRawUnsafe === 'function') {
-        try {
-          await tx.$queryRawUnsafe(
-            `SELECT id FROM "Batch" WHERE id = $1 AND "instituteId" = $2 FOR UPDATE`,
-            batchId,
-            instituteId,
-          );
-          await tx.$queryRawUnsafe(
-            `SELECT pg_advisory_xact_lock(hashtext($1))`,
-            `batch_capacity:${batchId}`,
-          );
-        } catch {
-          // Graceful fallback for mock unit tests or non-PG drivers
-        }
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM "Batch" WHERE id = $1 AND "instituteId" = $2 FOR UPDATE`,
+          batchId,
+          instituteId,
+        );
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `batch_capacity:${batchId}`,
+        );
       }
 
       // 2. Re-fetch batch inside the transaction to get real-time state
@@ -1012,24 +1113,20 @@ export class BatchesService {
     // 3. Retry loop for serialization anomalies
     const executeScheduleCreation = async (tx: any) => {
       if (typeof tx.$queryRawUnsafe === 'function') {
-        try {
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `sched_teacher:${input.teacherProfileId}`,
+        );
+        if (input.room?.trim()) {
           await tx.$queryRawUnsafe(
-            `SELECT pg_advisory_xact_lock(hashtext($1))`,
-            `sched_teacher:${input.teacherProfileId}`,
+            `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+            `sched_room:${instituteId}:${input.room.trim()}`,
           );
-          if (input.room?.trim()) {
-            await tx.$queryRawUnsafe(
-              `SELECT pg_advisory_xact_lock(hashtext($1))`,
-              `sched_room:${instituteId}:${input.room.trim()}`,
-            );
-          }
-          await tx.$queryRawUnsafe(
-            `SELECT pg_advisory_xact_lock(hashtext($1))`,
-            `sched_batch:${input.batchId}`,
-          );
-        } catch {
-          // Graceful fallback for mock unit tests or non-PG drivers
         }
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `sched_batch:${input.batchId}`,
+        );
       }
 
       const conflict = await this.detectConflict(
@@ -1088,8 +1185,12 @@ export class BatchesService {
     instituteId: string,
     input: RecurringWeeklyScheduleInput,
   ) {
-    const rangeStart = new Date(input.startDate);
-    const rangeEnd = new Date(input.endDate);
+    const rangeStart = new Date(
+      input.startDate.includes('T') ? input.startDate : `${input.startDate}T00:00:00.000Z`,
+    );
+    const rangeEnd = new Date(
+      input.endDate.includes('T') ? input.endDate : `${input.endDate}T23:59:59.999Z`,
+    );
 
     if (rangeStart >= rangeEnd) {
       throw new BadRequestException('Schedule date range start must precede end date');
@@ -1108,23 +1209,17 @@ export class BatchesService {
 
     const exceptionsSet = new Set(input.exceptions ?? []);
 
-    // Generate list of occurrences
+    // Generate list of occurrences deterministically in UTC
     const occurrences: Array<{ startsAt: Date; endsAt: Date; dateStr: string }> = [];
     const current = new Date(rangeStart);
 
     while (current <= rangeEnd) {
-      const dayOfWeek = current.getDay(); // 0 is Sunday, 6 is Saturday
+      const dayOfWeek = current.getUTCDay(); // 0 is Sunday, 6 is Saturday
       const dateStr = current.toISOString().slice(0, 10);
 
       if (input.daysOfWeek.includes(dayOfWeek) && !exceptionsSet.has(dateStr)) {
-        const [startH, startM] = input.startTime.split(':').map(Number);
-        const [endH, endM] = input.endTime.split(':').map(Number);
-
-        const occurrenceStart = new Date(current);
-        occurrenceStart.setHours(startH, startM, 0, 0);
-
-        const occurrenceEnd = new Date(current);
-        occurrenceEnd.setHours(endH, endM, 0, 0);
+        const occurrenceStart = new Date(`${dateStr}T${input.startTime}:00.000Z`);
+        const occurrenceEnd = new Date(`${dateStr}T${input.endTime}:00.000Z`);
 
         if (occurrenceStart >= occurrenceEnd) {
           throw new BadRequestException('Daily start time must precede end time');
@@ -1137,7 +1232,7 @@ export class BatchesService {
         });
       }
 
-      current.setDate(current.getDate() + 1);
+      current.setUTCDate(current.getUTCDate() + 1);
     }
 
     if (occurrences.length === 0) {
@@ -1149,24 +1244,20 @@ export class BatchesService {
     // Concurrency-safe atomic transaction: Validate EVERY occurrence for conflicts
     const executeRecurringCreation = async (tx: any) => {
       if (typeof tx.$queryRawUnsafe === 'function') {
-        try {
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `sched_teacher:${input.teacherProfileId}`,
+        );
+        if (input.room?.trim()) {
           await tx.$queryRawUnsafe(
-            `SELECT pg_advisory_xact_lock(hashtext($1))`,
-            `sched_teacher:${input.teacherProfileId}`,
+            `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+            `sched_room:${instituteId}:${input.room.trim()}`,
           );
-          if (input.room?.trim()) {
-            await tx.$queryRawUnsafe(
-              `SELECT pg_advisory_xact_lock(hashtext($1))`,
-              `sched_room:${instituteId}:${input.room.trim()}`,
-            );
-          }
-          await tx.$queryRawUnsafe(
-            `SELECT pg_advisory_xact_lock(hashtext($1))`,
-            `sched_batch:${input.batchId}`,
-          );
-        } catch {
-          // Graceful fallback for mock unit tests or non-PG drivers
         }
+        await tx.$queryRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext($1))::text`,
+          `sched_batch:${input.batchId}`,
+        );
       }
 
       const conflictResults: any[] = [];
