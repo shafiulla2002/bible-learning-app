@@ -26,9 +26,66 @@ export interface StudentProfileSummary {
   id: string;
   userId: string;
   admissionNo: string;
+  fullName: string;
+  phoneNumber: string;
+  email?: string;
   preferredLanguage: string;
-  status: 'APPLICANT' | 'ACTIVE' | 'INACTIVE' | 'ALUMNI';
-  enrolmentCount: number;
+  gender?: string;
+  church?: string;
+  status: 'APPLICANT' | 'APPLIED' | 'UNDER_REVIEW' | 'APPROVED' | 'ACTIVE' | 'INACTIVE' | 'REJECTED' | 'COMPLETED';
+  admissionDate: string;
+  enrolledCourseName?: string;
+  enrolledBatchName?: string;
+  totalEnrolments: number;
+}
+
+export interface StudentDetail extends StudentProfileSummary {
+  dateOfBirth?: string;
+  educationLevel?: string;
+  emergencyContact?: string;
+  address?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    postalCode?: string;
+  };
+  guardian?: {
+    name?: string;
+    relation?: string;
+    phoneNumber?: string;
+    email?: string;
+  };
+  enrolments: Array<{
+    id: string;
+    courseId: string;
+    courseTitle: string;
+    batchId?: string;
+    batchName?: string;
+    status: string;
+    progressPct: number;
+    enrolledAt: string;
+  }>;
+  admissionHistory: Array<{
+    id: string;
+    status: string;
+    statement?: string;
+    interviewNotes?: string;
+    interviewAt?: string;
+    createdAt: string;
+  }>;
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
 }
 
 export interface CourseSummary {

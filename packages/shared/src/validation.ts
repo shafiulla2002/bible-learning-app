@@ -18,13 +18,105 @@ export const StudentRegistrationSchema = z.object({
     .min(10, 'Phone number must be at least 10 digits')
     .regex(/^\+?[1-9]\d{7,14}$/, 'Invalid phone number format'),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(6, 'Password must be at least 6 characters').optional(),
   church: z.string().optional(),
   preferredLanguage: z.string().default('English'),
   statementOfInterest: z.string().max(1000).optional(),
 });
 
 export type StudentRegistrationInput = z.infer<typeof StudentRegistrationSchema>;
+
+export const StudentStatusEnum = z.enum([
+  'APPLIED',
+  'UNDER_REVIEW',
+  'APPROVED',
+  'ACTIVE',
+  'INACTIVE',
+  'REJECTED',
+  'COMPLETED',
+]);
+
+export type StudentStatusType = z.infer<typeof StudentStatusEnum>;
+
+export const CreateStudentAdmissionSchema = z.object({
+  fullName: z.string().min(2, 'Full name is required'),
+  phoneNumber: z
+    .string()
+    .min(10, 'Phone number must be at least 10 digits')
+    .regex(/^\+?[1-9]\d{7,14}$/, 'Invalid phone number format (e.g. +919876543210)'),
+  email: z.string().email('Invalid email address').optional().or(z.literal('')),
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
+  dateOfBirth: z.string().optional(), // YYYY-MM-DD
+  admissionDate: z.string().optional(), // YYYY-MM-DD
+  preferredLanguage: z.string().default('English'),
+  church: z.string().optional(),
+  educationLevel: z.string().optional(),
+  emergencyContact: z.string().optional(),
+
+  // Address
+  address: z
+    .object({
+      street: z.string().optional(),
+      city: z.string().optional(),
+      state: z.string().optional(),
+      country: z.string().default('India'),
+      postalCode: z.string().optional(),
+    })
+    .optional(),
+
+  // Guardian
+  guardian: z
+    .object({
+      name: z.string().optional(),
+      relation: z.string().optional(),
+      phoneNumber: z.string().optional(),
+      email: z.string().optional(),
+    })
+    .optional(),
+
+  // Enrolment & Admission
+  courseId: z.string().optional(),
+  batchId: z.string().optional(),
+  status: StudentStatusEnum.default('ACTIVE'),
+  statement: z.string().optional(),
+});
+
+export type CreateStudentAdmissionInput = z.infer<typeof CreateStudentAdmissionSchema>;
+
+export const UpdateStudentProfileSchema = CreateStudentAdmissionSchema.partial();
+export type UpdateStudentProfileInput = z.infer<typeof UpdateStudentProfileSchema>;
+
+export const UpdateStudentStatusSchema = z.object({
+  status: StudentStatusEnum,
+  notes: z.string().optional(),
+});
+export type UpdateStudentStatusInput = z.infer<typeof UpdateStudentStatusSchema>;
+
+export const StudentFilterQuerySchema = z.object({
+  search: z.string().optional(),
+  courseId: z.string().optional(),
+  batchId: z.string().optional(),
+  status: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  sortBy: z.enum(['fullName', 'admissionNo', 'createdAt', 'status']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
+export type StudentFilterQuery = z.infer<typeof StudentFilterQuerySchema>;
+
+export const BulkStudentImportRowSchema = z.object({
+  fullName: z.string().min(2, 'Full name is required'),
+  phoneNumber: z.string().min(10, 'Valid phone number required'),
+  email: z.string().email().optional().or(z.literal('')),
+  gender: z.string().optional(),
+  admissionNo: z.string().optional(),
+  courseName: z.string().optional(),
+  church: z.string().optional(),
+  preferredLanguage: z.string().default('English'),
+});
+
+export type BulkStudentImportRow = z.infer<typeof BulkStudentImportRowSchema>;
 
 export const CreateCourseSchema = z.object({
   title: z.string().min(3, 'Course title is required'),
