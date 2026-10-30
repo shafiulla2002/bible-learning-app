@@ -29,7 +29,14 @@ Last updated: 2026-10-30 11:56 IST
 | Dependencies Installation | 🔄 | Resolving and linking packages across workspaces |
 
 ## Phase 2 — Institute Admin Modules
-⏳ Next up: Complete student admissions review flow, faculty assignment, course CRUD, and batch scheduling.
+| Milestone | Status | Details |
+| :--- | :--- | :--- |
+| **Milestone 2.1 — Student Admissions & Directory Management** | ✅ | • NestJS `StudentsService` & `StudentsController` with multi-tenant isolation<br>• Student Directory table with search, role/status filters, CSV export, pagination<br>• Add Student Admission modal with zod validation & course selection<br>• Bulk CSV import with preview, phone duplicate detection, and commit<br>• Comprehensive Student Profile (`/admin/students/[id]`) with 5 tabs: Personal/Contact, Guardian/Address, Course Enrolments, Academic Progress, Payment/Fee history<br>• Verified builds (`nest build`, `next build`) & clean test runs |
+| **Milestone 2.2 — Course & Curriculum Management** | ⏳ | Course CRUD, module & lesson builders, syllabus upload, teacher assignment |
+| **Milestone 2.3 — Batches, Terms & Scheduling** | ⏳ | Academic years, intake terms, batch cohorts, live class schedules |
+| **Milestone 2.4 — Attendance & Academic Records** | ⏳ | Roll-call tracker, absence notifications, gradebook, transcripts |
+| **Milestone 2.5 — Fee Management & Invoicing** | ⏳ | Invoices, scholarship discounts, installment plans, receipts |
+
 
 ## Phase 3–10
 ⏳ Pending execution.
