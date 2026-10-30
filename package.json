@@ -1,0 +1,24 @@
+{
+  "name": "bible-institute-lms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise Bible Learning Institute Management System (LMS)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:web": "npm run dev --workspace=@bible-lms/web",
+    "dev:api": "npm run dev --workspace=@bible-lms/api",
+    "build": "npm run build --workspaces --if-present",
+    "build:shared": "npm run build --workspace=@bible-lms/shared",
+    "build:api": "npm run build --workspace=@bible-lms/api",
+    "build:web": "npm run build --workspace=@bible-lms/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

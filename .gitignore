@@ -1,0 +1,36 @@
+# ---- Secrets: never commit ----
+.env
+.env.*
+!.env.example
+**/firebase-service-account*.json
+**/*serviceAccount*.json
+**/*-adminsdk-*.json
+*.pem
+*.key
+
+# ---- Dependencies & builds ----
+node_modules/
+.next/
+dist/
+build/
+out/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# ---- Database dumps / backups (store in secure bucket, not git) ----
+*.dump
+*.sql.gz
+backups/
+
+# ---- Logs & OS ----
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- IDE ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
