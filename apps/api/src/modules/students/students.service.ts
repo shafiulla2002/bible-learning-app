@@ -10,6 +10,7 @@ import {
   UpdateStudentProfileInput,
   StudentFilterQuery,
   BulkStudentImportRow,
+  BulkStudentImportRowSchema,
   StudentDetail,
   StudentProfileSummary,
   PaginatedResult,
@@ -82,13 +83,22 @@ export class StudentsService {
     // 3. Generate unique admission number
     const admissionNo = await this.generateAdmissionNumber(instituteId);
 
-    // 4. Validate course if provided
+    // 4. Validate course and batch if provided
     if (input.courseId) {
       const course = await this.prisma.course.findFirst({
         where: { id: input.courseId, instituteId },
       });
       if (!course) {
         throw new BadRequestException('Selected course does not belong to this institute');
+      }
+
+      if (input.batchId) {
+        const batch = await this.prisma.batch.findFirst({
+          where: { id: input.batchId, instituteId, courseId: input.courseId },
+        });
+        if (!batch) {
+          throw new BadRequestException('Selected batch does not belong to this institute or course');
+        }
       }
     }
 
@@ -457,17 +467,23 @@ export class StudentsService {
     const seenPhones = new Set<string>();
 
     for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
+      const rawRow = rows[i];
       const rowNum = i + 1;
 
-      // Validate phone
-      if (!row.phoneNumber || row.phoneNumber.length < 10) {
+      // 1. Zod schema validation (rejects missing fullName, invalid email, etc.)
+      const parseResult = BulkStudentImportRowSchema.safeParse(rawRow);
+      if (!parseResult.success) {
         results.invalidRows++;
-        results.errors.push({ row: rowNum, error: 'Invalid phone number', data: row });
+        results.errors.push({
+          row: rowNum,
+          error: parseResult.error.errors[0]?.message || 'Invalid row data',
+          data: rawRow,
+        });
         continue;
       }
+      const row = parseResult.data;
 
-      // Check duplicates within the file
+      // 2. Check duplicates within the file
       if (seenPhones.has(row.phoneNumber)) {
         results.duplicates++;
         results.invalidRows++;
@@ -476,7 +492,7 @@ export class StudentsService {
       }
       seenPhones.add(row.phoneNumber);
 
-      // Check if phone already registered in this institute
+      // 3. Check if phone already registered in this institute
       const existing = await this.prisma.membership.findFirst({
         where: {
           instituteId,
@@ -496,6 +512,27 @@ export class StudentsService {
         continue;
       }
 
+      // 4. Validate course if courseName provided
+      let matchedCourseId: string | undefined;
+      if (row.courseName) {
+        const course = await this.prisma.course.findFirst({
+          where: {
+            instituteId,
+            title: { equals: row.courseName, mode: 'insensitive' },
+          },
+        });
+        if (!course) {
+          results.invalidRows++;
+          results.errors.push({
+            row: rowNum,
+            error: `Course "${row.courseName}" not found in this institute`,
+            data: row,
+          });
+          continue;
+        }
+        matchedCourseId = course.id;
+      }
+
       results.validRows++;
       if (results.preview.length < 10) {
         results.preview.push({
@@ -508,16 +545,28 @@ export class StudentsService {
       }
     }
 
-    // If execute is requested and there are valid rows, create them
+    // If execute is requested and there are valid rows, create them atomically
     if (execute && results.validRows > 0 && results.errors.length === 0) {
       let importedCount = 0;
       for (const row of rows) {
+        let courseId: string | undefined;
+        if (row.courseName) {
+          const course = await this.prisma.course.findFirst({
+            where: {
+              instituteId,
+              title: { equals: row.courseName, mode: 'insensitive' },
+            },
+          });
+          courseId = course?.id;
+        }
+
         await this.createStudent(instituteId, {
           fullName: row.fullName,
           phoneNumber: row.phoneNumber,
           email: row.email || undefined,
           church: row.church || undefined,
           preferredLanguage: row.preferredLanguage || 'English',
+          courseId,
           status: 'ACTIVE',
         });
         importedCount++;
@@ -529,7 +578,7 @@ export class StudentsService {
   }
 
   /**
-   * Enroll a student into a course & batch
+   * Enroll a student into a course & batch with strict multi-tenant verification
    */
   async enrollStudent(
     instituteId: string,
@@ -544,6 +593,16 @@ export class StudentsService {
 
     if (!student) throw new NotFoundException('Student not found in this institute');
     if (!course) throw new NotFoundException('Course not found in this institute');
+
+    // Strict batch tenant and course boundary check
+    if (batchId) {
+      const batch = await this.prisma.batch.findFirst({
+        where: { id: batchId, instituteId, courseId },
+      });
+      if (!batch) {
+        throw new BadRequestException('Selected batch does not belong to this institute or course');
+      }
+    }
 
     // Check for existing enrolment
     const existing = await this.prisma.enrolment.findUnique({

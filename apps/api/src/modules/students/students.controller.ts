@@ -8,8 +8,11 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { StudentsService } from './students.service';
+import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
+import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
 import {
   CreateStudentAdmissionSchema,
   CreateStudentAdmissionInput,
@@ -23,6 +26,7 @@ import {
 } from '@bible-lms/shared';
 
 @Controller('institutes/:instituteId/students')
+@UseGuards(JwtAuthGuard, InstituteTenantGuard)
 export class StudentsController {
   constructor(private readonly studentsService: StudentsService) {}
 
