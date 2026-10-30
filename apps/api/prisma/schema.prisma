@@ -173,6 +173,14 @@ model Institute {
   notifications Notification[]
   auditLogs     AuditLog[]
   attendances   Attendance[]
+  feeCategories FeeCategory[]
+  feeStructures FeeStructure[]
+  feeAllocations StudentFeeAllocation[]
+  financialSequences FinancialSequence[]
+  studentInvoices Invoice[]
+  feePayments   FeePayment[]
+  feeReceipts   FeeReceipt[]
+  paymentReversalAudits PaymentReversalAudit[]
 
   @@index([status])
 }
@@ -202,7 +210,10 @@ model AcademicYear {
 
   batches Batch[]
   terms   AcademicTerm[]
+  feeStructures FeeStructure[]
+  feeAllocations StudentFeeAllocation[]
 
+  @@unique([id, instituteId])
   @@unique([instituteId, name])
 }
 
@@ -220,7 +231,9 @@ model AcademicTerm {
   updatedAt      DateTime     @updatedAt
 
   batches Batch[]
+  feeAllocations StudentFeeAllocation[]
 
+  @@unique([id, instituteId])
   @@unique([academicYearId, name])
   @@index([instituteId])
 }
@@ -375,7 +388,10 @@ model StudentProfile {
   cart        Cart?
   orders      Order[]
   batchTransferLogs BatchTransferLog[]
+  feeAllocations StudentFeeAllocation[]
+  invoices    Invoice[]
 
+  @@unique([id, instituteId])
   @@unique([instituteId, admissionNo])
   @@index([instituteId, status])
 }
@@ -1056,4 +1072,274 @@ model AuditLog {
   createdAt   DateTime  @default(now())
 
   @@index([instituteId, createdAt])
+}
+
+// ====================================================
+// 9. INSTITUTIONAL FEE MANAGEMENT & INVOICING (MILESTONE 2.5)
+// ====================================================
+
+enum FeePeriodType {
+  ONE_TIME
+  ANNUAL
+  SEMESTER
+  TERM
+  MONTHLY
+}
+
+enum AllocationStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum FeePaymentMode {
+  CASH
+  BANK_TRANSFER
+  CHEQUE
+  DEMAND_DRAFT
+  ONLINE
+  OTHER
+}
+
+enum FeePaymentStatus {
+  COMPLETED
+  PARTIALLY_REVERSED
+  REVERSED
+}
+
+enum FinancialSequenceType {
+  INVOICE
+  PAYMENT
+  RECEIPT
+}
+
+model FeeCategory {
+  id          String         @id @default(uuid())
+  instituteId String
+  institute   Institute      @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  name        String
+  code        String
+  description String?
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  feeStructures FeeStructure[]
+
+  @@unique([id, instituteId])
+  @@unique([instituteId, code])
+  @@index([instituteId])
+}
+
+model FeeStructure {
+  id             String                @id @default(uuid())
+  instituteId    String
+  institute      Institute             @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  feeCategoryId  String
+  feeCategory    FeeCategory           @relation(fields: [feeCategoryId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  academicYearId String?
+  academicYear   AcademicYear?         @relation(fields: [academicYearId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  name           String
+  code           String
+  periodType     FeePeriodType         @default(ONE_TIME)
+  amount         Int                   // Stored in paise. CHECK (amount > 0)
+  currency       String                @default("INR")
+  description    String?
+  isActive       Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  allocations    StudentFeeAllocation[]
+  invoiceItems   InvoiceItem[]
+
+  @@unique([id, instituteId])
+  @@unique([instituteId, code])
+  @@index([instituteId, feeCategoryId])
+}
+
+model StudentFeeAllocation {
+  id               String           @id @default(uuid())
+  instituteId      String
+  institute        Institute        @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  studentProfileId String
+  studentProfile   StudentProfile   @relation(fields: [studentProfileId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  feeStructureId   String
+  feeStructure     FeeStructure     @relation(fields: [feeStructureId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  academicYearId   String?
+  academicYear     AcademicYear?    @relation(fields: [academicYearId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  academicTermId   String?
+  academicTerm     AcademicTerm?    @relation(fields: [academicTermId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  billingPeriod    String           // e.g. "AY-2026-2027", "FALL-2026"
+  customAmount     Int?             // In paise. CHECK (customAmount IS NULL OR customAmount >= 0)
+  status           AllocationStatus @default(ACTIVE)
+  remarks          String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  invoiceItems     InvoiceItem[]
+
+  @@unique([id, instituteId])
+  @@unique([id, feeStructureId, instituteId])
+  @@unique([studentProfileId, feeStructureId, billingPeriod])
+  @@index([instituteId, status])
+  @@index([studentProfileId])
+}
+
+model FinancialSequence {
+  id          String                @id @default(uuid())
+  instituteId String
+  institute   Institute             @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  year        Int                   // Calendar year
+  type        FinancialSequenceType // INVOICE, PAYMENT, RECEIPT
+  currentSeq  Int                   @default(0)
+  updatedAt   DateTime              @updatedAt
+
+  @@unique([instituteId, year, type])
+}
+
+model Invoice {
+  id               String               @id @default(uuid())
+  instituteId      String
+  institute        Institute            @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  studentProfileId String
+  studentProfile   StudentProfile       @relation(fields: [studentProfileId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  invoiceNumber    String               // e.g. "INV-2026-0001"
+  status           InvoiceStatus        @default(DRAFT)
+  issueDate        DateTime?
+  dueDate          DateTime             @db.Date
+  totalAmount      Int                  // In paise. CHECK (totalAmount > 0)
+  paidAmount       Int                  @default(0) // In paise. CHECK (paidAmount >= 0)
+  balanceAmount    Int                  // In paise. CHECK (balanceAmount >= 0)
+  currency         String               @default("INR")
+  notes            String?
+  cancelledAt      DateTime?
+  cancelledReason  String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  items            InvoiceItem[]
+  installments     InvoiceInstallment[]
+  payments         FeePayment[]
+
+  @@unique([id, instituteId])
+  @@unique([instituteId, invoiceNumber])
+  @@index([instituteId, status])
+  @@index([studentProfileId])
+  @@index([dueDate])
+}
+
+model InvoiceItem {
+  id                     String                @id @default(uuid())
+  instituteId            String
+  invoiceId              String
+  invoice                Invoice               @relation(fields: [invoiceId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  feeStructureId         String?
+  feeStructure           FeeStructure?         @relation(fields: [feeStructureId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  studentFeeAllocationId String?
+  studentFeeAllocation   StudentFeeAllocation? @relation(fields: [studentFeeAllocationId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  description            String
+  amount                 Int                   // In paise. CHECK (amount > 0)
+  createdAt              DateTime              @default(now())
+
+  @@index([invoiceId])
+  @@index([instituteId])
+}
+
+model InvoiceInstallment {
+  id                String            @id @default(uuid())
+  instituteId       String
+  invoiceId         String
+  invoice           Invoice           @relation(fields: [invoiceId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  installmentNumber Int               // 1, 2, 3...
+  dueDate           DateTime          @db.Date
+  amount            Int               // In paise. CHECK (amount > 0)
+  paidAmount        Int               @default(0) // In paise. CHECK (paidAmount >= 0)
+  status            InstallmentStatus @default(PENDING)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  payments          FeePayment[]
+
+  @@unique([id, invoiceId])
+  @@unique([invoiceId, installmentNumber])
+  @@index([invoiceId])
+  @@index([instituteId])
+}
+
+model FeePayment {
+  id                 String                 @id @default(uuid())
+  instituteId        String
+  institute          Institute              @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  invoiceId          String
+  invoice            Invoice                @relation(fields: [invoiceId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  installmentId      String?
+  installment        InvoiceInstallment?    @relation(fields: [installmentId, invoiceId], references: [id, invoiceId], onDelete: Restrict)
+  paymentNumber      String                 // e.g. "PAY-2026-0001"
+  amount             Int                    // Gross in paise. CHECK (amount > 0)
+  reversedAmount     Int                    @default(0) // In paise. CHECK (reversedAmount >= 0)
+  netAmount          Int                    // In paise. CHECK (netAmount = amount - reversedAmount)
+  paymentMode        FeePaymentMode
+  paymentDate        DateTime               @default(now())
+  status             FeePaymentStatus       @default(COMPLETED)
+  referenceNumber    String?                // Cheque / DD / UTR
+  recordedByUserId   String
+  remarks            String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  receipt            FeeReceipt?
+  reversals          PaymentReversalAudit[]
+
+  @@unique([id, instituteId])
+  @@unique([instituteId, paymentNumber])
+  @@index([instituteId, paymentDate])
+  @@index([invoiceId])
+}
+
+model FeeReceipt {
+  id               String     @id @default(uuid())
+  instituteId      String
+  institute        Institute  @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  paymentId        String     @unique
+  payment          FeePayment @relation(fields: [paymentId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  receiptNumber    String     // e.g. "REC-2026-0001"
+  issuedAt         DateTime   @default(now())
+  issuedByUserId   String
+  pdfUrl           String?
+
+  @@unique([paymentId, instituteId])
+  @@unique([instituteId, receiptNumber])
+  @@index([instituteId, issuedAt])
+}
+
+model PaymentReversalAudit {
+  id                 String     @id @default(uuid())
+  instituteId        String
+  institute          Institute  @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  paymentId          String
+  payment            FeePayment @relation(fields: [paymentId, instituteId], references: [id, instituteId], onDelete: Restrict)
+  reversedByUserId   String
+  reason             String
+  reversedAmount     Int        // In paise. CHECK (reversedAmount > 0)
+  createdAt          DateTime   @default(now())
+
+  @@index([instituteId, createdAt])
+  @@index([paymentId])
 }

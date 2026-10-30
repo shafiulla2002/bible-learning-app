@@ -372,7 +372,7 @@ export class AttendanceService {
         createdCount,
         updatedCount,
       };
-    });
+    }, { maxWait: 10000, timeout: 30000 });
   }
 
   // ---------------------------------------------------------------------------
@@ -435,7 +435,7 @@ export class AttendanceService {
           },
         },
       });
-    });
+    }, { maxWait: 10000, timeout: 30000 });
   }
 
   // ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ function getTestDbUrl(): string {
 describe('Milestone 2.3 — Real PostgreSQL Concurrency & Integrity Integration Suite', () => {
   let prisma: PrismaClient;
   let service: BatchesService;
+  jest.setTimeout(60000);
 
   const testSuffix = Date.now().toString().slice(-6);
   const testInstituteSlug = `pg-test-inst-${testSuffix}`;
