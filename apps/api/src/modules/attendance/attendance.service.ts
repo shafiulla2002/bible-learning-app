@@ -563,11 +563,11 @@ export class AttendanceService {
       if (query.endDate) whereClause.date.lte = new Date(query.endDate);
     }
 
-    const [records, statusCounts] = await Promise.all([
+    const [records, statusCounts, transferLogs] = await Promise.all([
       this.prisma.attendance.findMany({
         where: whereClause,
         include: {
-          batch: { select: { name: true } },
+          batch: { select: { id: true, name: true } },
           liveSession: { select: { title: true } },
         },
         orderBy: { date: 'desc' },
@@ -577,6 +577,16 @@ export class AttendanceService {
         where: whereClause,
         _count: { _all: true },
       }),
+      this.prisma.batchTransferLog?.findMany
+        ? this.prisma.batchTransferLog.findMany({
+            where: { instituteId, studentProfileId },
+            include: {
+              sourceBatch: { select: { id: true, name: true } },
+              targetBatch: { select: { id: true, name: true } },
+            },
+            orderBy: { transferredAt: 'asc' },
+          })
+        : Promise.resolve([]),
     ]);
 
     let present = 0;
@@ -595,6 +605,29 @@ export class AttendanceService {
     const applicableTotal = totalSessions - excused;
     const attendancePercentage =
       applicableTotal > 0 ? Math.round(((present + late) / applicableTotal) * 100) : null;
+
+    // Batch Breakdown (Calculated only for sessions during actual enrolment in each batch)
+    const batchMap = new Map<string, { batchId: string; batchName: string; present: number; late: number; absent: number; excused: number }>();
+    for (const r of records) {
+      if (!batchMap.has(r.batchId)) {
+        batchMap.set(r.batchId, { batchId: r.batchId, batchName: r.batch.name, present: 0, late: 0, absent: 0, excused: 0 });
+      }
+      const bEntry = batchMap.get(r.batchId)!;
+      if (r.status === 'PRESENT') bEntry.present++;
+      else if (r.status === 'LATE') bEntry.late++;
+      else if (r.status === 'ABSENT') bEntry.absent++;
+      else if (r.status === 'EXCUSED') bEntry.excused++;
+    }
+
+    const batchBreakdowns = Array.from(batchMap.values()).map((b) => {
+      const bTotal = b.present + b.late + b.absent + b.excused;
+      const bApplicable = bTotal - b.excused;
+      return {
+        ...b,
+        totalSessions: bTotal,
+        attendancePercentage: bApplicable > 0 ? Math.round(((b.present + b.late) / bApplicable) * 100) : null,
+      };
+    });
 
     // Monthly breakdown
     const monthlyMap = new Map<string, { present: number; late: number; absent: number; excused: number }>();
@@ -634,9 +667,21 @@ export class AttendanceService {
         excusedCount: excused,
         attendancePercentage,
       },
+      batchBreakdowns,
+      transfers: transferLogs.map((tl) => ({
+        id: tl.id,
+        sourceBatchId: tl.sourceBatchId,
+        sourceBatchName: tl.sourceBatch.name,
+        targetBatchId: tl.targetBatchId,
+        targetBatchName: tl.targetBatch.name,
+        reason: tl.reason,
+        transferredBy: tl.transferredBy,
+        transferredAt: tl.transferredAt.toISOString(),
+      })),
       monthlySummary,
       records: records.map((r) => ({
         id: r.id,
+        batchId: r.batchId,
         batchName: r.batch.name,
         date: r.date.toISOString().slice(0, 10),
         status: r.status,
