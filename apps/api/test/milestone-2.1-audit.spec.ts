@@ -123,12 +123,21 @@ describe('Milestone 2.1 — Final Quality & Security Audit', () => {
 
     it('should reject enrollment if batch belongs to another institute or different course', async () => {
       mockPrisma.studentProfile.findFirst.mockResolvedValue({ id: 'stu-1', instituteId: 'inst-berean' });
-      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean' });
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean', status: 'PUBLISHED' });
       mockPrisma.batch.findFirst.mockResolvedValue(null); // Batch not found for this inst + course
 
       await expect(
         service.enrollStudent('inst-berean', 'stu-1', 'crs-1', 'batch-foreign'),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject enrollment if course is ARCHIVED with 400 BadRequest', async () => {
+      mockPrisma.studentProfile.findFirst.mockResolvedValue({ id: 'stu-1', instituteId: 'inst-berean' });
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-archived', instituteId: 'inst-berean', status: 'ARCHIVED' });
+
+      await expect(
+        service.enrollStudent('inst-berean', 'stu-1', 'crs-archived'),
+      ).rejects.toThrow('Archived courses cannot receive new enrolments');
     });
   });
 

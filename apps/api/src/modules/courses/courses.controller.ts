@@ -15,6 +15,7 @@ import {
 import { CoursesService } from './courses.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import {
   CreateCourseSchema,
   UpdateCourseSchema,
@@ -230,5 +231,25 @@ export class CoursesController {
   ) {
     const validated = ReorderCurriculumSchema.parse(body);
     return this.coursesService.reorderCurriculum(instituteId, id, validated);
+  }
+
+  @Get(':id/lessons/:lessonId/resources/:resourceId/access')
+  async getResourceAccess(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Param('resourceId') resourceId: string,
+    @Query('download') download: string,
+    @CurrentUser() user: any,
+  ) {
+    const requestDownload = download === 'true';
+    return this.coursesService.authorizeResourceAccess(
+      instituteId,
+      id,
+      lessonId,
+      resourceId,
+      user,
+      requestDownload,
+    );
   }
 }

@@ -245,8 +245,10 @@ describe('Milestone 2.2 — Course & Curriculum Management Audit', () => {
   });
 
   describe('3. Curriculum Reordering & Teacher Assignment', () => {
-    it('should reorder modules transactionally', async () => {
+    it('should reorder modules transactionally when all modules belong to course', async () => {
       mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean' });
+      mockPrisma.module.findFirst.mockResolvedValue({ id: 'mod-1', courseId: 'crs-1', instituteId: 'inst-berean' });
+      mockPrisma.module.update.mockResolvedValue({});
 
       const res = await service.reorderCurriculum('inst-berean', 'crs-1', {
         entityType: 'module',
@@ -257,7 +259,19 @@ describe('Milestone 2.2 — Course & Curriculum Management Audit', () => {
       });
 
       expect(res.success).toBe(true);
-      expect(mockPrisma.module.updateMany).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.module.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('should REJECT reordering with 400 BadRequest if an item belongs to another course', async () => {
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean' });
+      mockPrisma.module.findFirst.mockResolvedValue(null); // Foreign item not found in this course
+
+      await expect(
+        service.reorderCurriculum('inst-berean', 'crs-1', {
+          entityType: 'module',
+          items: [{ id: 'mod-foreign', position: 0 }],
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('should assign teacher to course with role LEAD', async () => {
@@ -281,6 +295,144 @@ describe('Milestone 2.2 — Course & Curriculum Management Audit', () => {
 
       expect(instructor.teacherName).toBe('Dr. Samuel Mathew');
       expect(instructor.role).toBe('LEAD');
+    });
+  });
+
+  describe('4. Course Content Security, Entitlements & DRM Enforcement', () => {
+    beforeEach(() => {
+      mockPrisma.enrolment = {
+        findFirst: jest.fn(),
+      };
+    });
+
+    it('should BLOCK students from accessing non-preview lesson materials without active enrolment (403)', async () => {
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean', status: 'PUBLISHED' });
+      mockPrisma.lesson.findFirst.mockResolvedValue({ id: 'les-1', isPreview: false });
+      mockPrisma.lessonResource.findFirst.mockResolvedValue({
+        id: 'res-1',
+        downloadable: true,
+        mediaAsset: { storageKey: 'notes.pdf', kind: 'PDF', mimeType: 'application/pdf', sizeBytes: BigInt(1024) },
+      });
+      mockPrisma.enrolment.findFirst.mockResolvedValue(null); // Not enrolled
+
+      await expect(
+        service.authorizeResourceAccess(
+          'inst-berean',
+          'crs-1',
+          'les-1',
+          'res-1',
+          { sub: 'student-usr-1', role: 'STUDENT', instituteId: 'inst-berean' },
+          false,
+        ),
+      ).rejects.toThrow('You must be actively enrolled');
+    });
+
+    it('should ALLOW student access to preview lesson without active enrolment', async () => {
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean', status: 'PUBLISHED' });
+      mockPrisma.lesson.findFirst.mockResolvedValue({ id: 'les-preview', isPreview: true });
+      mockPrisma.lessonResource.findFirst.mockResolvedValue({
+        id: 'res-1',
+        downloadable: false,
+        mediaAsset: { storageKey: 'preview-notes.pdf', kind: 'PDF', mimeType: 'application/pdf', sizeBytes: BigInt(1024) },
+      });
+
+      const result = await service.authorizeResourceAccess(
+        'inst-berean',
+        'crs-1',
+        'les-preview',
+        'res-1',
+        { sub: 'student-usr-1', role: 'STUDENT', instituteId: 'inst-berean' },
+        false,
+      );
+
+      expect(result.accessMode).toBe('INLINE_STREAM');
+      expect(result.signedAccessToken).toBeDefined();
+    });
+
+    it('should ENFORCE DRM: BLOCK offline download when downloadable=false with 403 Forbidden', async () => {
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean', status: 'PUBLISHED' });
+      mockPrisma.lesson.findFirst.mockResolvedValue({ id: 'les-preview', isPreview: true });
+      mockPrisma.lessonResource.findFirst.mockResolvedValue({
+        id: 'res-protected',
+        downloadable: false, // DRM Protected
+        mediaAsset: { storageKey: 'confidential-lecture.mp4', kind: 'VIDEO', mimeType: 'video/mp4', sizeBytes: BigInt(102400) },
+      });
+
+      await expect(
+        service.authorizeResourceAccess(
+          'inst-berean',
+          'crs-1',
+          'les-preview',
+          'res-protected',
+          { sub: 'student-usr-1', role: 'STUDENT', instituteId: 'inst-berean' },
+          true, // Requested offline download
+        ),
+      ).rejects.toThrow('Offline download is restricted for this resource');
+    });
+
+    it('should ALLOW offline download when downloadable=true', async () => {
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean', status: 'PUBLISHED' });
+      mockPrisma.lesson.findFirst.mockResolvedValue({ id: 'les-preview', isPreview: true });
+      mockPrisma.lessonResource.findFirst.mockResolvedValue({
+        id: 'res-open',
+        downloadable: true,
+        mediaAsset: { storageKey: 'open-syllabus.pdf', kind: 'PDF', mimeType: 'application/pdf', sizeBytes: BigInt(102400) },
+      });
+
+      const result = await service.authorizeResourceAccess(
+        'inst-berean',
+        'crs-1',
+        'les-preview',
+        'res-open',
+        { sub: 'student-usr-1', role: 'STUDENT', instituteId: 'inst-berean' },
+        true, // Requested download
+      );
+
+      expect(result.accessMode).toBe('ATTACHMENT_DOWNLOAD');
+      expect(result.signedAccessToken).toBeDefined();
+    });
+
+    it('should BLOCK unassigned teacher from accessing course materials with 403 Forbidden', async () => {
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-1', instituteId: 'inst-berean', status: 'PUBLISHED' });
+      mockPrisma.lesson.findFirst.mockResolvedValue({ id: 'les-1', isPreview: false });
+      mockPrisma.lessonResource.findFirst.mockResolvedValue({
+        id: 'res-1',
+        downloadable: true,
+        mediaAsset: { storageKey: 'notes.pdf', kind: 'PDF', mimeType: 'application/pdf', sizeBytes: BigInt(1024) },
+      });
+      mockPrisma.courseInstructor.findFirst.mockResolvedValue(null); // Teacher not assigned to course
+
+      await expect(
+        service.authorizeResourceAccess(
+          'inst-berean',
+          'crs-1',
+          'les-1',
+          'res-1',
+          { sub: 'unassigned-teacher-id', role: 'TEACHER', instituteId: 'inst-berean' },
+          false,
+        ),
+      ).rejects.toThrow('You are not assigned as an instructor for this course');
+    });
+
+    it('should BLOCK students from accessing DRAFT courses with 403 Forbidden', async () => {
+      mockPrisma.course.findFirst.mockResolvedValue({ id: 'crs-draft', instituteId: 'inst-berean', status: 'DRAFT' });
+      mockPrisma.lesson.findFirst.mockResolvedValue({ id: 'les-1', isPreview: true });
+      mockPrisma.lessonResource.findFirst.mockResolvedValue({
+        id: 'res-1',
+        downloadable: true,
+        mediaAsset: { storageKey: 'notes.pdf', kind: 'PDF', mimeType: 'application/pdf', sizeBytes: BigInt(1024) },
+      });
+
+      await expect(
+        service.authorizeResourceAccess(
+          'inst-berean',
+          'crs-draft',
+          'les-1',
+          'res-1',
+          { sub: 'student-usr-1', role: 'STUDENT', instituteId: 'inst-berean' },
+          false,
+        ),
+      ).rejects.toThrow('currently in draft status');
     });
   });
 });

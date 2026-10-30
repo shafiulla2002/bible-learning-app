@@ -91,6 +91,9 @@ export class StudentsService {
       if (!course) {
         throw new BadRequestException('Selected course does not belong to this institute');
       }
+      if (course.status === 'ARCHIVED') {
+        throw new BadRequestException('Archived courses cannot receive new enrolments');
+      }
 
       if (input.batchId) {
         const batch = await this.prisma.batch.findFirst({
@@ -593,6 +596,10 @@ export class StudentsService {
 
     if (!student) throw new NotFoundException('Student not found in this institute');
     if (!course) throw new NotFoundException('Course not found in this institute');
+
+    if (course.status === 'ARCHIVED') {
+      throw new BadRequestException('Archived courses cannot receive new enrolments');
+    }
 
     // Strict batch tenant and course boundary check
     if (batchId) {

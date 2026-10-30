@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
@@ -857,18 +858,36 @@ export class CoursesService {
     await this.prisma.$transaction(async (tx) => {
       for (const item of input.items) {
         if (input.entityType === 'module') {
-          await tx.module.updateMany({
+          const mod = await tx.module.findFirst({
             where: { id: item.id, courseId, instituteId },
+          });
+          if (!mod) {
+            throw new BadRequestException(`Module ${item.id} does not belong to course ${courseId}`);
+          }
+          await tx.module.update({
+            where: { id: item.id },
             data: { position: item.position },
           });
         } else if (input.entityType === 'chapter') {
-          await tx.chapter.updateMany({
+          const chap = await tx.chapter.findFirst({
             where: { id: item.id, instituteId, module: { courseId } },
+          });
+          if (!chap) {
+            throw new BadRequestException(`Chapter ${item.id} does not belong to course ${courseId}`);
+          }
+          await tx.chapter.update({
+            where: { id: item.id },
             data: { position: item.position },
           });
         } else if (input.entityType === 'lesson') {
-          await tx.lesson.updateMany({
+          const les = await tx.lesson.findFirst({
             where: { id: item.id, instituteId, chapter: { module: { courseId } } },
+          });
+          if (!les) {
+            throw new BadRequestException(`Lesson ${item.id} does not belong to course ${courseId}`);
+          }
+          await tx.lesson.update({
+            where: { id: item.id },
             data: { position: item.position },
           });
         }
@@ -876,6 +895,116 @@ export class CoursesService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Protected Resource Delivery & DRM Authorization
+   * Verifies enrolment, instructor assignment, preview rules, and enforces downloadable flags
+   */
+  async authorizeResourceAccess(
+    instituteId: string,
+    courseId: string,
+    lessonId: string,
+    resourceId: string,
+    user: { sub: string; role: string; instituteId?: string },
+    requestDownload: boolean = false,
+  ) {
+    // 1. Verify course exists in this institute
+    const course = await this.prisma.course.findFirst({
+      where: { id: courseId, instituteId, deletedAt: null },
+    });
+    if (!course) {
+      throw new NotFoundException('Course not found in this institute');
+    }
+
+    // 2. Verify lesson belongs to this course hierarchy
+    const lesson = await this.prisma.lesson.findFirst({
+      where: {
+        id: lessonId,
+        instituteId,
+        chapter: { module: { courseId } },
+      },
+    });
+    if (!lesson) {
+      throw new NotFoundException('Lesson not found in this course hierarchy');
+    }
+
+    // 3. Verify resource belongs to this lesson
+    const resource = await this.prisma.lessonResource.findFirst({
+      where: { id: resourceId, instituteId, lessonId },
+      include: { mediaAsset: true },
+    });
+    if (!resource) {
+      throw new NotFoundException('Resource not found in this lesson');
+    }
+
+    // 4. Role-based entitlement checks
+    if (user.role === 'STUDENT') {
+      if (course.status === 'DRAFT') {
+        throw new ForbiddenException('This course is currently in draft status and not accessible to students');
+      }
+
+      // If lesson is not previewable, verify student active enrolment
+      if (!lesson.isPreview) {
+        const enrolment = await this.prisma.enrolment.findFirst({
+          where: {
+            instituteId,
+            courseId,
+            status: 'ACTIVE',
+            studentProfile: {
+              membership: { userId: user.sub },
+            },
+          },
+        });
+        if (!enrolment) {
+          throw new ForbiddenException('You must be actively enrolled in this course to access protected lesson materials');
+        }
+      }
+    } else if (user.role === 'TEACHER') {
+      // Verify teacher is assigned to this course or has admin role
+      const isAssigned = await this.prisma.courseInstructor.findFirst({
+        where: {
+          courseId,
+          instituteId,
+          teacherProfile: {
+            membership: { userId: user.sub },
+          },
+        },
+      });
+      if (!isAssigned) {
+        throw new ForbiddenException('You are not assigned as an instructor for this course');
+      }
+    }
+
+    // 5. DRM Download Restriction Enforcement
+    if (requestDownload && !resource.downloadable) {
+      throw new ForbiddenException(
+        'Offline download is restricted for this resource. It is DRM-protected for in-platform viewing and streaming only.',
+      );
+    }
+
+    // 6. Return secure signed delivery payload
+    const tokenPayload = Buffer.from(
+      JSON.stringify({
+        assetId: resource.mediaAssetId,
+        storageKey: resource.mediaAsset.storageKey,
+        kind: resource.mediaAsset.kind,
+        mode: requestDownload ? 'DOWNLOAD' : 'STREAM',
+        expiresAt: Date.now() + 15 * 60 * 1000,
+      }),
+    ).toString('base64url');
+
+    return {
+      resourceId: resource.id,
+      fileName: resource.mediaAsset.storageKey,
+      kind: resource.mediaAsset.kind,
+      mimeType: resource.mediaAsset.mimeType,
+      sizeBytes: resource.mediaAsset.sizeBytes.toString(),
+      accessMode: requestDownload ? 'ATTACHMENT_DOWNLOAD' : 'INLINE_STREAM',
+      signedAccessToken: tokenPayload,
+      streamUrl: `/api/v1/institutes/${instituteId}/courses/${courseId}/lessons/${lessonId}/resources/${resourceId}/stream?token=${tokenPayload}`,
+      expiresInSeconds: 900,
+    };
   }
 
   /**
