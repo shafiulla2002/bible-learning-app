@@ -257,3 +257,169 @@ export const batchApi = {
       body: JSON.stringify(data),
     }),
 };
+
+// -----------------------------------------------------------------------------
+// ATTENDANCE MANAGEMENT SERVICES (MILESTONE 2.4)
+// -----------------------------------------------------------------------------
+
+export interface AttendanceRecordDto {
+  id: string;
+  date: string;
+  studentProfileId: string;
+  admissionNo: string;
+  studentName: string;
+  status: 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+  mode: 'DAILY_BATCH' | 'LIVE_SESSION';
+  remarks?: string | null;
+  liveSessionTitle?: string;
+  markedAt: string;
+  hasBeenEdited?: boolean;
+}
+
+export interface AttendanceRosterItemDto {
+  studentProfileId: string;
+  admissionNo: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  enrolmentId: string;
+  enrolmentStatus: string;
+  enrolledAt: string;
+  attendanceId?: string;
+  status?: 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+  remarks?: string;
+  markedAt?: string;
+}
+
+export interface AttendanceOverviewDto {
+  summary: {
+    totalRecords: number;
+    presentCount: number;
+    lateCount: number;
+    absentCount: number;
+    excusedCount: number;
+    attendancePercentage: number | null;
+  };
+  batches: Array<{
+    batchId: string;
+    batchName: string;
+    courseTitle: string;
+    academicYear?: string;
+    term?: string;
+    totalEnrolled: number;
+    totalRecords: number;
+    presentCount: number;
+    lateCount: number;
+    absentCount: number;
+    excusedCount: number;
+    attendancePercentage: number | null;
+  }>;
+}
+
+export const attendanceApi = {
+  // Overview KPIs & batch breakdown
+  getOverview: (instituteId: string, params?: Record<string, any>) => {
+    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return apiFetch<AttendanceOverviewDto>(`/institutes/${instituteId}/attendance/overview${q}`);
+  },
+
+  // Batch roster for roll-call marking
+  getBatchRoster: (instituteId: string, batchId: string, date: string, liveSessionId?: string) => {
+    const params = new URLSearchParams({ date });
+    if (liveSessionId) params.append('liveSessionId', liveSessionId);
+    return apiFetch<{
+      batchId: string;
+      batchName: string;
+      courseTitle: string;
+      date: string;
+      mode: 'DAILY_BATCH' | 'LIVE_SESSION';
+      liveSessionId?: string;
+      totalEnrolled: number;
+      markedCount: number;
+      roster: AttendanceRosterItemDto[];
+    }>(`/institutes/${instituteId}/attendance/batches/${batchId}/roster?${params.toString()}`);
+  },
+
+  // Atomic bulk attendance recording
+  markBulkAttendance: (instituteId: string, batchId: string, data: {
+    date: string;
+    mode?: 'DAILY_BATCH' | 'LIVE_SESSION';
+    liveSessionId?: string;
+    records: Array<{
+      studentProfileId: string;
+      status: 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+      remarks?: string;
+    }>;
+  }) =>
+    apiFetch<{
+      success: boolean;
+      batchId: string;
+      date: string;
+      mode: string;
+      totalSubmitted: number;
+      createdCount: number;
+      updatedCount: number;
+    }>(`/institutes/${instituteId}/attendance/batches/${batchId}/bulk`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Individual record update with audit trail
+  updateIndividualAttendance: (instituteId: string, attendanceId: string, data: {
+    status: 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+    remarks?: string;
+  }) =>
+    apiFetch<any>(`/institutes/${instituteId}/attendance/${attendanceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  // Batch attendance history
+  getBatchHistory: (instituteId: string, batchId: string, params?: Record<string, any>) => {
+    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return apiFetch<{
+      data: AttendanceRecordDto[];
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/institutes/${instituteId}/attendance/batches/${batchId}/history${q}`);
+  },
+
+  // Student personal attendance history
+  getStudentHistory: (instituteId: string, studentProfileId: string, params?: Record<string, any>) => {
+    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return apiFetch<{
+      student: { id: string; admissionNo: string; fullName: string };
+      summary: {
+        totalSessions: number;
+        presentCount: number;
+        lateCount: number;
+        absentCount: number;
+        excusedCount: number;
+        attendancePercentage: number | null;
+      };
+      monthlySummary: Array<{
+        month: string;
+        present: number;
+        late: number;
+        absent: number;
+        excused: number;
+        percentage: number | null;
+      }>;
+      records: Array<{
+        id: string;
+        batchName: string;
+        date: string;
+        status: 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+        mode: string;
+        remarks?: string;
+        sessionTitle?: string;
+      }>;
+    }>(`/institutes/${instituteId}/attendance/students/${studentProfileId}${q}`);
+  },
+
+  // Export CSV url
+  getExportUrl: (instituteId: string, params?: Record<string, any>) => {
+    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return `${API_BASE_URL}/institutes/${instituteId}/attendance/export${q}`;
+  },
+};
+

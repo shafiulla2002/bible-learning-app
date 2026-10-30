@@ -205,7 +205,16 @@ describe('Milestone 2.3 — Real PostgreSQL Concurrency & Integrity Integration 
     });
 
     it('atomic setCurrentAcademicYear switches current year and preserves state on failure', async () => {
-      const years = await prisma.academicYear.findMany({ where: { instituteId } });
+      let years = await prisma.academicYear.findMany({ where: { instituteId } });
+      if (years.length < 2) {
+        await service.createAcademicYear(instituteId, {
+          name: `AY 2028-2029 ${testSuffix}`,
+          startDate: '2028-06-01',
+          endDate: '2029-05-31',
+          isCurrent: false,
+        });
+        years = await prisma.academicYear.findMany({ where: { instituteId } });
+      }
       expect(years.length).toBeGreaterThanOrEqual(2);
 
       const targetYear = years.find((y) => !y.isCurrent)!;
@@ -245,12 +254,28 @@ describe('Milestone 2.3 — Real PostgreSQL Concurrency & Integrity Integration 
     let term1Year2Id: string;
 
     beforeAll(async () => {
-      const y1 = await prisma.academicYear.findFirst({
+      let y1 = await prisma.academicYear.findFirst({
         where: { instituteId, name: `AY 2026-2027 ${testSuffix}` },
       });
-      const y2 = await prisma.academicYear.findFirst({
+      let y2 = await prisma.academicYear.findFirst({
         where: { instituteId, name: `AY 2028-2029 ${testSuffix}` },
       });
+      if (!y1) {
+        y1 = await service.createAcademicYear(instituteId, {
+          name: `AY 2026-2027 ${testSuffix}`,
+          startDate: '2026-06-01',
+          endDate: '2027-05-31',
+          isCurrent: true,
+        });
+      }
+      if (!y2) {
+        y2 = await service.createAcademicYear(instituteId, {
+          name: `AY 2028-2029 ${testSuffix}`,
+          startDate: '2028-06-01',
+          endDate: '2029-05-31',
+          isCurrent: false,
+        });
+      }
       year1Id = y1!.id;
       year2Id = y2!.id;
     });

@@ -6,7 +6,9 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 import {
+  CalendarCheck,
   LayoutDashboard,
   BookOpen,
   Users,
@@ -24,6 +26,7 @@ import {
 const teacherNav = [
   { label: 'Dashboard', href: '/teacher', icon: <LayoutDashboard size={18} /> },
   { label: 'Assigned Courses', href: '/teacher/courses', icon: <BookOpen size={18} /> },
+  { label: 'Attendance', href: '/teacher/attendance', icon: <CalendarCheck size={18} /> },
   { label: 'My Students', href: '/teacher/students', icon: <Users size={18} /> },
   { label: 'Live Sessions', href: '/teacher/classes', icon: <Calendar size={18} /> },
   { label: 'Grading & Submissions', href: '/teacher/grading', icon: <FileCheck2 size={18} />, badge: '6 New' },
@@ -58,10 +61,12 @@ export default function TeacherDashboardPage() {
               <PlusCircle size={15} />
               Create Assignment
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <CheckCircle2 size={15} />
-              Mark Attendance
-            </Button>
+            <Link href="/teacher/attendance">
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <CheckCircle2 size={15} />
+                Mark Attendance
+              </Button>
+            </Link>
             <Button variant="outline" size="sm" className="gap-1.5">
               <UploadCloud size={15} />
               Upload Material

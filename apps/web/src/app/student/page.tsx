@@ -18,12 +18,14 @@ import {
   Zap,
   PlayCircle,
   Video,
+  CalendarCheck,
 } from 'lucide-react';
 
 const studentNav = [
   { label: 'Dashboard', href: '/student', icon: <LayoutDashboard size={18} /> },
   { label: 'My Courses', href: '/student/courses', icon: <BookOpen size={18} /> },
   { label: 'Live Classes', href: '/student/classes', icon: <Video size={18} />, badge: 'LIVE' },
+  { label: 'Attendance', href: '/student/attendance', icon: <CalendarCheck size={18} /> },
   { label: 'Assignments', href: '/student/assignments', icon: <FileCheck2 size={18} /> },
   { label: 'Certificates', href: '/student/certificates', icon: <Award size={18} /> },
   { label: 'Payments & Receipts', href: '/student/payments', icon: <CreditCard size={18} /> },

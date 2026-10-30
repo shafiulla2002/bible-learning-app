@@ -105,6 +105,11 @@ enum AttendanceStatus {
   EXCUSED
 }
 
+enum AttendanceMode {
+  DAILY_BATCH
+  LIVE_SESSION
+}
+
 enum OrderStatus {
   PENDING
   AWAITING_PAYMENT
@@ -167,6 +172,7 @@ model Institute {
   announcements Announcement[]
   notifications Notification[]
   auditLogs     AuditLog[]
+  attendances   Attendance[]
 
   @@index([status])
 }
@@ -587,6 +593,7 @@ model Batch {
   teachers        BatchTeacher[]
   enrolments      Enrolment[]
   liveSessions    LiveSession[]
+  attendances     Attendance[]
   assignments     Assignment[]
   sourceTransfers BatchTransferLog[] @relation("SourceBatchTransfers")
   targetTransfers BatchTransferLog[] @relation("TargetBatchTransfers")
@@ -659,14 +666,47 @@ model BatchTransferLog {
 model Attendance {
   id               String           @id @default(uuid())
   instituteId      String
-  liveSessionId    String
-  liveSession      LiveSession      @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  institute        Institute        @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  batchId          String
+  batch            Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
   studentProfileId String
   studentProfile   StudentProfile   @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  enrolmentId      String?
+  enrolment        Enrolment?       @relation(fields: [enrolmentId], references: [id], onDelete: SetNull)
+  liveSessionId    String?
+  liveSession      LiveSession?     @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  mode             AttendanceMode   @default(DAILY_BATCH)
+  date             DateTime         @db.Date
   status           AttendanceStatus @default(PRESENT)
+  remarks          String?
+  markedById       String?
+  markedByRole     String?          // TEACHER, ADMIN
+  updatedById      String?
   markedAt         DateTime         @default(now())
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  @@unique([liveSessionId, studentProfileId])
+  auditLogs        AttendanceAuditLog[]
+
+  @@index([instituteId, batchId, date])
+  @@index([studentProfileId, date])
+  @@index([instituteId, date])
+  @@index([liveSessionId])
+}
+
+model AttendanceAuditLog {
+  id              String           @id @default(uuid())
+  attendanceId    String
+  attendance      Attendance       @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  previousStatus  AttendanceStatus
+  newStatus       AttendanceStatus
+  previousRemarks String?
+  newRemarks      String?
+  changedById     String?
+  changedByRole   String?          // TEACHER, ADMIN
+  changedAt       DateTime         @default(now())
+
+  @@index([attendanceId, changedAt])
 }
 
 model TeacherAttendance {
@@ -703,6 +743,7 @@ model Enrolment {
   updatedAt        DateTime        @updatedAt
 
   progressRecords LessonProgress[]
+  attendances     Attendance[]
   certificate     Certificate?
 
   @@unique([studentProfileId, courseId])

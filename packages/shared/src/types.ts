@@ -360,3 +360,77 @@ export interface RecurringScheduleRule {
   exceptions?: string[]; // YYYY-MM-DD dates to skip
 }
 
+// -----------------------------------------------------------------------------
+// ATTENDANCE MANAGEMENT TYPES (Milestone 2.4)
+// -----------------------------------------------------------------------------
+
+export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+export type AttendanceMode = 'DAILY_BATCH' | 'LIVE_SESSION';
+
+export interface AttendanceItem {
+  id: string;
+  instituteId: string;
+  batchId: string;
+  batchName?: string;
+  studentProfileId: string;
+  studentName?: string;
+  admissionNo?: string;
+  date: string; // YYYY-MM-DD
+  mode: AttendanceMode;
+  status: AttendanceStatus;
+  remarks?: string;
+  liveSessionId?: string;
+  liveSessionTitle?: string;
+  markedById?: string;
+  markedByRole?: string;
+  markedAt: string;
+  updatedAt?: string;
+}
+
+export interface AttendanceAuditLogItem {
+  id: string;
+  attendanceId: string;
+  previousStatus: AttendanceStatus;
+  newStatus: AttendanceStatus;
+  previousRemarks?: string;
+  newRemarks?: string;
+  changedById?: string;
+  changedByRole?: string;
+  changedAt: string;
+}
+
+export interface AttendanceSummary {
+  totalSessions: number;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  excusedCount: number;
+  attendancePercentage: number | null; // null if 0 applicable sessions
+}
+
+export interface StudentRosterAttendanceItem {
+  studentProfileId: string;
+  admissionNo: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  enrolmentId: string;
+  enrolmentStatus: string;
+  enrolledAt: string;
+  attendanceId?: string;
+  status?: AttendanceStatus;
+  remarks?: string;
+}
+
+export interface BatchAttendanceOverview {
+  batchId: string;
+  batchName: string;
+  courseTitle: string;
+  academicYearName?: string;
+  termName?: string;
+  totalStudents: number;
+  totalDaysMarked: number;
+  averageAttendancePct: number | null;
+}
+
+

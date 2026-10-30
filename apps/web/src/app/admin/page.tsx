@@ -17,6 +17,7 @@ import {
   Download,
   Plus,
   TrendingUp,
+  CalendarCheck,
 } from 'lucide-react';
 
 const adminNav = [
@@ -25,6 +26,7 @@ const adminNav = [
   { label: 'Faculty & Teachers', href: '/admin/teachers', icon: <GraduationCap size={18} /> },
   { label: 'Courses & Curriculum', href: '/admin/courses', icon: <BookOpen size={18} /> },
   { label: 'Batches & Classes', href: '/admin/batches', icon: <Calendar size={18} /> },
+  { label: 'Attendance', href: '/admin/attendance', icon: <CalendarCheck size={18} /> },
   { label: 'Finance & Payments', href: '/admin/finance', icon: <CreditCard size={18} /> },
   { label: 'Institute Settings', href: '/admin/settings', icon: <Settings size={18} /> },
 ];

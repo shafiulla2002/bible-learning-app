@@ -345,3 +345,55 @@ export const RecurringWeeklyScheduleSchema = z.object({
 });
 export type RecurringWeeklyScheduleInput = z.infer<typeof RecurringWeeklyScheduleSchema>;
 
+// -----------------------------------------------------------------------------
+// ATTENDANCE MANAGEMENT VALIDATION (Milestone 2.4)
+// -----------------------------------------------------------------------------
+
+export const AttendanceStatusEnum = z.enum(['PRESENT', 'LATE', 'ABSENT', 'EXCUSED']);
+export type AttendanceStatusType = z.infer<typeof AttendanceStatusEnum>;
+
+export const AttendanceModeEnum = z.enum(['DAILY_BATCH', 'LIVE_SESSION']);
+export type AttendanceModeType = z.infer<typeof AttendanceModeEnum>;
+
+export const MarkAttendanceRecordSchema = z.object({
+  studentProfileId: z.string().min(1, 'Student selection is required'),
+  status: AttendanceStatusEnum,
+  remarks: z.string().max(500, 'Remarks cannot exceed 500 characters').optional().nullable(),
+});
+export type MarkAttendanceRecordInput = z.infer<typeof MarkAttendanceRecordSchema>;
+
+export const MarkBulkAttendanceSchema = z.object({
+  batchId: z.string().min(1, 'Batch selection is required'),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be formatted as YYYY-MM-DD'),
+  mode: AttendanceModeEnum.default('DAILY_BATCH'),
+  liveSessionId: z.string().optional().nullable(),
+  records: z
+    .array(MarkAttendanceRecordSchema)
+    .min(1, 'At least one student attendance record is required'),
+});
+export type MarkBulkAttendanceInput = z.infer<typeof MarkBulkAttendanceSchema>;
+
+export const UpdateIndividualAttendanceSchema = z.object({
+  status: AttendanceStatusEnum,
+  remarks: z.string().max(500, 'Remarks cannot exceed 500 characters').optional().nullable(),
+});
+export type UpdateIndividualAttendanceInput = z.infer<typeof UpdateIndividualAttendanceSchema>;
+
+export const AttendanceFilterQuerySchema = z.object({
+  batchId: z.string().optional(),
+  studentProfileId: z.string().optional(),
+  academicYearId: z.string().optional(),
+  termId: z.string().optional(),
+  courseId: z.string().optional(),
+  mode: AttendanceModeEnum.optional(),
+  status: AttendanceStatusEnum.optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+export type AttendanceFilterQueryInput = z.infer<typeof AttendanceFilterQuerySchema>;
+
+
