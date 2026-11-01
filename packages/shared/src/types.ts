@@ -433,4 +433,97 @@ export interface BatchAttendanceOverview {
   averageAttendancePct: number | null;
 }
 
+// -----------------------------------------------------------------------------
+// TEACHER MANAGEMENT TYPES (Milestone 2.6)
+// -----------------------------------------------------------------------------
+
+export type TeacherStatus = 'ACTIVE' | 'INACTIVE' | 'DRAFT';
+export type InstructorRole = 'LEAD' | 'ASSISTANT';
+
+export interface TeacherAddress {
+  street?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+export interface TeacherSummaryItem {
+  id: string;
+  instituteId: string;
+  userId: string;
+  membershipId: string;
+  fullName: string;
+  phoneE164: string;
+  email?: string;
+  avatarUrl?: string;
+  employeeCode?: string;
+  qualifications?: string;
+  specialization?: string;
+  experienceYears?: number;
+  joiningDate?: string;
+  status: TeacherStatus;
+  assignedCoursesCount: number;
+  assignedBatchesCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TeacherAssignedCourse {
+  id: string;
+  courseId: string;
+  title: string;
+  slug: string;
+  code?: string;
+  role: InstructorRole;
+  createdAt?: string;
+}
+
+export interface TeacherAssignedBatch {
+  id: string;
+  batchId: string;
+  name: string;
+  courseTitle: string;
+  role: InstructorRole;
+  startDate: string;
+  endDate: string;
+  status: string;
+  capacity?: number;
+}
+
+export interface TeacherLiveSessionItem {
+  id: string;
+  batchId: string;
+  batchName: string;
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  room?: string;
+  joinUrl?: string;
+}
+
+export interface TeacherWorkloadSummary {
+  totalCourses: number;
+  totalBatches: number;
+  upcomingLiveSessionsCount: number;
+  totalLiveSessionsConducted: number;
+  weeklyHours: number;
+}
+
+export interface TeacherDetail extends TeacherSummaryItem {
+  bio?: string;
+  address?: TeacherAddress;
+  assignedCourses: TeacherAssignedCourse[];
+  assignedBatches: TeacherAssignedBatch[];
+  workloadSummary: TeacherWorkloadSummary;
+  recentLiveSessions: TeacherLiveSessionItem[];
+  attendanceStats?: {
+    totalSessionsConducted: number;
+    totalAttendanceMarked: number;
+  };
+}
+
+
+
 

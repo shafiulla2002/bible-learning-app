@@ -177,6 +177,7 @@ model Institute {
   feeStructures FeeStructure[]
   feeAllocations StudentFeeAllocation[]
   financialSequences FinancialSequence[]
+  financialSequenceRegistries FinancialSequenceRegistry[]
   studentInvoices Invoice[]
   feePayments   FeePayment[]
   feeReceipts   FeeReceipt[]
@@ -397,24 +398,30 @@ model StudentProfile {
 }
 
 model TeacherProfile {
-  id             String     @id @default(uuid())
-  instituteId    String
-  membershipId   String     @unique
-  membership     Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  employeeCode   String?
-  qualifications String?
-  specialization String?
-  bio            String?
-  photoUrl       String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id              String     @id @default(uuid())
+  instituteId     String
+  membershipId    String     @unique
+  membership      Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  employeeCode    String?
+  qualifications  String?
+  specialization  String?
+  experienceYears Int?
+  joiningDate     DateTime?
+  address         Json?
+  bio             String?
+  photoUrl        String?
+  status          String     @default("ACTIVE") // ACTIVE, INACTIVE, DRAFT
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
   instructingCourses CourseInstructor[]
   batchTeachers      BatchTeacher[]
   liveSessions       LiveSession[]
   teacherAttendances TeacherAttendance[]
 
+  @@unique([id, instituteId])
   @@unique([instituteId, employeeCode])
+  @@index([instituteId, status])
 }
 
 model Admission {
@@ -493,8 +500,10 @@ model CourseInstructor {
   teacherProfileId String
   teacherProfile   TeacherProfile @relation(fields: [teacherProfileId], references: [id], onDelete: Cascade)
   role             String         @default("LEAD") // LEAD, ASSISTANT
+  createdAt        DateTime       @default(now())
 
   @@unique([courseId, teacherProfileId])
+  @@index([instituteId, teacherProfileId])
 }
 
 model Module {
@@ -1210,6 +1219,18 @@ model FinancialSequence {
   type        FinancialSequenceType // INVOICE, PAYMENT, RECEIPT
   currentSeq  Int                   @default(0)
   updatedAt   DateTime              @updatedAt
+
+  @@unique([instituteId, year, type])
+}
+
+model FinancialSequenceRegistry {
+  id           String                @id @default(uuid())
+  instituteId  String
+  institute    Institute             @relation(fields: [instituteId], references: [id], onDelete: Restrict)
+  year         Int
+  type         FinancialSequenceType
+  sequenceName String                @unique
+  createdAt    DateTime              @default(now())
 
   @@unique([instituteId, year, type])
 }

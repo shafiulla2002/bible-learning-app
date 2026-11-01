@@ -423,3 +423,147 @@ export const attendanceApi = {
   },
 };
 
+// -----------------------------------------------------------------------------
+// TEACHER & FACULTY SERVICES (Milestone 2.6)
+// -----------------------------------------------------------------------------
+
+export interface TeacherSummaryDto {
+  id: string;
+  employeeCode?: string | null;
+  fullName: string;
+  phoneE164: string;
+  email?: string | null;
+  specialization?: string | null;
+  highestDegree?: string | null;
+  experienceYears?: number | null;
+  status: 'ACTIVE' | 'INACTIVE' | 'DRAFT' | 'ON_LEAVE';
+  assignedCoursesCount: number;
+  assignedBatchesCount: number;
+  joiningDate?: string | null;
+  createdAt: string;
+}
+
+export interface TeacherDetailDto extends TeacherSummaryDto {
+  bio?: string | null;
+  address?: any;
+  courses: Array<{
+    courseId: string;
+    title: string;
+    slug: string;
+    categoryName?: string;
+    role: 'LEAD' | 'ASSISTANT' | 'GUEST';
+    assignedAt: string;
+  }>;
+  batches: Array<{
+    batchId: string;
+    name: string;
+    code: string;
+    courseTitle: string;
+    role: 'LEAD' | 'ASSISTANT' | 'GUEST';
+    batchStatus: string;
+    startDate: string;
+    endDate: string;
+  }>;
+  workload: {
+    totalCourses: number;
+    totalBatches: number;
+    upcomingSessionsCount: number;
+    weeklyScheduledHours: number;
+    sessionsThisWeek: Array<{
+      id: string;
+      batchId: string;
+      batchName: string;
+      title: string;
+      startsAt: string;
+      endsAt: string;
+      status: string;
+      durationMinutes: number;
+    }>;
+  };
+}
+
+export const teacherApi = {
+  getTeachers: (instituteId: string, params?: Record<string, any>) => {
+    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return apiFetch<{
+      data: TeacherSummaryDto[];
+      meta: { total: number; page: number; limit: number; totalPages: number };
+    }>(`/institutes/${instituteId}/teachers${q}`);
+  },
+
+  getTeacher: (instituteId: string, teacherId: string) => {
+    return apiFetch<TeacherDetailDto>(`/institutes/${instituteId}/teachers/${teacherId}`);
+  },
+
+  createTeacher: (instituteId: string, data: any) => {
+    return apiFetch<TeacherDetailDto>(`/institutes/${instituteId}/teachers`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateTeacher: (instituteId: string, teacherId: string, data: any) => {
+    return apiFetch<TeacherDetailDto>(`/institutes/${instituteId}/teachers/${teacherId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateStatus: (instituteId: string, teacherId: string, status: string, reason?: string) => {
+    return apiFetch<{ id: string; status: string; message: string }>(
+      `/institutes/${instituteId}/teachers/${teacherId}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status, reason }),
+      },
+    );
+  },
+
+  assignCourse: (instituteId: string, teacherId: string, data: { courseId: string; role?: string }) => {
+    return apiFetch(`/institutes/${instituteId}/teachers/${teacherId}/courses`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  removeCourse: (instituteId: string, teacherId: string, courseId: string) => {
+    return apiFetch(`/institutes/${instituteId}/teachers/${teacherId}/courses/${courseId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  assignBatch: (instituteId: string, teacherId: string, data: { batchId: string; role?: string }) => {
+    return apiFetch(`/institutes/${instituteId}/teachers/${teacherId}/batches`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  removeBatch: (instituteId: string, teacherId: string, batchId: string) => {
+    return apiFetch(`/institutes/${instituteId}/teachers/${teacherId}/batches/${batchId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  getWorkload: (instituteId: string, teacherId: string) => {
+    return apiFetch<TeacherDetailDto['workload']>(
+      `/institutes/${instituteId}/teachers/${teacherId}/workload`,
+    );
+  },
+
+  checkScheduleConflict: (
+    instituteId: string,
+    data: { teacherProfileId: string; startsAt: string; endsAt: string; excludeSessionId?: string },
+  ) => {
+    return apiFetch<{
+      hasConflict: boolean;
+      conflictType?: string;
+      conflictingSession?: any;
+      message?: string;
+    }>(`/institutes/${instituteId}/teachers/check-conflict`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+};
+

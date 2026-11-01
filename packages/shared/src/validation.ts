@@ -396,4 +396,83 @@ export const AttendanceFilterQuerySchema = z.object({
 });
 export type AttendanceFilterQueryInput = z.infer<typeof AttendanceFilterQuerySchema>;
 
+// -----------------------------------------------------------------------------
+// TEACHER MANAGEMENT VALIDATION SCHEMAS (Milestone 2.6)
+// -----------------------------------------------------------------------------
+
+export const TeacherStatusEnum = z.enum(['ACTIVE', 'INACTIVE', 'DRAFT']);
+export type TeacherStatusType = z.infer<typeof TeacherStatusEnum>;
+
+export const InstructorRoleEnum = z.enum(['LEAD', 'ASSISTANT']);
+export type InstructorRoleType = z.infer<typeof InstructorRoleEnum>;
+
+export const TeacherAddressSchema = z.object({
+  street: z.string().max(200).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  state: z.string().max(100).optional().nullable(),
+  postalCode: z.string().max(20).optional().nullable(),
+  country: z.string().max(100).optional().nullable(),
+});
+export type TeacherAddressInput = z.infer<typeof TeacherAddressSchema>;
+
+export const CreateTeacherSchema = z.object({
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters').max(100, 'Full name cannot exceed 100 characters'),
+  phoneE164: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'Phone number must be valid E.164 format (e.g. +919876543210)'),
+  email: z.string().trim().email('Invalid email address').optional().nullable().or(z.literal('')),
+  employeeCode: z.string().trim().max(50, 'Employee code cannot exceed 50 characters').optional().nullable().or(z.literal('')),
+  qualifications: z.string().trim().max(255, 'Qualifications cannot exceed 255 characters').optional().nullable().or(z.literal('')),
+  specialization: z.string().trim().max(255, 'Specialization cannot exceed 255 characters').optional().nullable().or(z.literal('')),
+  experienceYears: z.coerce.number().int().min(0, 'Experience cannot be negative').max(60, 'Experience cannot exceed 60 years').optional().nullable(),
+  joiningDate: z.string().optional().nullable().or(z.literal('')),
+  address: TeacherAddressSchema.optional().nullable(),
+  bio: z.string().max(2000, 'Bio cannot exceed 2000 characters').optional().nullable().or(z.literal('')),
+  photoUrl: z.string().url('Invalid photo URL').optional().nullable().or(z.literal('')),
+  status: TeacherStatusEnum.default('ACTIVE'),
+});
+export type CreateTeacherInput = z.infer<typeof CreateTeacherSchema>;
+
+export const UpdateTeacherProfileSchema = z.object({
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters').max(100, 'Full name cannot exceed 100 characters').optional(),
+  email: z.string().trim().email('Invalid email address').optional().nullable().or(z.literal('')),
+  employeeCode: z.string().trim().max(50, 'Employee code cannot exceed 50 characters').optional().nullable().or(z.literal('')),
+  qualifications: z.string().trim().max(255, 'Qualifications cannot exceed 255 characters').optional().nullable().or(z.literal('')),
+  specialization: z.string().trim().max(255, 'Specialization cannot exceed 255 characters').optional().nullable().or(z.literal('')),
+  experienceYears: z.coerce.number().int().min(0, 'Experience cannot be negative').max(60, 'Experience cannot exceed 60 years').optional().nullable(),
+  joiningDate: z.string().optional().nullable().or(z.literal('')),
+  address: TeacherAddressSchema.optional().nullable(),
+  bio: z.string().max(2000, 'Bio cannot exceed 2000 characters').optional().nullable().or(z.literal('')),
+  photoUrl: z.string().url('Invalid photo URL').optional().nullable().or(z.literal('')),
+});
+export type UpdateTeacherProfileInput = z.infer<typeof UpdateTeacherProfileSchema>;
+
+export const UpdateTeacherStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'INACTIVE']),
+  reason: z.string().max(500, 'Reason cannot exceed 500 characters').optional().nullable(),
+});
+export type UpdateTeacherStatusInput = z.infer<typeof UpdateTeacherStatusSchema>;
+
+export const TeacherFilterQuerySchema = z.object({
+  search: z.string().optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'DRAFT', 'ALL']).optional(),
+  specialization: z.string().optional(),
+  courseId: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type TeacherFilterQueryInput = z.infer<typeof TeacherFilterQuerySchema>;
+
+export const AssignTeacherCourseSchema = z.object({
+  courseId: z.string().min(1, 'Course selection is required'),
+  role: InstructorRoleEnum.default('LEAD'),
+});
+export type AssignTeacherCourseInput = z.infer<typeof AssignTeacherCourseSchema>;
+
+export const AssignTeacherBatchSchema = z.object({
+  batchId: z.string().min(1, 'Batch selection is required'),
+  role: InstructorRoleEnum.default('LEAD'),
+});
+export type AssignTeacherBatchInput = z.infer<typeof AssignTeacherBatchSchema>;
+
+
+
 
