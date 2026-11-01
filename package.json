@@ -15,6 +15,7 @@
     "build:shared": "npm run build --workspace=@bible-lms/shared",
     "build:api": "npm run build --workspace=@bible-lms/api",
     "build:web": "npm run build --workspace=@bible-lms/web",
+    "postinstall": "npm run prisma:generate --workspace=@bible-lms/api --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
