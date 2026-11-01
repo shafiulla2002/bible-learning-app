@@ -600,7 +600,19 @@ describe('Milestone 2.5 — Financial Integrity & Concurrency Integration Suite 
     ];
 
     for (const stmt of ddlStatements) {
-      await prisma.$executeRawUnsafe(stmt);
+      try {
+        await prisma.$executeRawUnsafe(stmt);
+      } catch (err: any) {
+        // Allow proceeding if DDL is already provisioned by migration or user is least-privileged
+        const msg = err.message || '';
+        if (
+          !msg.includes('already exists') && 
+          !msg.includes('permission denied') && 
+          !msg.includes('must be owner')
+        ) {
+          throw err;
+        }
+      }
     }
 
     // Seed test institutes
