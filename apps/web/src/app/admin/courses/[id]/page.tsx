@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { courseApi, resolveVerifiedAdminContext } from '@/lib/api';
 import {
   BookOpen,
   ChevronLeft,
@@ -85,161 +86,100 @@ export default function CourseCurriculumBuilderPage() {
   const params = useParams();
   const courseId = params?.id as string;
 
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('current_institute_id');
+      if (stored) return stored;
+    }
+    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+  });
+
   const [activeTab, setActiveTab] = useState<'curriculum' | 'settings' | 'pricing' | 'faculty' | 'enrolled'>('curriculum');
   const [courseStatus, setCourseStatus] = useState<'DRAFT' | 'PUBLISHED' | 'ARCHIVED'>('PUBLISHED');
   const [saveToast, setSaveToast] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Course Metadata State
-  const [courseTitle, setCourseTitle] = useState('Building Biblical Theology');
-  const [category, setCategory] = useState('Biblical Theology');
+  const [courseTitle, setCourseTitle] = useState('Course Curriculum');
+  const [category, setCategory] = useState('Biblical Studies');
   const [level, setLevel] = useState('BEGINNER');
   const [language, setLanguage] = useState('English');
-  const [price, setPrice] = useState('18500');
-  const [pricingType, setPricingType] = useState<'FREE' | 'PAID'>('PAID');
-  const [description, setDescription] = useState(
-    'A comprehensive study of redemptive history, biblical covenants, and overarching theological narrative from Genesis to Revelation.',
-  );
+  const [price, setPrice] = useState('0');
+  const [pricingType, setPricingType] = useState<'FREE' | 'PAID'>('FREE');
+  const [description, setDescription] = useState('');
 
   // Curriculum Hierarchy State (Course -> Modules -> Chapters -> Lessons -> Resources)
-  const [modules, setModules] = useState<ModuleItem[]>([
-    {
-      id: 'mod-1',
-      title: 'Module 1: Foundations of Biblical Theology',
-      chapters: [
-        {
-          id: 'ch-1',
-          title: 'Chapter 1: Definitions, Method & History',
-          lessons: [
-            {
-              id: 'les-1',
-              title: '1.1 What is Biblical Theology? Distinction from Systematic Theology',
-              type: 'VIDEO',
-              durationMinutes: 45,
-              isPreview: true,
-              isMandatory: true,
-              body: 'Introduction to Vosian and redemptive-historical methodologies.',
-              resources: [
-                { id: 'res-1', title: 'Biblical-Theology-Syllabus.pdf', kind: 'PDF', size: '2.4 MB', downloadable: true },
-                { id: 'res-2', title: 'Lecture-Slides-Session1.pdf', kind: 'PDF', size: '5.1 MB', downloadable: false },
-              ],
-            },
-            {
-              id: 'les-2',
-              title: '1.2 Revelation in History: Progressive Unfolding of the Divine Plan',
-              type: 'VIDEO',
-              durationMinutes: 50,
-              isPreview: false,
-              isMandatory: true,
-              body: 'Traces progressive special revelation through biblical epochs.',
-              resources: [
-                { id: 'res-3', title: 'Epochs-of-Redemption-Timeline.pdf', kind: 'PDF', size: '1.8 MB', downloadable: true },
-              ],
-            },
-            {
-              id: 'les-3',
-              title: '1.3 Reading Assignment: Vos on Biblical Theology (Chapters 1-3)',
-              type: 'TEXT',
-              durationMinutes: 30,
-              isPreview: false,
-              isMandatory: true,
-              body: 'Read excerpts from Geerhardus Vos, Biblical Theology, pp. 3-28.',
-              resources: [],
-            },
-          ],
-        },
-        {
-          id: 'ch-2',
-          title: 'Chapter 2: Redemptive Eras & Typology',
-          lessons: [
-            {
-              id: 'les-4',
-              title: '2.1 Principles of Biblical Typology vs Allegory',
-              type: 'VIDEO',
-              durationMinutes: 40,
-              isPreview: false,
-              isMandatory: true,
-              body: 'Hermeneutical criteria for legitimate Old Testament types pointing to Christ.',
-              resources: [
-                { id: 'res-4', title: 'Typology-Reference-Guide.pdf', kind: 'PDF', size: '3.2 MB', downloadable: false },
-              ],
-            },
-            {
-              id: 'les-5',
-              title: '2.2 Audio Lecture: Typological Patterns in the Exodus Event',
-              type: 'AUDIO',
-              durationMinutes: 35,
-              isPreview: false,
-              isMandatory: false,
-              body: 'Audio commentary on the Passover lamb, wilderness wandering, and Promised Land.',
-              resources: [
-                { id: 'res-5', title: 'Exodus-Typology-Audio.mp3', kind: 'AUDIO', size: '32 MB', downloadable: true },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 'mod-2',
-      title: 'Module 2: The Biblical Covenants',
-      chapters: [
-        {
-          id: 'ch-3',
-          title: 'Chapter 3: The Adamic & Noahic Covenants',
-          lessons: [
-            {
-              id: 'les-6',
-              title: '3.1 The Covenant of Creation and the Fall',
-              type: 'VIDEO',
-              durationMinutes: 45,
-              isPreview: false,
-              isMandatory: true,
-              body: 'Genesis 1-3 analysis, covenant of works, protoevangelium Genesis 3:15.',
-              resources: [],
-            },
-            {
-              id: 'les-7',
-              title: '3.2 The Noahic Covenant: Preservation and Common Grace',
-              type: 'VIDEO',
-              durationMinutes: 40,
-              isPreview: false,
-              isMandatory: true,
-              body: 'Genesis 8-9 analysis, divine restraint, bow in the clouds.',
-              resources: [],
-            },
-          ],
-        },
-        {
-          id: 'ch-4',
-          title: 'Chapter 4: The Abrahamic, Mosaic, and Davidic Covenants',
-          lessons: [
-            {
-              id: 'les-8',
-              title: '4.1 Abrahamic Promises: Land, Seed, and Universal Blessing',
-              type: 'VIDEO',
-              durationMinutes: 55,
-              isPreview: false,
-              isMandatory: true,
-              body: 'Genesis 12, 15, 17 analysis and Paul’s commentary in Galatians 3.',
-              resources: [
-                { id: 'res-6', title: 'Covenants-Comparison-Chart.pdf', kind: 'PDF', size: '1.2 MB', downloadable: true },
-              ],
-            },
-            {
-              id: 'les-9',
-              title: '4.2 The Mosaic Covenant: Law, Holiness, and Tabernacle',
-              type: 'VIDEO',
-              durationMinutes: 50,
-              isPreview: false,
-              isMandatory: true,
-              body: 'Exodus 19-24, the moral law, and pedagogical function toward Christ.',
-              resources: [],
-            },
-          ],
-        },
-      ],
-    },
-  ]);
+  const [modules, setModules] = useState<ModuleItem[]>([]);
+
+  // Resolve admin context
+  useEffect(() => {
+    let active = true;
+    resolveVerifiedAdminContext()
+      .then((ctx) => {
+        if (!active) return;
+        if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Fetch course from PostgreSQL
+  const loadCourseFromDatabase = useCallback(async () => {
+    if (!instituteId || !courseId) return;
+    setIsLoading(true);
+    try {
+      const data = await courseApi.getCourse(instituteId, courseId);
+      if (data) {
+        setCourseTitle(data.title || 'Course Curriculum');
+        setCategory(data.category?.name || 'Biblical Studies');
+        setLevel(data.level || 'BEGINNER');
+        setLanguage(data.language || 'English');
+        setPrice(String(data.price || 0));
+        setPricingType(data.price && data.price > 0 ? 'PAID' : 'FREE');
+        setDescription(data.description || '');
+        setCourseStatus(data.status as any);
+
+        if (Array.isArray(data.modules)) {
+          setModules(
+            data.modules.map((m: any) => ({
+              id: m.id,
+              title: m.title,
+              chapters: (m.chapters || []).map((ch: any) => ({
+                id: ch.id,
+                title: ch.title,
+                lessons: (ch.lessons || []).map((l: any) => ({
+                  id: l.id,
+                  title: l.title,
+                  type: l.type || 'VIDEO',
+                  durationMinutes: l.durationMinutes || 15,
+                  isPreview: Boolean(l.isPreview),
+                  isMandatory: Boolean(l.isMandatory),
+                  body: l.body || '',
+                  resources: (l.resources || []).map((r: any) => ({
+                    id: r.id,
+                    title: r.title,
+                    kind: r.type || 'PDF',
+                    size: r.fileSize ? `${Math.round(r.fileSize / 1024)} KB` : '1 MB',
+                    downloadable: true,
+                  })),
+                })),
+              })),
+            }))
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load course from database:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [instituteId, courseId]);
+
+  useEffect(() => {
+    loadCourseFromDatabase();
+  }, [loadCourseFromDatabase]);
 
   // Modal States
   const [showAddModuleModal, setShowAddModuleModal] = useState(false);
@@ -278,16 +218,20 @@ export default function CourseCurriculumBuilderPage() {
   ];
 
   // Handlers for Curriculum Management
-  const handleAddModule = (e: React.FormEvent) => {
+  const handleAddModule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newModuleTitle.trim()) return;
 
-    const newMod: ModuleItem = {
-      id: `mod-${Date.now().toString().slice(-4)}`,
-      title: newModuleTitle.trim(),
-      chapters: [],
-    };
-    setModules([...modules, newMod]);
+    try {
+      await courseApi.createModule(instituteId, courseId, {
+        title: newModuleTitle.trim(),
+        position: modules.length,
+      });
+      await loadCourseFromDatabase();
+    } catch (err) {
+      console.error('Failed to create module:', err);
+    }
+
     setNewModuleTitle('');
     setShowAddModuleModal(false);
   };
@@ -296,23 +240,18 @@ export default function CourseCurriculumBuilderPage() {
     setModules(modules.filter((m) => m.id !== moduleId));
   };
 
-  const handleAddChapter = (e: React.FormEvent) => {
+  const handleAddChapter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!showAddChapterModal || !newChapterTitle.trim()) return;
 
-    setModules(
-      modules.map((m) => {
-        if (m.id === showAddChapterModal) {
-          const newChap: ChapterItem = {
-            id: `ch-${Date.now().toString().slice(-4)}`,
-            title: newChapterTitle.trim(),
-            lessons: [],
-          };
-          return { ...m, chapters: [...m.chapters, newChap] };
-        }
-        return m;
-      }),
-    );
+    try {
+      await courseApi.createChapter(instituteId, courseId, showAddChapterModal, {
+        title: newChapterTitle.trim(),
+      });
+      await loadCourseFromDatabase();
+    } catch (err) {
+      console.error('Failed to create chapter:', err);
+    }
 
     setNewChapterTitle('');
     setShowAddChapterModal(null);
@@ -329,37 +268,23 @@ export default function CourseCurriculumBuilderPage() {
     );
   };
 
-  const handleAddLesson = (e: React.FormEvent) => {
+  const handleAddLesson = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!showAddLessonModal || !newLessonTitle.trim()) return;
 
-    const newLesson: LessonItem = {
-      id: `les-${Date.now().toString().slice(-4)}`,
-      title: newLessonTitle.trim(),
-      type: newLessonType,
-      durationMinutes: parseInt(newLessonDuration, 10) || 15,
-      isPreview: newLessonPreview,
-      isMandatory: true,
-      body: newLessonBody.trim(),
-      resources: [],
-    };
-
-    setModules(
-      modules.map((m) => {
-        if (m.id === showAddLessonModal.moduleId) {
-          return {
-            ...m,
-            chapters: m.chapters.map((ch) => {
-              if (ch.id === showAddLessonModal.chapterId) {
-                return { ...ch, lessons: [...ch.lessons, newLesson] };
-              }
-              return ch;
-            }),
-          };
-        }
-        return m;
-      }),
-    );
+    try {
+      await courseApi.createLesson(instituteId, courseId, showAddLessonModal.chapterId, {
+        title: newLessonTitle.trim(),
+        type: newLessonType,
+        durationMinutes: parseInt(newLessonDuration, 10) || 15,
+        isPreview: newLessonPreview,
+        isMandatory: true,
+        body: newLessonBody.trim(),
+      });
+      await loadCourseFromDatabase();
+    } catch (err) {
+      console.error('Failed to create lesson:', err);
+    }
 
     setNewLessonTitle('');
     setNewLessonBody('');
@@ -485,9 +410,30 @@ export default function CourseCurriculumBuilderPage() {
     );
   };
 
-  const handleSave = () => {
-    setSaveToast(true);
-    setTimeout(() => setSaveToast(false), 3000);
+  const handleSave = async () => {
+    try {
+      await courseApi.updateCourse(instituteId, courseId, {
+        title: courseTitle,
+        description,
+        price: pricingType === 'PAID' ? parseInt(price, 10) || 0 : 0,
+        pricingType,
+        level: level as any,
+        language,
+      });
+      setSaveToast(true);
+      setTimeout(() => setSaveToast(false), 3000);
+    } catch (err) {
+      console.error('Failed to update course in database:', err);
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED') => {
+    try {
+      await courseApi.updateStatus(instituteId, courseId, newStatus);
+      setCourseStatus(newStatus);
+    } catch (err) {
+      console.error('Failed to update status:', err);
+    }
   };
 
   const totalLessons = modules.reduce(

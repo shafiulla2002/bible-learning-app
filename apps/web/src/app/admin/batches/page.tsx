@@ -1,30 +1,27 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { batchApi, BatchDto, AcademicYearDto, AcademicTermDto } from '@/lib/api';
 import {
   Calendar,
-  Plus,
-  Search,
-  Filter,
-  Users,
-  GraduationCap,
-  Clock,
-  BookOpen,
-  ArrowRight,
-  Sparkles,
   Layers,
+  Plus,
+  Users,
+  Clock,
   CheckCircle,
-  AlertCircle,
+  Filter,
+  Search,
+  Sparkles,
+  ArrowRight,
   X,
-  ChevronRight,
-  MoreVertical,
   CalendarDays,
-  ShieldAlert,
-  Building,
-  UserCheck,
-  CalendarCheck,
+  RefreshCw,
+  AlertCircle,
+  RotateCcw,
+  BookOpen,
+  GraduationCap,
+  CreditCard,
+  Building2,
 } from 'lucide-react';
 import { PortalShell } from '@/components/layout/portal-shell';
 import { StatCard } from '@/components/ui/stat-card';
@@ -32,20 +29,22 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import {
-  LayoutDashboard,
-  CreditCard,
-  Settings,
-} from 'lucide-react';
+  batchApi,
+  courseApi,
+  AcademicYearDto,
+  AcademicTermDto,
+  CourseDto,
+  resolveVerifiedAdminContext,
+} from '@/lib/api';
 
 const adminNav = [
-  { label: 'Overview', href: '/admin', icon: <LayoutDashboard size={18} /> },
-  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} />, badge: '3 Pending' },
+  { label: 'Overview', href: '/admin', icon: <Building2 size={18} /> },
+  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} /> },
   { label: 'Faculty & Teachers', href: '/admin/teachers', icon: <GraduationCap size={18} /> },
   { label: 'Courses & Curriculum', href: '/admin/courses', icon: <BookOpen size={18} /> },
   { label: 'Batches & Classes', href: '/admin/batches', icon: <Calendar size={18} /> },
-  { label: 'Attendance', href: '/admin/attendance', icon: <CalendarCheck size={18} /> },
+  { label: 'Attendance', href: '/admin/attendance', icon: <Calendar size={18} /> },
   { label: 'Finance & Payments', href: '/admin/finance', icon: <CreditCard size={18} /> },
-  { label: 'Institute Settings', href: '/admin/settings', icon: <Settings size={18} /> },
 ];
 
 export interface BatchItem {
@@ -72,249 +71,197 @@ export interface BatchItem {
   scheduledClassesCount: number;
 }
 
-const initialBatches: BatchItem[] = [
-  {
-    id: 'batch-alpha-101',
-    name: 'Diploma Cohort Alpha 2026',
-    code: 'DIB-2026-A',
-    courseId: 'c1',
-    courseTitle: 'Diploma in Biblical Studies',
-    academicYearName: '2026-2027',
-    termName: 'Fall Semester 2026',
-    status: 'ACTIVE',
-    startDate: '2026-07-01',
-    endDate: '2026-12-20',
-    capacity: 40,
-    enrolledCount: 36,
-    leadTeacher: {
-      id: 't1',
-      name: 'Dr. Timothy Keller',
-    },
-    assistantsCount: 2,
-    scheduledClassesCount: 24,
-  },
-  {
-    id: 'batch-beta-201',
-    name: 'Evening Greek Intensive',
-    code: 'GRK-2026-EVE',
-    courseId: 'c2',
-    courseTitle: 'New Testament Greek I',
-    academicYearName: '2026-2027',
-    termName: 'Fall Semester 2026',
-    status: 'ACTIVE',
-    startDate: '2026-08-01',
-    endDate: '2026-11-30',
-    capacity: 25,
-    enrolledCount: 22,
-    leadTeacher: {
-      id: 't2',
-      name: 'Prof. Sarah Jenkins',
-    },
-    assistantsCount: 1,
-    scheduledClassesCount: 18,
-  },
-  {
-    id: 'batch-theology-spr',
-    name: 'Spring Systematic Cohort',
-    code: 'THEO-2027-SPR',
-    courseId: 'c3',
-    courseTitle: 'Systematic Theology & Doctrine',
-    academicYearName: '2026-2027',
-    termName: 'Spring Semester 2027',
-    status: 'UPCOMING',
-    startDate: '2027-01-10',
-    endDate: '2027-05-25',
-    capacity: 50,
-    enrolledCount: 14,
-    leadTeacher: {
-      id: 't3',
-      name: 'Rev. Matthew Henry',
-    },
-    assistantsCount: 2,
-    scheduledClassesCount: 0,
-  },
-  {
-    id: 'batch-history-old',
-    name: 'Church History Cohort 2025',
-    code: 'HIST-2025-C',
-    courseId: 'c4',
-    courseTitle: 'Church History & Patristics',
-    academicYearName: '2025-2026',
-    termName: 'Spring Semester 2026',
-    status: 'COMPLETED',
-    startDate: '2026-01-05',
-    endDate: '2026-05-20',
-    capacity: 30,
-    enrolledCount: 29,
-    leadTeacher: {
-      id: 't1',
-      name: 'Dr. Timothy Keller',
-    },
-    assistantsCount: 1,
-    scheduledClassesCount: 32,
-  },
-];
-
 export default function BatchesPage() {
-  const [batches, setBatches] = useState<BatchItem[]>(initialBatches);
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('current_institute_id');
+      if (stored) return stored;
+    }
+    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+  });
+
+  // Database State (Strict Zero-Mock: empty by default)
+  const [batches, setBatches] = useState<BatchItem[]>([]);
   const [academicYears, setAcademicYears] = useState<AcademicYearDto[]>([]);
   const [academicTerms, setAcademicTerms] = useState<AcademicTermDto[]>([]);
+  const [courses, setCourses] = useState<CourseDto[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+
+  // Filters
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [termFilter, setTermFilter] = useState<string>('ALL');
-  const [isLiveApi, setIsLiveApi] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [apiError, setApiError] = useState<string | null>(null);
-
-  const instituteId = typeof window !== 'undefined'
-    ? localStorage.getItem('current_institute_id') || 'inst-1'
-    : 'inst-1';
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // New Batch Form State
   const [newBatch, setNewBatch] = useState({
     name: '',
     code: '',
-    courseTitle: 'Diploma in Biblical Studies',
-    academicYearName: '2026-2027',
-    termName: 'Fall Semester 2026',
-    startDate: '2026-09-01',
-    endDate: '2026-12-31',
+    courseId: '',
+    academicYearId: '',
+    academicTermId: '',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date(Date.now() + 120 * 24 * 3600 * 1000).toISOString().split('T')[0],
     capacity: 40,
-    status: 'ACTIVE' as const,
-    leadTeacherName: 'Dr. Timothy Keller',
-    assistantsCount: 1,
   });
 
-  // Load live data on mount
+  // Resolve admin context
   useEffect(() => {
-    let isMounted = true;
-    async function loadData() {
-      setIsLoading(true);
-      try {
-        const [liveBatches, years, terms] = await Promise.allSettled([
-          batchApi.getBatches(instituteId),
-          batchApi.getAcademicYears(instituteId),
-          batchApi.getAcademicTerms(instituteId),
-        ]);
+    let active = true;
+    resolveVerifiedAdminContext()
+      .then((ctx) => {
+        if (!active) return;
+        if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
-        if (!isMounted) return;
+  // Fetch courses, academic years, and terms
+  useEffect(() => {
+    if (!instituteId) return;
+    courseApi
+      .getCourses(instituteId, { limit: 100 })
+      .then((res) => {
+        if (res && Array.isArray(res.data)) {
+          setCourses(res.data);
+          if (res.data.length > 0 && !newBatch.courseId) {
+            setNewBatch((prev) => ({ ...prev, courseId: res.data[0].id }));
+          }
+        }
+      })
+      .catch(() => {});
 
-        if (years.status === 'fulfilled' && Array.isArray(years.value)) {
-          setAcademicYears(years.value);
+    batchApi
+      .getAcademicYears(instituteId)
+      .then((years) => {
+        if (Array.isArray(years)) {
+          setAcademicYears(years);
+          const currentYear = years.find((y) => y.isCurrent) || years[0];
+          if (currentYear && !newBatch.academicYearId) {
+            setNewBatch((prev) => ({ ...prev, academicYearId: currentYear.id }));
+          }
         }
-        if (terms.status === 'fulfilled' && Array.isArray(terms.value)) {
-          setAcademicTerms(terms.value);
-        }
+      })
+      .catch(() => {});
 
-        if (liveBatches.status === 'fulfilled' && Array.isArray(liveBatches.value) && liveBatches.value.length > 0) {
-          const mapped: BatchItem[] = liveBatches.value.map((b: any) => ({
-            id: b.id,
-            name: b.name,
-            code: b.code,
-            courseId: b.courseId,
-            courseTitle: b.course?.title || 'Biblical Studies',
-            academicYearId: b.academicYearId,
-            academicYearName: b.academicYear?.name || '2026-2027',
-            termId: b.termId,
-            termName: b.academicTerm?.name || 'Fall Semester 2026',
-            status: b.status,
-            startDate: typeof b.startDate === 'string' ? b.startDate.slice(0, 10) : '2026-07-01',
-            endDate: typeof b.endDate === 'string' ? b.endDate.slice(0, 10) : '2026-12-31',
-            capacity: b.capacity,
-            enrolledCount: b._count?.enrolments ?? 0,
-            leadTeacher: {
-              id: 't-faculty',
-              name: b.teachers?.[0]?.teacherProfile?.membership?.user?.fullName || 'Faculty Member',
-            },
-            assistantsCount: Math.max(0, (b._count?.teachers ?? 1) - 1),
-            scheduledClassesCount: b._count?.liveSessions ?? 0,
-          }));
-          setBatches(mapped);
-          setIsLiveApi(true);
+    batchApi
+      .getAcademicTerms(instituteId)
+      .then((terms) => {
+        if (Array.isArray(terms)) {
+          setAcademicTerms(terms);
+          const currentTerm = terms.find((t) => t.isCurrent) || terms[0];
+          if (currentTerm && !newBatch.academicTermId) {
+            setNewBatch((prev) => ({ ...prev, academicTermId: currentTerm.id }));
+          }
         }
-      } catch (err: any) {
-        console.warn('Backend API unavailable, using verified mock batch data:', err.message);
-        setApiError(err.message);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    }
-    loadData();
-    return () => { isMounted = false; };
+      })
+      .catch(() => {});
   }, [instituteId]);
 
+  // Load live batches from PostgreSQL
+  const loadBatches = useCallback(async () => {
+    if (!instituteId) return;
+    setIsLoading(true);
+    setApiError(null);
+
+    try {
+      const res: any = await batchApi.getBatches(instituteId);
+      const rawBatches = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
+
+      const mapped: BatchItem[] = rawBatches.map((b: any) => ({
+        id: b.id,
+        name: b.name,
+        code: b.code,
+        courseId: b.courseId,
+        courseTitle: b.course?.title || 'Biblical Studies',
+        academicYearId: b.academicYearId,
+        academicYearName: b.academicYear?.name || '2026-2027',
+        termId: b.termId || b.academicTermId,
+        termName: b.academicTerm?.name || 'Semester',
+        status: b.status,
+        startDate: typeof b.startDate === 'string' ? b.startDate.slice(0, 10) : '2026-07-01',
+        endDate: typeof b.endDate === 'string' ? b.endDate.slice(0, 10) : '2026-12-31',
+        capacity: b.capacity,
+        enrolledCount: b._count?.enrolments ?? b.enrolledCount ?? 0,
+        leadTeacher: {
+          id: 't-faculty',
+          name: b.teachers?.[0]?.teacherProfile?.membership?.user?.fullName || 'Faculty Lead',
+        },
+        assistantsCount: Math.max(0, (b._count?.teachers ?? 1) - 1),
+        scheduledClassesCount: b._count?.liveSessions ?? 0,
+      }));
+
+      setBatches(mapped);
+    } catch (err: any) {
+      setBatches([]);
+      setApiError(err?.message || 'Failed to query live batches from PostgreSQL');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [instituteId]);
+
+  useEffect(() => {
+    loadBatches();
+  }, [loadBatches]);
+
   // Filter batches
-  const filtered = batches.filter((b) => {
-    const matchesSearch =
-      b.name.toLowerCase().includes(search.toLowerCase()) ||
-      b.code.toLowerCase().includes(search.toLowerCase()) ||
-      b.courseTitle.toLowerCase().includes(search.toLowerCase());
+  const filtered = useMemo(() => {
+    return batches.filter((b) => {
+      const matchesSearch =
+        b.name.toLowerCase().includes(search.toLowerCase()) ||
+        b.code.toLowerCase().includes(search.toLowerCase()) ||
+        b.courseTitle.toLowerCase().includes(search.toLowerCase());
 
-    const matchesStatus = statusFilter === 'ALL' || b.status === statusFilter;
-    const matchesTerm = termFilter === 'ALL' || b.termName === termFilter;
+      const matchesStatus = statusFilter === 'ALL' || b.status === statusFilter;
+      const matchesTerm = termFilter === 'ALL' || b.termName === termFilter;
 
-    return matchesSearch && matchesStatus && matchesTerm;
-  });
+      return matchesSearch && matchesStatus && matchesTerm;
+    });
+  }, [batches, search, statusFilter, termFilter]);
 
+  // Handle Create Batch
   const handleCreateBatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBatch.name || !newBatch.startDate || !newBatch.endDate) return;
+    if (!newBatch.name || !newBatch.courseId || !newBatch.startDate || !newBatch.endDate) return;
 
-    // Call live API if available
+    setIsSubmitting(true);
     try {
       await batchApi.createBatch(instituteId, {
-        courseId: 'c1',
+        courseId: newBatch.courseId,
         name: newBatch.name,
         code: newBatch.code || `B-${Date.now().toString().slice(-4)}`,
         startDate: newBatch.startDate,
         endDate: newBatch.endDate,
         capacity: Number(newBatch.capacity),
+        academicYearId: newBatch.academicYearId || undefined,
+        termId: newBatch.academicTermId || undefined,
       });
-      setIsLiveApi(true);
+
+      setShowCreateModal(false);
+      setNewBatch({
+        name: '',
+        code: '',
+        courseId: courses[0]?.id || '',
+        academicYearId: academicYears[0]?.id || '',
+        academicTermId: academicTerms[0]?.id || '',
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date(Date.now() + 120 * 24 * 3600 * 1000).toISOString().split('T')[0],
+        capacity: 40,
+      });
+      loadBatches();
     } catch (err: any) {
-      console.warn('Direct API creation failed or running standalone, updating UI state:', err.message);
+      alert(`Batch creation error: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    const created: BatchItem = {
-      id: `batch-${Date.now()}`,
-      name: newBatch.name,
-      code: newBatch.code || `B-${Date.now().toString().slice(-4)}`,
-      courseId: 'c1',
-      courseTitle: newBatch.courseTitle,
-      academicYearName: newBatch.academicYearName,
-      termName: newBatch.termName,
-      status: newBatch.status,
-      startDate: newBatch.startDate,
-      endDate: newBatch.endDate,
-      capacity: Number(newBatch.capacity),
-      enrolledCount: 0,
-      leadTeacher: {
-        id: 't-new',
-        name: newBatch.leadTeacherName,
-      },
-      assistantsCount: Number(newBatch.assistantsCount),
-      scheduledClassesCount: 0,
-    };
-
-    setBatches([created, ...batches]);
-    setShowCreateModal(false);
-    setNewBatch({
-      name: '',
-      code: '',
-      courseTitle: 'Diploma in Biblical Studies',
-      academicYearName: '2026-2027',
-      termName: 'Fall Semester 2026',
-      startDate: '2026-09-01',
-      endDate: '2026-12-31',
-      capacity: 40,
-      status: 'ACTIVE',
-      leadTeacherName: 'Dr. Timothy Keller',
-      assistantsCount: 1,
-    });
   };
 
   const handleSetCurrentYear = async (yearId: string) => {
@@ -357,36 +304,49 @@ export default function BatchesPage() {
       portalTitle="Institute Admin"
       portalRole="ADMIN"
       navItems={adminNav}
-      userName="Principal Admin"
+      userName="Samuel Admin"
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6">
+        {/* Error Alert */}
+        {apiError && (
+          <div className="p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-rose-600" />
+              <span>{apiError}</span>
+            </div>
+            <Button size="sm" variant="outline" onClick={loadBatches} className="gap-1 h-7 text-xs">
+              <RefreshCw size={12} /> Retry
+            </Button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-              <Calendar className="text-primary" size={26} />
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+              <Calendar className="text-blue-600" size={26} />
               Batches, Academic Terms & Scheduling
             </h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Manage cohort intakes, academic semesters, student capacities, faculty assignments and live timetables.
+            <p className="text-slate-500 text-xs mt-1">
+              Live PostgreSQL cohort intakes, academic periods, capacity quotas, and scheduled live classes.
             </p>
           </div>
           <div className="flex items-center gap-3">
             <Button
               variant="outline"
               onClick={() => setShowTermsModal(true)}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 text-xs"
             >
-              <CalendarDays size={16} />
+              <CalendarDays size={14} />
               Academic Terms
             </Button>
             <Button
               variant="primary"
               onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 text-xs"
             >
-              <Plus size={16} />
+              <Plus size={14} />
               Create New Batch
             </Button>
           </div>
@@ -398,25 +358,29 @@ export default function BatchesPage() {
             title="Total Cohorts"
             value={batches.length.toString()}
             trend="All Academic Periods"
-            icon={<Layers className="text-primary" size={22} />}
+            colorScheme="blue"
+            icon={<Layers className="text-blue-600" size={22} />}
           />
           <StatCard
             title="Active Batches"
             value={batches.filter((b) => b.status === 'ACTIVE').length.toString()}
             trend="In Session Now"
+            colorScheme="emerald"
             icon={<CheckCircle className="text-emerald-500" size={22} />}
           />
           <StatCard
             title="Upcoming Intakes"
             value={batches.filter((b) => b.status === 'UPCOMING').length.toString()}
             trend="Open for Admissions"
+            colorScheme="amber"
             icon={<Sparkles className="text-amber-500" size={22} />}
           />
           <StatCard
-            title="Live Classes Scheduled"
+            title="Live Classes"
             value={batches.reduce((acc, b) => acc + b.scheduledClassesCount, 0).toString()}
-            trend="With Conflict Protection"
-            icon={<Clock className="text-indigo-500" size={22} />}
+            trend="Scheduled Sessions"
+            colorScheme="purple"
+            icon={<Clock className="text-purple-500" size={22} />}
           />
         </div>
 
@@ -425,50 +389,52 @@ export default function BatchesPage() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="relative flex-1 max-w-md">
               <Search
-                size={18}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
               <input
                 type="text"
                 placeholder="Search batches by name, code or course..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                className="w-full pl-9 pr-4 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
               />
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Filter size={16} />
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <Filter size={14} />
                 <span>Term:</span>
               </div>
               <select
                 value={termFilter}
                 onChange={(e) => setTermFilter(e.target.value)}
-                className="text-sm border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="text-xs border rounded-xl px-3 py-2 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="ALL">All Academic Terms</option>
-                <option value="Fall Semester 2026">Fall Semester 2026</option>
-                <option value="Spring Semester 2027">Spring Semester 2027</option>
-                <option value="Spring Semester 2026">Spring Semester 2026</option>
+                {academicTerms.map((t) => (
+                  <option key={t.id} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
           {/* Status Tabs */}
-          <div className="flex items-center gap-2 border-t pt-3 overflow-x-auto text-sm">
+          <div className="flex items-center gap-2 border-t pt-3 overflow-x-auto text-xs">
             {['ALL', 'ACTIVE', 'UPCOMING', 'COMPLETED', 'ARCHIVED'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setStatusFilter(tab)}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
                   statusFilter === tab
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    ? 'bg-blue-600 text-white font-bold'
+                    : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
                 {tab.charAt(0) + tab.slice(1).toLowerCase()}
-                <span className="ml-1.5 text-xs opacity-80">
+                <span className="ml-1.5 text-[10px] opacity-80">
                   (
                   {tab === 'ALL'
                     ? batches.length
@@ -481,232 +447,241 @@ export default function BatchesPage() {
         </Card>
 
         {/* Batches Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {filtered.map((batch) => {
-            const fillPct = Math.round((batch.enrolledCount / batch.capacity) * 100);
-            const isNearFull = fillPct >= 85;
-
-            return (
-              <Card
-                key={batch.id}
-                className="p-5 flex flex-col justify-between hover:border-primary/50 transition-shadow hover:shadow-md"
-              >
-                <div className="space-y-4">
-                  {/* Top line: Name & Status */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-lg text-foreground hover:text-primary transition-colors">
-                          <Link href={`/admin/batches/${batch.id}`}>{batch.name}</Link>
-                        </h3>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                        <span className="font-mono bg-muted px-1.5 py-0.5 rounded font-medium">
-                          {batch.code}
-                        </span>
-                        <span>•</span>
-                        <span className="font-medium text-foreground">{batch.courseTitle}</span>
-                      </div>
-                    </div>
-                    <div>{getStatusBadge(batch.status)}</div>
-                  </div>
-
-                  {/* Dates & Academic Period */}
-                  <div className="grid grid-cols-2 gap-2 text-xs bg-muted/40 p-3 rounded-lg">
-                    <div>
-                      <span className="text-muted-foreground block">Period:</span>
-                      <span className="font-medium text-foreground">
-                        {batch.startDate} to {batch.endDate}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground block">Term:</span>
-                      <span className="font-medium text-foreground">
-                        {batch.termName || 'General'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Capacity Meter */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground flex items-center gap-1">
-                        <Users size={14} />
-                        Enrolment Capacity:
-                      </span>
-                      <span className={`font-semibold ${isNearFull ? 'text-amber-600' : 'text-foreground'}`}>
-                        {batch.enrolledCount} / {batch.capacity} Students ({fillPct}%)
-                      </span>
-                    </div>
-                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          fillPct >= 100
-                            ? 'bg-rose-500'
-                            : fillPct >= 80
-                            ? 'bg-amber-500'
-                            : 'bg-emerald-500'
-                        }`}
-                        style={{ width: `${Math.min(fillPct, 100)}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Faculty & Classes info */}
-                  <div className="pt-2 border-t flex items-center justify-between text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
-                        {batch.leadTeacher.name[0]}
-                      </div>
-                      <div>
-                        <span className="font-medium text-foreground">{batch.leadTeacher.name}</span>
-                        <span className="text-muted-foreground ml-1">(Lead)</span>
-                        {batch.assistantsCount > 0 && (
-                          <span className="ml-1.5 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                            +{batch.assistantsCount} Asst
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 font-medium text-foreground">
-                      <Clock size={14} className="text-primary" />
-                      <span>{batch.scheduledClassesCount} Live Classes</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Footer Action */}
-                <div className="mt-5 pt-3 border-t flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    Strict Multi-Tenant Isolated
-                  </span>
-                  <Link href={`/admin/batches/${batch.id}`}>
-                    <Button variant="primary" size="sm" className="flex items-center gap-1.5">
-                      Batch Studio
-                      <ArrowRight size={14} />
-                    </Button>
-                  </Link>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-
-        {filtered.length === 0 && (
+        {isLoading ? (
+          <div className="bg-white rounded-2xl p-16 text-center text-slate-400 border border-slate-200">
+            <div className="inline-flex items-center gap-2 text-sm">
+              <RefreshCw size={18} className="animate-spin text-blue-600" />
+              <span>Querying verified batches from PostgreSQL...</span>
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
           <Card className="p-12 text-center">
-            <Calendar className="mx-auto text-muted-foreground mb-3 opacity-40" size={48} />
-            <h3 className="text-lg font-semibold">No Batches Found</h3>
-            <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-              No cohorts match your current search or filter criteria. Try clearing filters or create a new batch.
+            <Calendar className="mx-auto text-slate-300 mb-3" size={40} />
+            <h3 className="text-sm font-bold text-slate-700">No Batches Found in Database</h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+              Click &apos;Create New Batch&apos; above to record a new cohort intake in PostgreSQL.
             </p>
           </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {filtered.map((batch) => {
+              const fillPct = Math.round((batch.enrolledCount / (batch.capacity || 1)) * 100);
+              const isNearFull = fillPct >= 85;
+
+              return (
+                <Card
+                  key={batch.id}
+                  className="p-5 flex flex-col justify-between hover:border-blue-400 transition-shadow hover:shadow-md"
+                >
+                  <div className="space-y-4">
+                    {/* Top line: Name & Status */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-base text-slate-900 hover:text-blue-600 transition-colors">
+                            <Link href={`/admin/batches/${batch.id}`}>{batch.name}</Link>
+                          </h3>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                          <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded font-medium text-slate-700">
+                            {batch.code}
+                          </span>
+                          <span>•</span>
+                          <span className="font-semibold text-slate-800">{batch.courseTitle}</span>
+                        </div>
+                      </div>
+                      <div>{getStatusBadge(batch.status)}</div>
+                    </div>
+
+                    {/* Dates & Academic Period */}
+                    <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Period</span>
+                        <span className="font-medium text-slate-800 mt-0.5 block">
+                          {batch.startDate} to {batch.endDate}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Term</span>
+                        <span className="font-medium text-slate-800 mt-0.5 block">
+                          {batch.termName || 'General'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Capacity Meter */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500 flex items-center gap-1">
+                          <Users size={13} />
+                          Enrolment Capacity:
+                        </span>
+                        <span className={`font-semibold ${isNearFull ? 'text-amber-600' : 'text-slate-800'}`}>
+                          {batch.enrolledCount} / {batch.capacity} Students ({fillPct}%)
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            fillPct >= 100
+                              ? 'bg-rose-500'
+                              : fillPct >= 80
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.min(fillPct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Faculty & Classes info */}
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs">
+                          {batch.leadTeacher?.name?.[0] || 'F'}
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-800">{batch.leadTeacher.name}</span>
+                          <span className="text-slate-400 ml-1">(Lead)</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 font-medium text-slate-700">
+                        <Clock size={13} className="text-blue-600" />
+                        <span>{batch.scheduledClassesCount} Live Sessions</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Action */}
+                  <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-400">
+                      PostgreSQL Verified Batch
+                    </span>
+                    <Link href={`/admin/batches/${batch.id}`}>
+                      <Button variant="primary" size="sm" className="flex items-center gap-1 text-xs">
+                        Batch Studio
+                        <ArrowRight size={13} />
+                      </Button>
+                    </Link>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
         )}
       </div>
 
       {/* CREATE BATCH MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-background rounded-xl border max-w-xl w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border max-w-xl w-full p-6 shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b pb-3">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <Calendar className="text-primary" size={20} />
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Calendar className="text-blue-600" size={18} />
                 Create New Academic Batch
               </h2>
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="text-muted-foreground hover:text-foreground p-1 rounded-md"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             <form onSubmit={handleCreateBatch} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-xs font-semibold text-foreground">Batch Name *</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-semibold text-slate-700">Batch Name *</label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Diploma Cohort Alpha 2026"
                     value={newBatch.name}
                     onChange={(e) => setNewBatch({ ...newBatch, name: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Batch Code (Identifier)</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Batch Code (Identifier)</label>
                   <input
                     type="text"
                     placeholder="e.g. DIB-2026-A"
                     value={newBatch.code}
                     onChange={(e) => setNewBatch({ ...newBatch, code: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Course *</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Course Selection *</label>
                   <select
-                    value={newBatch.courseTitle}
-                    onChange={(e) => setNewBatch({ ...newBatch, courseTitle: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    value={newBatch.courseId}
+                    onChange={(e) => setNewBatch({ ...newBatch, courseId: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="Diploma in Biblical Studies">Diploma in Biblical Studies</option>
-                    <option value="New Testament Greek I">New Testament Greek I</option>
-                    <option value="Systematic Theology & Doctrine">Systematic Theology & Doctrine</option>
-                    <option value="Church History & Patristics">Church History & Patristics</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Academic Year</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Academic Year</label>
                   <select
-                    value={newBatch.academicYearName}
-                    onChange={(e) => setNewBatch({ ...newBatch, academicYearName: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    value={newBatch.academicYearId}
+                    onChange={(e) => setNewBatch({ ...newBatch, academicYearId: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="2026-2027">2026-2027 (Current)</option>
-                    <option value="2025-2026">2025-2026</option>
+                    {academicYears.map((ay) => (
+                      <option key={ay.id} value={ay.id}>
+                        {ay.name} {ay.isCurrent ? '(Current)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Academic Term</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Academic Term</label>
                   <select
-                    value={newBatch.termName}
-                    onChange={(e) => setNewBatch({ ...newBatch, termName: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    value={newBatch.academicTermId}
+                    onChange={(e) => setNewBatch({ ...newBatch, academicTermId: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="Fall Semester 2026">Fall Semester 2026</option>
-                    <option value="Spring Semester 2027">Spring Semester 2027</option>
+                    {academicTerms.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} {t.isCurrent ? '(Current)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Start Date *</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Start Date *</label>
                   <input
                     type="date"
                     required
                     value={newBatch.startDate}
                     onChange={(e) => setNewBatch({ ...newBatch, startDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">End Date *</label>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">End Date *</label>
                   <input
                     type="date"
                     required
                     value={newBatch.endDate}
                     onChange={(e) => setNewBatch({ ...newBatch, endDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Student Capacity *</label>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-semibold text-slate-700">Student Capacity *</label>
                   <input
                     type="number"
                     min="1"
@@ -714,37 +689,23 @@ export default function BatchesPage() {
                     required
                     value={newBatch.capacity}
                     onChange={(e) => setNewBatch({ ...newBatch, capacity: Number(e.target.value) })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2 text-xs border rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <span className="text-[11px] text-muted-foreground">
-                    Enforced concurrency-safely on backend.
-                  </span>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">Lead Teacher *</label>
-                  <select
-                    value={newBatch.leadTeacherName}
-                    onChange={(e) => setNewBatch({ ...newBatch, leadTeacherName: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    <option value="Dr. Timothy Keller">Dr. Timothy Keller (Senior Faculty)</option>
-                    <option value="Prof. Sarah Jenkins">Prof. Sarah Jenkins (Biblical Languages)</option>
-                    <option value="Rev. Matthew Henry">Rev. Matthew Henry (Systematic Theology)</option>
-                  </select>
                 </div>
               </div>
 
-              <div className="pt-4 border-t flex items-center justify-end gap-3">
+              <div className="pt-3 border-t flex items-center justify-end gap-2">
                 <Button
                   type="button"
                   variant="outline"
+                  size="sm"
                   onClick={() => setShowCreateModal(false)}
+                  disabled={isSubmitting}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary">
-                  Create Batch Cohort
+                <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
+                  {isSubmitting ? 'Saving to Database...' : 'Create Batch'}
                 </Button>
               </div>
             </form>
@@ -754,43 +715,38 @@ export default function BatchesPage() {
 
       {/* ACADEMIC TERMS MANAGER MODAL */}
       {showTermsModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-background rounded-xl border max-w-2xl w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border max-w-2xl w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
-                <h2 className="text-xl font-bold flex items-center gap-2">
-                  <CalendarDays className="text-primary" size={20} />
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <CalendarDays className="text-blue-600" size={18} />
                   Academic Period & Term Boundaries
                 </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Requirement 6: Ensure terms strictly stay within their parent academic year boundaries.
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Live PostgreSQL academic years and semesters configured for this institute.
                 </p>
               </div>
               <button
                 onClick={() => setShowTermsModal(false)}
-                className="text-muted-foreground hover:text-foreground p-1 rounded-md"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             <div className="space-y-4">
-              <div className="bg-muted/50 p-4 rounded-lg space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Active Academic Years ({academicYears.length > 0 ? 'Live Database' : 'Default Demo'})
-                  </h4>
-                  {isLiveApi && (
-                    <Badge variant="success">Cloud PostgreSQL 18.6 Connected</Badge>
-                  )}
-                </div>
-                <div className="divide-y text-sm">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Active Academic Years ({academicYears.length} in Database)
+                </h4>
+                <div className="divide-y divide-slate-100 text-xs">
                   {academicYears.length > 0 ? (
                     academicYears.map((ay) => (
                       <div key={ay.id} className="py-2.5 flex items-center justify-between">
                         <div>
-                          <span className="font-semibold text-foreground">{ay.name}</span>
-                          <span className="text-xs text-muted-foreground block">
+                          <span className="font-bold text-slate-900">{ay.name}</span>
+                          <span className="text-[11px] text-slate-500 block">
                             Boundary: {ay.startDate.slice(0, 10)} to {ay.endDate.slice(0, 10)}
                           </span>
                         </div>
@@ -810,42 +766,23 @@ export default function BatchesPage() {
                       </div>
                     ))
                   ) : (
-                    <>
-                      <div className="py-2.5 flex items-center justify-between">
-                        <div>
-                          <span className="font-semibold text-foreground">2026-2027 Academic Year</span>
-                          <span className="text-xs text-muted-foreground block">
-                            Boundary: June 1, 2026 to May 31, 2027
-                          </span>
-                        </div>
-                        <Badge variant="success">Current Period</Badge>
-                      </div>
-                      <div className="py-2.5 flex items-center justify-between">
-                        <div>
-                          <span className="font-semibold text-foreground">2025-2026 Academic Year</span>
-                          <span className="text-xs text-muted-foreground block">
-                            Boundary: June 1, 2025 to May 31, 2026
-                          </span>
-                        </div>
-                        <Badge variant="neutral">Archived</Badge>
-                      </div>
-                    </>
+                    <div className="py-4 text-center text-slate-400">No academic years recorded</div>
                   )}
                 </div>
               </div>
 
-              <div className="bg-muted/50 p-4 rounded-lg space-y-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Configured Semesters / Terms ({academicTerms.length > 0 ? 'Live Database' : 'Default Demo'})
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Configured Semesters / Terms ({academicTerms.length} in Database)
                 </h4>
-                <div className="divide-y text-sm">
+                <div className="divide-y divide-slate-100 text-xs">
                   {academicTerms.length > 0 ? (
                     academicTerms.map((term) => (
                       <div key={term.id} className="py-2 flex items-center justify-between">
                         <div>
-                          <span className="font-medium text-foreground">{term.name}</span>
-                          <span className="text-xs text-muted-foreground block">
-                            {term.startDate.slice(0, 10)} - {term.endDate.slice(0, 10)} (Within Year Bounds)
+                          <span className="font-semibold text-slate-800">{term.name}</span>
+                          <span className="text-[11px] text-slate-500 block">
+                            {term.startDate.slice(0, 10)} to {term.endDate.slice(0, 10)}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -864,37 +801,14 @@ export default function BatchesPage() {
                       </div>
                     ))
                   ) : (
-                    <>
-                      <div className="py-2 flex items-center justify-between">
-                        <div>
-                          <span className="font-medium text-foreground">Fall Semester 2026</span>
-                          <span className="text-xs text-muted-foreground block">
-                            Aug 1, 2026 - Dec 20, 2026 (Within Year Bounds)
-                          </span>
-                        </div>
-                        <span className="text-xs bg-emerald-500/10 text-emerald-600 font-semibold px-2 py-0.5 rounded">
-                          2 Batches Active
-                        </span>
-                      </div>
-                      <div className="py-2 flex items-center justify-between">
-                        <div>
-                          <span className="font-medium text-foreground">Spring Semester 2027</span>
-                          <span className="text-xs text-muted-foreground block">
-                            Jan 10, 2027 - May 20, 2027 (Within Year Bounds)
-                          </span>
-                        </div>
-                        <span className="text-xs bg-indigo-500/10 text-indigo-600 font-semibold px-2 py-0.5 rounded">
-                          1 Batch Upcoming
-                        </span>
-                      </div>
-                    </>
+                    <div className="py-4 text-center text-slate-400">No academic terms recorded</div>
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="pt-4 border-t flex justify-end">
-              <Button variant="primary" onClick={() => setShowTermsModal(false)}>
+            <div className="pt-3 border-t flex justify-end">
+              <Button variant="primary" size="sm" onClick={() => setShowTermsModal(false)}>
                 Done
               </Button>
             </div>

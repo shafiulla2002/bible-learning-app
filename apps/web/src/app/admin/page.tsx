@@ -358,9 +358,15 @@ function renderGrowthPill(
 }
 
 export default function AdminDashboardPage() {
-  const [instituteId, setInstituteId] = useState<string>('');
-  const [viewerName, setViewerName] = useState<string>('Administrator');
-  const [instituteDisplayName, setInstituteDisplayName] = useState<string>('Bible Institute');
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('current_institute_id');
+      if (stored) return stored;
+    }
+    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+  });
+  const [viewerName, setViewerName] = useState<string>('Samuel Admin');
+  const [instituteDisplayName, setInstituteDisplayName] = useState<string>('Grace Bible Institute');
 
   // Explicit Demo Mode Toggle (Default: strictly false in production unless explicit query/env)
   const [demoMode, setDemoMode] = useState<boolean>(() => {

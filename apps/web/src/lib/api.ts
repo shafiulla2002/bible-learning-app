@@ -74,6 +74,288 @@ export async function apiFetch<T>(
   return response.json();
 }
 
+function buildCleanQueryString(params?: Record<string, any>): string {
+  if (!params) return '';
+  const searchParams = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      searchParams.set(k, String(v));
+    }
+  }
+  const str = searchParams.toString();
+  return str ? `?${str}` : '';
+}
+
+// -----------------------------------------------------------------------------
+// STUDENT SERVICES
+// -----------------------------------------------------------------------------
+
+export interface StudentProfileSummaryDto {
+  id: string;
+  userId: string;
+  admissionNo: string;
+  fullName: string;
+  phoneNumber: string;
+  email?: string;
+  preferredLanguage: string;
+  gender?: string;
+  church?: string;
+  status: 'APPLICANT' | 'APPLIED' | 'UNDER_REVIEW' | 'APPROVED' | 'ACTIVE' | 'INACTIVE' | 'REJECTED' | 'COMPLETED';
+  admissionDate: string;
+  enrolledCourseName?: string;
+  enrolledBatchName?: string;
+  totalEnrolments: number;
+}
+
+export interface StudentDetailDto extends StudentProfileSummaryDto {
+  dateOfBirth?: string;
+  educationLevel?: string;
+  emergencyContact?: string;
+  address?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    postalCode?: string;
+  };
+  guardian?: {
+    name?: string;
+    relation?: string;
+    phoneNumber?: string;
+    email?: string;
+  };
+  enrolments: Array<{
+    id: string;
+    courseId: string;
+    courseTitle: string;
+    batchId?: string;
+    batchName?: string;
+    status: string;
+    progressPct: number;
+    enrolledAt: string;
+  }>;
+  admissionHistory: Array<{
+    id: string;
+    status: string;
+    statement?: string;
+    interviewNotes?: string;
+    interviewAt?: string;
+    createdAt: string;
+  }>;
+}
+
+export interface PaginatedStudentsDto {
+  data: StudentProfileSummaryDto[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
+}
+
+export const studentApi = {
+  getStudents: (
+    instituteId: string,
+    params?: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      courseId?: string;
+      batchId?: string;
+    },
+  ) => {
+    const q = buildCleanQueryString(params);
+    return apiFetch<PaginatedStudentsDto>(`/institutes/${instituteId}/students${q}`);
+  },
+
+  getStudent: (instituteId: string, studentId: string) =>
+    apiFetch<StudentDetailDto>(`/institutes/${instituteId}/students/${studentId}`),
+
+  createStudent: (instituteId: string, data: any) =>
+    apiFetch<StudentProfileSummaryDto>(`/institutes/${instituteId}/students`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateStudent: (instituteId: string, studentId: string, data: any) =>
+    apiFetch<StudentDetailDto>(`/institutes/${instituteId}/students/${studentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  updateStatus: (instituteId: string, studentId: string, status: string, notes?: string) =>
+    apiFetch<{ id: string; status: string; notes?: string }>(
+      `/institutes/${instituteId}/students/${studentId}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status, notes }),
+      },
+    ),
+
+  enrollStudent: (instituteId: string, studentId: string, courseId: string, batchId?: string) =>
+    apiFetch<{ id: string; studentProfileId: string; courseId: string; batchId?: string; status: string }>(
+      `/institutes/${instituteId}/students/${studentId}/enrollments`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ courseId, batchId }),
+      },
+    ),
+
+  bulkImport: (instituteId: string, rows: any[], execute = false) =>
+    apiFetch<{ importedCount: number; errors: any[] }>(`/institutes/${instituteId}/students/bulk-import`, {
+      method: 'POST',
+      body: JSON.stringify({ rows, execute }),
+    }),
+};
+
+// -----------------------------------------------------------------------------
+// COURSE & CURRICULUM SERVICES
+// -----------------------------------------------------------------------------
+
+export interface CourseCategoryDto {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+}
+
+export interface LessonResourceDto {
+  id: string;
+  title: string;
+  kind: string;
+  storageKey?: string;
+  downloadable?: boolean;
+}
+
+export interface LessonDto {
+  id: string;
+  title: string;
+  type: string;
+  body?: string | null;
+  durationSec?: number;
+  isPreview?: boolean;
+  isMandatory?: boolean;
+  position: number;
+  resources?: LessonResourceDto[];
+}
+
+export interface ChapterDto {
+  id: string;
+  title: string;
+  position: number;
+  lessons: LessonDto[];
+}
+
+export interface ModuleDto {
+  id: string;
+  title: string;
+  position: number;
+  chapters: ChapterDto[];
+}
+
+export interface CourseDto {
+  id: string;
+  instituteId: string;
+  categoryId: string;
+  category?: CourseCategoryDto;
+  title: string;
+  slug: string;
+  description: string;
+  level: string;
+  language: string;
+  price: number; // in paise
+  pricing: string;
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  coverImage?: string | null;
+  modules?: ModuleDto[];
+  modulesCount?: number;
+  lessonsCount?: number;
+  enrolledCount?: number;
+  _count?: {
+    enrolments: number;
+    batches: number;
+    instructors: number;
+  };
+}
+
+export interface PaginatedCoursesDto {
+  data: CourseDto[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export const courseApi = {
+  getCourses: (
+    instituteId: string,
+    params?: {
+      status?: string;
+      categoryId?: string;
+      search?: string;
+      page?: number;
+      limit?: number;
+    },
+  ) => {
+    const q = buildCleanQueryString(params);
+    return apiFetch<PaginatedCoursesDto>(`/institutes/${instituteId}/courses${q}`);
+  },
+
+  getCategories: (instituteId: string) =>
+    apiFetch<CourseCategoryDto[]>(`/institutes/${instituteId}/courses/categories`),
+
+  getCourse: (instituteId: string, courseId: string) =>
+    apiFetch<CourseDto>(`/institutes/${instituteId}/courses/${courseId}`),
+
+  createCourse: (instituteId: string, data: any) =>
+    apiFetch<CourseDto>(`/institutes/${instituteId}/courses`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateCourse: (instituteId: string, courseId: string, data: any) =>
+    apiFetch<CourseDto>(`/institutes/${instituteId}/courses/${courseId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  updateStatus: (instituteId: string, courseId: string, status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED') =>
+    apiFetch<CourseDto>(`/institutes/${instituteId}/courses/${courseId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  createCategory: (instituteId: string, data: { name: string; slug: string; description?: string }) =>
+    apiFetch<CourseCategoryDto>(`/institutes/${instituteId}/courses/categories`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createModule: (instituteId: string, courseId: string, data: { title: string; position?: number }) =>
+    apiFetch<ModuleDto>(`/institutes/${instituteId}/courses/${courseId}/modules`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createChapter: (instituteId: string, courseId: string, moduleId: string, data: { title: string; position?: number }) =>
+    apiFetch<ChapterDto>(`/institutes/${instituteId}/courses/${courseId}/modules/${moduleId}/chapters`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createLesson: (instituteId: string, courseId: string, chapterId: string, data: any) =>
+    apiFetch<LessonDto>(`/institutes/${instituteId}/courses/${courseId}/chapters/${chapterId}/lessons`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
 // -----------------------------------------------------------------------------
 // BATCHES & ACADEMIC SERVICES
 // -----------------------------------------------------------------------------
@@ -339,6 +621,25 @@ export const attendanceApi = {
   getOverview: (instituteId: string, params?: Record<string, any>) => {
     const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
     return apiFetch<AttendanceOverviewDto>(`/institutes/${instituteId}/attendance/overview${q}`);
+  },
+
+  // Paginated attendance records list
+  getRecords: (instituteId: string, params?: Record<string, any>) => {
+    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return apiFetch<{
+      data: Array<{
+        id: string;
+        date: string;
+        status: 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+        mode: string;
+        remarks?: string;
+        markedAt?: string;
+        student: { id: string; admissionNo: string; fullName: string };
+        batch: { id: string; name: string };
+        course: { title: string };
+      }>;
+      meta: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/institutes/${instituteId}/attendance/records${q}`);
   },
 
   // Batch roster for roll-call marking
@@ -952,18 +1253,6 @@ export async function resolveVerifiedAdminContext(
   return cachedContextPromise;
 }
 
-function buildCleanQueryString(params?: Record<string, any>): string {
-  if (!params) return '';
-  const searchParams = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== '') {
-      searchParams.set(k, String(v));
-    }
-  }
-  const str = searchParams.toString();
-  return str ? `?${str}` : '';
-}
-
 export const dashboardApi = {
   getContext: () => resolveVerifiedAdminContext(),
 
@@ -1271,4 +1560,125 @@ export const notificationsApi = {
         body: JSON.stringify(data),
       },
     ),
+};
+
+// -----------------------------------------------------------------------------
+// FINANCE, FEE MANAGEMENT & INVOICING (MILESTONE 2.5)
+// -----------------------------------------------------------------------------
+
+export interface FinanceOverviewDto {
+  summary: {
+    totalInvoicedPaise: number;
+    totalPaidPaise: number;
+    totalPendingPaise: number;
+    overdueAmountPaise: number;
+    totalInvoicesCount: number;
+    paidInvoicesCount: number;
+    pendingInvoicesCount: number;
+  };
+  categories: Array<{
+    id: string;
+    name: string;
+    code: string;
+    description?: string;
+    isActive: boolean;
+  }>;
+  structures: Array<{
+    id: string;
+    name: string;
+    code: string;
+    periodType: string;
+    amount: number;
+    currency: string;
+    description?: string;
+    isActive: boolean;
+    feeCategoryId: string;
+    categoryName: string;
+    academicYearName?: string;
+    allocationsCount: number;
+  }>;
+  invoices: Array<{
+    id: string;
+    invoiceNumber: string;
+    status: 'DRAFT' | 'ISSUED' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE' | 'CANCELLED';
+    issueDate: string | null;
+    dueDate: string | null;
+    totalAmount: number;
+    paidAmount: number;
+    balanceAmount: number;
+    currency: string;
+    notes?: string;
+    studentProfileId: string;
+    admissionNo: string;
+    studentName: string;
+    studentPhone: string;
+  }>;
+  payments: Array<{
+    id: string;
+    paymentNumber: string;
+    amount: number;
+    reversedAmount: number;
+    netAmount: number;
+    paymentMode: string;
+    paymentDate: string;
+    status: string;
+    referenceNumber?: string;
+    remarks?: string;
+    invoiceId: string;
+    invoiceNumber: string;
+    studentProfileId: string;
+    admissionNo: string;
+    studentName: string;
+    receiptNumber?: string;
+  }>;
+}
+
+export const financeApi = {
+  getOverview: (instituteId: string) =>
+    apiFetch<FinanceOverviewDto>(`/institutes/${instituteId}/finance/overview`),
+
+  createFeeStructure: (
+    instituteId: string,
+    data: {
+      name: string;
+      code?: string;
+      categoryName: string;
+      periodType: string;
+      amountInRupees: number;
+      description?: string;
+    },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/finance/structures`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  issueInvoice: (
+    instituteId: string,
+    data: {
+      studentProfileId: string;
+      feeStructureId: string;
+      dueDate?: string;
+      notes?: string;
+    },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/finance/invoices`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  recordPayment: (
+    instituteId: string,
+    data: {
+      invoiceId: string;
+      amountInRupees: number;
+      paymentMode: string;
+      referenceNumber?: string;
+      remarks?: string;
+    },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/finance/payments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };

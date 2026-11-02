@@ -1,249 +1,195 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   CalendarCheck,
   Calendar,
-  Users,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  TrendingUp,
+  Download,
   Search,
   Filter,
-  Download,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  HelpCircle,
-  TrendingUp,
-  FileSpreadsheet,
-  AlertCircle,
   Edit3,
-  Check,
   X,
+  Check,
   History,
+  HelpCircle,
   BookOpen,
-  LayoutDashboard,
-  GraduationCap,
+  Users,
   CreditCard,
   Settings,
+  GraduationCap,
+  Building2,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import { PortalShell } from '@/components/layout/portal-shell';
 import { StatCard } from '@/components/ui/stat-card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { attendanceApi, AttendanceOverviewDto, AttendanceRecordDto } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  attendanceApi,
+  batchApi,
+  AttendanceOverviewDto,
+  BatchDto,
+  resolveVerifiedAdminContext,
+} from '@/lib/api';
 
 const adminNav = [
-  { label: 'Overview', href: '/admin', icon: <LayoutDashboard size={18} /> },
-  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} />, badge: '3 Pending' },
+  { label: 'Overview', href: '/admin', icon: <Building2 size={18} /> },
+  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} /> },
   { label: 'Faculty & Teachers', href: '/admin/teachers', icon: <GraduationCap size={18} /> },
   { label: 'Courses & Curriculum', href: '/admin/courses', icon: <BookOpen size={18} /> },
   { label: 'Batches & Classes', href: '/admin/batches', icon: <Calendar size={18} /> },
   { label: 'Attendance', href: '/admin/attendance', icon: <CalendarCheck size={18} /> },
   { label: 'Finance & Payments', href: '/admin/finance', icon: <CreditCard size={18} /> },
-  { label: 'Institute Settings', href: '/admin/settings', icon: <Settings size={18} /> },
 ];
 
-const mockOverview: AttendanceOverviewDto = {
-  summary: {
-    totalRecords: 148,
-    presentCount: 122,
-    lateCount: 14,
-    absentCount: 8,
-    excusedCount: 4,
-    attendancePercentage: 94,
-  },
-  batches: [
-    {
-      batchId: 'batch-alpha-101',
-      batchName: 'Diploma Cohort Alpha 2026',
-      courseTitle: 'Diploma in Biblical Studies',
-      academicYear: '2026-2027',
-      term: 'Fall Term',
-      totalEnrolled: 36,
-      totalRecords: 72,
-      presentCount: 62,
-      lateCount: 6,
-      absentCount: 3,
-      excusedCount: 1,
-      attendancePercentage: 96,
-    },
-    {
-      batchId: 'batch-beta-201',
-      batchName: 'Evening Greek Intensive',
-      courseTitle: 'New Testament Greek I',
-      academicYear: '2026-2027',
-      term: 'Fall Term',
-      totalEnrolled: 25,
-      totalRecords: 50,
-      presentCount: 39,
-      lateCount: 5,
-      absentCount: 4,
-      excusedCount: 2,
-      attendancePercentage: 92,
-    },
-    {
-      batchId: 'batch-gamma-301',
-      batchName: 'Hermeneutics Weekend Cohort',
-      courseTitle: 'Biblical Hermeneutics',
-      academicYear: '2026-2027',
-      term: 'Fall Term',
-      totalEnrolled: 18,
-      totalRecords: 26,
-      presentCount: 21,
-      lateCount: 3,
-      absentCount: 1,
-      excusedCount: 1,
-      attendancePercentage: 96,
-    },
-  ],
-};
-
-const mockRecords: AttendanceRecordDto[] = [
-  {
-    id: 'att-1',
-    date: '2026-10-30',
-    studentProfileId: 'sp-1',
-    admissionNo: 'ADM-2026-001',
-    studentName: 'David Ben-Gurion',
-    status: 'PRESENT',
-    mode: 'DAILY_BATCH',
-    remarks: 'Punctual & engaged',
-    markedAt: '2026-10-30T09:05:00Z',
-    hasBeenEdited: false,
-  },
-  {
-    id: 'att-2',
-    date: '2026-10-30',
-    studentProfileId: 'sp-2',
-    admissionNo: 'ADM-2026-002',
-    studentName: 'Hannah Abbott',
-    status: 'LATE',
-    mode: 'DAILY_BATCH',
-    remarks: '10 mins transit delay',
-    markedAt: '2026-10-30T09:15:00Z',
-    hasBeenEdited: false,
-  },
-  {
-    id: 'att-3',
-    date: '2026-10-30',
-    studentProfileId: 'sp-3',
-    admissionNo: 'ADM-2026-003',
-    studentName: 'Jonathan Edwards',
-    status: 'EXCUSED',
-    mode: 'DAILY_BATCH',
-    remarks: 'Medical leave approved by Dean',
-    markedAt: '2026-10-30T08:50:00Z',
-    hasBeenEdited: true,
-  },
-  {
-    id: 'att-4',
-    date: '2026-10-30',
-    studentProfileId: 'sp-4',
-    admissionNo: 'ADM-2026-004',
-    studentName: 'Sarah Jenkins',
-    status: 'ABSENT',
-    mode: 'DAILY_BATCH',
-    remarks: 'Unexcused absence',
-    markedAt: '2026-10-30T09:30:00Z',
-    hasBeenEdited: false,
-  },
-  {
-    id: 'att-5',
-    date: '2026-10-29',
-    studentProfileId: 'sp-1',
-    admissionNo: 'ADM-2026-001',
-    studentName: 'David Ben-Gurion',
-    status: 'PRESENT',
-    mode: 'LIVE_SESSION',
-    liveSessionTitle: 'Greek Verb Morphology Q&A',
-    remarks: null,
-    markedAt: '2026-10-29T18:02:00Z',
-    hasBeenEdited: false,
-  },
-];
+export interface AttendanceRecordItem {
+  id: string;
+  date: string;
+  status: 'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED';
+  mode: string;
+  remarks?: string;
+  markedAt?: string;
+  student: {
+    id: string;
+    admissionNo: string;
+    fullName: string;
+  };
+  batch: {
+    id: string;
+    name: string;
+  };
+  course: {
+    title: string;
+  };
+}
 
 export default function AdminAttendancePage() {
-  const [instituteId, setInstituteId] = useState<string>('inst-default');
-  const [overview, setOverview] = useState<AttendanceOverviewDto>(mockOverview);
-  const [records, setRecords] = useState<AttendanceRecordDto[]>(mockRecords);
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('current_institute_id');
+      if (stored) return stored;
+    }
+    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+  });
+
+  // Genuine Database State (Strict Zero-Mock: empty by default)
+  const [overview, setOverview] = useState<AttendanceOverviewDto | null>(null);
+  const [records, setRecords] = useState<AttendanceRecordItem[]>([]);
+  const [batches, setBatches] = useState<BatchDto[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Filters
   const [selectedBatchId, setSelectedBatchId] = useState<string>('ALL');
-  const [selectedMode, setSelectedMode] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [dateFilter, setDateFilter] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [editingRecord, setEditingRecord] = useState<AttendanceRecordDto | null>(null);
+
+  // Edit record modal
+  const [editingRecord, setEditingRecord] = useState<AttendanceRecordItem | null>(null);
   const [editStatus, setEditStatus] = useState<'PRESENT' | 'LATE' | 'ABSENT' | 'EXCUSED'>('PRESENT');
   const [editRemarks, setEditRemarks] = useState<string>('');
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Resolve admin context
+  useEffect(() => {
+    let active = true;
+    resolveVerifiedAdminContext()
+      .then((ctx) => {
+        if (!active) return;
+        if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Fetch batches for filter dropdown
+  useEffect(() => {
+    if (!instituteId) return;
+    batchApi
+      .getBatches(instituteId)
+      .then((res: any) => {
+        const raw = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
+        setBatches(raw);
+      })
+      .catch(() => {});
+  }, [instituteId]);
+
+  // Load genuine overview and records from PostgreSQL
+  const loadAttendanceData = useCallback(async () => {
+    if (!instituteId) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const overviewParams: any = {};
+      if (selectedBatchId !== 'ALL') overviewParams.batchId = selectedBatchId;
+
+      const recordsParams: any = {};
+      if (selectedBatchId !== 'ALL') recordsParams.batchId = selectedBatchId;
+      if (selectedStatus !== 'ALL') recordsParams.status = selectedStatus;
+      if (dateFilter) recordsParams.date = dateFilter;
+      if (searchQuery.trim()) recordsParams.search = searchQuery.trim();
+
+      const [overviewRes, recordsRes] = await Promise.allSettled([
+        attendanceApi.getOverview(instituteId, overviewParams),
+        attendanceApi.getRecords(instituteId, recordsParams),
+      ]);
+
+      if (overviewRes.status === 'fulfilled' && overviewRes.value) {
+        setOverview(overviewRes.value);
+      } else {
+        setOverview(null);
+      }
+
+      if (recordsRes.status === 'fulfilled' && recordsRes.value && Array.isArray(recordsRes.value.data)) {
+        setRecords(recordsRes.value.data as any);
+      } else {
+        setRecords([]);
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to query attendance from PostgreSQL');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [instituteId, selectedBatchId, selectedStatus, dateFilter, searchQuery]);
 
   useEffect(() => {
-    // Attempt real fetch if API is reachable
-    const fetchAttendanceData = async () => {
-      try {
-        const storedInst = typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : null;
-        const currentInst = storedInst || 'inst-default';
-        setInstituteId(currentInst);
+    loadAttendanceData();
+  }, [loadAttendanceData]);
 
-        const params: any = {};
-        if (selectedBatchId !== 'ALL') params.batchId = selectedBatchId;
-        if (selectedMode !== 'ALL') params.mode = selectedMode;
-        if (dateFilter) {
-          params.startDate = dateFilter;
-          params.endDate = dateFilter;
-        }
-
-        const data = await attendanceApi.getOverview(currentInst, params);
-        if (data?.summary) {
-          setOverview(data);
-        }
-      } catch {
-        // Keep fallback mock data
-      }
-    };
-    fetchAttendanceData();
-  }, [selectedBatchId, selectedMode, dateFilter]);
-
+  // Handle Update Record
   const handleUpdateRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRecord) return;
 
+    setIsSubmitting(true);
     try {
       await attendanceApi.updateIndividualAttendance(instituteId, editingRecord.id, {
         status: editStatus,
         remarks: editRemarks,
       });
-    } catch {
-      // Local state update for preview
+
+      setSaveSuccessMessage(`Attendance for ${editingRecord.student.fullName} updated with audit trail.`);
+      setTimeout(() => setSaveSuccessMessage(''), 4000);
+      setEditingRecord(null);
+      loadAttendanceData();
+    } catch (err: any) {
+      alert(`Failed to update attendance: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setRecords((prev) =>
-      prev.map((r) =>
-        r.id === editingRecord.id
-          ? {
-              ...r,
-              status: editStatus,
-              remarks: editRemarks,
-              hasBeenEdited: true,
-            }
-          : r,
-      ),
-    );
-
-    setSaveSuccessMessage(`Attendance for ${editingRecord.studentName} updated with audit trail.`);
-    setTimeout(() => setSaveSuccessMessage(''), 4000);
-    setEditingRecord(null);
   };
-
-  const filteredRecords = records.filter((r) => {
-    const matchesSearch =
-      r.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.admissionNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (r.remarks && r.remarks.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesMode = selectedMode === 'ALL' || r.mode === selectedMode;
-    const matchesDate = !dateFilter || r.date === dateFilter;
-    return matchesSearch && matchesMode && matchesDate;
-  });
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -260,6 +206,17 @@ export default function AdminAttendancePage() {
     }
   };
 
+  const summary = overview?.summary || {
+    totalRecords: 0,
+    presentCount: 0,
+    lateCount: 0,
+    absentCount: 0,
+    excusedCount: 0,
+    attendancePercentage: null,
+  };
+
+  const batchList = overview?.batches || [];
+
   return (
     <PortalShell
       portalTitle="Institute Admin"
@@ -268,7 +225,28 @@ export default function AdminAttendancePage() {
       userName="Samuel Admin"
       userRoleLabel="Institute Administrator"
     >
-      <div className="space-y-8 pb-12">
+      <div className="space-y-6 pb-12">
+        {/* Error Alert Banner */}
+        {errorMessage && (
+          <div className="p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-rose-600" />
+              <span>{errorMessage}</span>
+            </div>
+            <Button size="sm" variant="outline" onClick={loadAttendanceData} className="gap-1 h-7 text-xs">
+              <RefreshCw size={12} /> Retry
+            </Button>
+          </div>
+        )}
+
+        {/* Success Alert Banner */}
+        {saveSuccessMessage && (
+          <div className="flex items-center gap-2 p-3.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold">
+            <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0" />
+            <span>{saveSuccessMessage}</span>
+          </div>
+        )}
+
         {/* Header with Title and Actions */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -281,27 +259,13 @@ export default function AdminAttendancePage() {
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Dual-mode tracking (Daily Roll-Call & Live Sessions) with policy-compliant attendance calculations and immutable audit logs.
+              Live PostgreSQL roll-call records, cohort breakdown, and immutable audit logs.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <a
-              href={attendanceApi.getExportUrl(instituteId, {
-                batchId: selectedBatchId !== 'ALL' ? selectedBatchId : undefined,
-                mode: selectedMode !== 'ALL' ? selectedMode : undefined,
-              })}
-              download
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Button variant="outline" size="sm" className="gap-1.5 shadow-sm text-slate-700 bg-white">
-                <Download size={14} />
-                Export CSV Report
-              </Button>
-            </a>
             <Link href="/teacher/attendance">
-              <Button variant="primary" size="sm" className="gap-1.5 shadow-sm">
+              <Button variant="primary" size="sm" className="gap-1.5 text-xs">
                 <Edit3 size={14} />
                 Open Faculty Roll-Call
               </Button>
@@ -309,81 +273,58 @@ export default function AdminAttendancePage() {
           </div>
         </div>
 
-        {/* Success Alert Banner */}
-        {saveSuccessMessage && (
-          <div className="flex items-center gap-2 p-3.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-sm font-medium animate-fadeIn">
-            <CheckCircle2 size={18} className="text-emerald-600 flex-shrink-0" />
-            <span>{saveSuccessMessage}</span>
-          </div>
-        )}
-
-        {/* Policy Explanation Banner */}
-        <div className="rounded-xl bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50 border border-blue-100/80 p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs text-slate-600">
-          <div className="flex items-start gap-2.5">
-            <HelpCircle size={16} className="text-blue-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <span className="font-semibold text-slate-900">Institute Attendance Policy: </span>
-              Rate = <code className="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono text-slate-800 font-medium">((Present + Late) / (Total - Excused)) × 100</code>.
-              <span className="text-slate-500 ml-1">Excused absences are non-penalizing and excluded from applicable total.</span>
-            </div>
-          </div>
-          <span className="text-[11px] font-medium text-blue-700 bg-blue-100/60 px-2.5 py-1 rounded-full whitespace-nowrap self-start md:self-auto">
-            Partial Unique Index Duplicate Protection Active
-          </span>
-        </div>
-
         {/* 4 Stat Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Attendance Rate"
-            value={overview.summary.attendancePercentage !== null ? `${overview.summary.attendancePercentage}%` : 'No data'}
+            value={summary.attendancePercentage !== null ? `${summary.attendancePercentage}%` : '0%'}
             icon={<TrendingUp size={20} />}
-            trend={`${overview.summary.presentCount + overview.summary.lateCount} of ${overview.summary.totalRecords - overview.summary.excusedCount} applicable`}
+            trend={`${summary.presentCount + summary.lateCount} of ${summary.totalRecords} sessions`}
             trendPositive={true}
             colorScheme="blue"
           />
           <StatCard
             title="Total Sessions Marked"
-            value={overview.summary.totalRecords.toString()}
+            value={summary.totalRecords.toString()}
             icon={<Calendar size={20} />}
-            trend={`${overview.batches.length} Cohorts active`}
+            trend={`${batchList.length} Active Cohorts`}
             trendPositive={true}
             colorScheme="purple"
           />
           <StatCard
             title="Present & Late"
-            value={`${overview.summary.presentCount + overview.summary.lateCount}`}
+            value={`${summary.presentCount + summary.lateCount}`}
             icon={<CheckCircle2 size={20} />}
-            trend={`${overview.summary.presentCount} On-time · ${overview.summary.lateCount} Late`}
+            trend={`${summary.presentCount} On-time · ${summary.lateCount} Late`}
             trendPositive={true}
             colorScheme="emerald"
           />
           <StatCard
             title="Absences & Leaves"
-            value={`${overview.summary.absentCount + overview.summary.excusedCount}`}
+            value={`${summary.absentCount + summary.excusedCount}`}
             icon={<XCircle size={20} />}
-            trend={`${overview.summary.absentCount} Unexcused · ${overview.summary.excusedCount} Excused`}
+            trend={`${summary.absentCount} Absent · ${summary.excusedCount} Excused`}
             trendPositive={false}
             colorScheme="amber"
           />
         </div>
 
         {/* Batch-by-Batch Performance Overview */}
-        <Card className="overflow-hidden border border-slate-200 shadow-sm">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+        <Card className="overflow-hidden border border-slate-200 shadow-sm p-0">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <h3 className="font-semibold text-slate-900 text-sm">Batch Attendance Breakdown</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Performance metrics scoped to academic calendar periods</p>
+              <h3 className="font-bold text-slate-900 text-sm">Batch Attendance Breakdown</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Performance metrics across verified cohorts</p>
             </div>
-            <Badge variant="neutral">{overview.batches.length} Batches</Badge>
+            <Badge variant="neutral">{batchList.length} Batches</Badge>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-medium">
+                <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold">
                   <th className="py-3 px-4">Batch Name & Course</th>
-                  <th className="py-3 px-4">Enrolled Students</th>
+                  <th className="py-3 px-4">Enrolled Learners</th>
                   <th className="py-3 px-4">Total Records</th>
                   <th className="py-3 px-4">Present</th>
                   <th className="py-3 px-4">Late</th>
@@ -393,37 +334,45 @@ export default function AdminAttendancePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {overview.batches.map((b) => (
-                  <tr key={b.batchId} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="py-3 px-4 font-medium text-slate-900">
-                      <div>{b.batchName}</div>
-                      <div className="text-[11px] text-slate-500">{b.courseTitle}</div>
-                    </td>
-                    <td className="py-3 px-4 text-slate-600">{b.totalEnrolled} students</td>
-                    <td className="py-3 px-4 text-slate-600">{b.totalRecords} sessions</td>
-                    <td className="py-3 px-4 text-emerald-600 font-semibold">{b.presentCount}</td>
-                    <td className="py-3 px-4 text-amber-600 font-semibold">{b.lateCount}</td>
-                    <td className="py-3 px-4 text-rose-600 font-semibold">{b.absentCount}</td>
-                    <td className="py-3 px-4 text-blue-600 font-semibold">{b.excusedCount}</td>
-                    <td className="py-3 px-4 text-right">
-                      {b.attendancePercentage !== null ? (
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold text-[11px] ${
-                            b.attendancePercentage >= 90
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : b.attendancePercentage >= 75
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-rose-50 text-rose-700 border border-rose-200'
-                          }`}
-                        >
-                          {b.attendancePercentage}%
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 italic">No sessions</span>
-                      )}
+                {batchList.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-400">
+                      No cohort attendance recorded yet in PostgreSQL.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  batchList.map((b) => (
+                    <tr key={b.batchId} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-3 px-4 font-bold text-slate-900">
+                        <div>{b.batchName}</div>
+                        <div className="text-[11px] text-slate-500 font-normal">{b.courseTitle}</div>
+                      </td>
+                      <td className="py-3 px-4 text-slate-600">{b.totalEnrolled} students</td>
+                      <td className="py-3 px-4 text-slate-600">{b.totalRecords} sessions</td>
+                      <td className="py-3 px-4 text-emerald-600 font-semibold">{b.presentCount}</td>
+                      <td className="py-3 px-4 text-amber-600 font-semibold">{b.lateCount}</td>
+                      <td className="py-3 px-4 text-rose-600 font-semibold">{b.absentCount}</td>
+                      <td className="py-3 px-4 text-blue-600 font-semibold">{b.excusedCount}</td>
+                      <td className="py-3 px-4 text-right">
+                        {b.attendancePercentage !== null ? (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full font-bold text-[11px] ${
+                              b.attendancePercentage >= 90
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : b.attendancePercentage >= 75
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-rose-50 text-rose-700 border border-rose-200'
+                            }`}
+                          >
+                            {b.attendancePercentage}%
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic">No records</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -443,35 +392,51 @@ export default function AdminAttendancePage() {
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search student or remark..."
+                  placeholder="Search student or admission no..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 w-44 md:w-56"
+                  className="pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 w-44 md:w-56"
                 />
               </div>
 
               <select
-                value={selectedMode}
-                onChange={(e) => setSelectedMode(e.target.value)}
-                className="text-xs rounded-lg border border-slate-200 py-1.5 px-2 bg-white text-slate-700 focus:outline-none"
+                value={selectedBatchId}
+                onChange={(e) => setSelectedBatchId(e.target.value)}
+                className="text-xs rounded-xl border border-slate-200 py-1.5 px-2 bg-white text-slate-700 focus:outline-none"
               >
-                <option value="ALL">All Modes</option>
-                <option value="DAILY_BATCH">Daily Roll-Call</option>
-                <option value="LIVE_SESSION">Live Session</option>
+                <option value="ALL">All Batches</option>
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="text-xs rounded-xl border border-slate-200 py-1.5 px-2 bg-white text-slate-700 focus:outline-none"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="PRESENT">Present</option>
+                <option value="LATE">Late</option>
+                <option value="ABSENT">Absent</option>
+                <option value="EXCUSED">Excused</option>
               </select>
 
               <input
                 type="date"
                 value={dateFilter}
                 onChange={(e) => setDateFilter(e.target.value)}
-                className="text-xs rounded-lg border border-slate-200 py-1 px-2 bg-white text-slate-700 focus:outline-none"
+                className="text-xs rounded-xl border border-slate-200 py-1 px-2 bg-white text-slate-700 focus:outline-none"
               />
 
-              {(searchQuery || selectedMode !== 'ALL' || dateFilter) && (
+              {(searchQuery || selectedBatchId !== 'ALL' || selectedStatus !== 'ALL' || dateFilter) && (
                 <button
                   onClick={() => {
                     setSearchQuery('');
-                    setSelectedMode('ALL');
+                    setSelectedBatchId('ALL');
+                    setSelectedStatus('ALL');
                     setDateFilter('');
                   }}
                   className="text-xs text-slate-500 hover:text-slate-800 p-1.5"
@@ -482,58 +447,50 @@ export default function AdminAttendancePage() {
             </div>
           </div>
 
-          <Card className="overflow-hidden border border-slate-200 shadow-sm">
+          <Card className="overflow-hidden border border-slate-200 shadow-sm p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-medium">
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold">
                     <th className="py-3 px-4">Date</th>
                     <th className="py-3 px-4">Student</th>
+                    <th className="py-3 px-4">Course & Batch</th>
                     <th className="py-3 px-4">Mode</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4">Remarks</th>
-                    <th className="py-3 px-4">Audit Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredRecords.length > 0 ? (
-                    filteredRecords.map((r) => (
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                        <div className="inline-flex items-center gap-2">
+                          <RefreshCw size={16} className="animate-spin text-blue-600" />
+                          <span>Loading attendance records from PostgreSQL...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : records.length > 0 ? (
+                    records.map((r) => (
                       <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
                         <td className="py-3 px-4 font-mono text-slate-700">{r.date}</td>
                         <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-900">{r.studentName}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">{r.admissionNo}</div>
+                          <div className="font-semibold text-slate-900">{r.student.fullName}</div>
+                          <div className="text-[11px] text-slate-400 font-mono">{r.student.admissionNo}</div>
                         </td>
                         <td className="py-3 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                              r.mode === 'DAILY_BATCH'
-                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
-                                : 'bg-amber-50 text-amber-700 border border-amber-100'
-                            }`}
-                          >
-                            {r.mode === 'DAILY_BATCH' ? 'DAILY ROLL-CALL' : 'LIVE SESSION'}
+                          <div className="font-medium text-slate-800">{r.course?.title}</div>
+                          <div className="text-[11px] text-slate-400">{r.batch?.name}</div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                            {r.mode}
                           </span>
-                          {r.liveSessionTitle && (
-                            <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-xs">
-                              {r.liveSessionTitle}
-                            </div>
-                          )}
                         </td>
                         <td className="py-3 px-4">{getStatusBadge(r.status)}</td>
                         <td className="py-3 px-4 text-slate-600 italic">
                           {r.remarks || <span className="text-slate-300">—</span>}
-                        </td>
-                        <td className="py-3 px-4">
-                          {r.hasBeenEdited ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-purple-700 font-medium bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
-                              <History size={11} />
-                              Revised
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 text-[11px]">Original</span>
-                          )}
                         </td>
                         <td className="py-3 px-4 text-right">
                           <Button
@@ -568,11 +525,11 @@ export default function AdminAttendancePage() {
         {/* Quick Edit Modal */}
         {editingRecord && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100 animate-scaleUp">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
                   <h4 className="text-base font-bold text-slate-900">Revise Attendance Record</h4>
-                  <p className="text-xs text-slate-500">Changes will be immutably recorded in the audit log</p>
+                  <p className="text-xs text-slate-500">Changes will be immutably recorded in the database audit log</p>
                 </div>
                 <button
                   onClick={() => setEditingRecord(null)}
@@ -586,7 +543,7 @@ export default function AdminAttendancePage() {
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Student</label>
                   <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800">
-                    {editingRecord.studentName} ({editingRecord.admissionNo}) — {editingRecord.date}
+                    {editingRecord.student.fullName} ({editingRecord.student.admissionNo}) — {editingRecord.date}
                   </div>
                 </div>
 
@@ -637,11 +594,12 @@ export default function AdminAttendancePage() {
                     variant="outline"
                     size="sm"
                     onClick={() => setEditingRecord(null)}
+                    disabled={isSubmitting}
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" variant="primary" size="sm">
-                    Save Audit Logged Revision
+                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
+                    {isSubmitting ? 'Saving...' : 'Save Audit Logged Revision'}
                   </Button>
                 </div>
               </form>

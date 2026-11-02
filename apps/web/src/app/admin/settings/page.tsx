@@ -214,11 +214,11 @@ const DEFAULT_AUDIT_LOGS: AuditLogItemDto[] = [
 const ALL_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function InstituteSettingsPage() {
-  const [instituteId, setInstituteId] = useState<string>('inst-1');
+  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
   const [settings, setSettings] = useState<FullInstituteSettingsResponse>(DEFAULT_SETTINGS_DATA);
-  const [usersList, setUsersList] = useState<InstituteUserItemDto[]>(DEFAULT_USERS);
-  const [auditLogs, setAuditLogs] = useState<AuditLogItemDto[]>(DEFAULT_AUDIT_LOGS);
+  const [usersList, setUsersList] = useState<InstituteUserItemDto[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogItemDto[]>([]);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -238,7 +238,7 @@ export default function InstituteSettingsPage() {
   // Load instituteId from localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id') || 'inst-1';
+      const stored = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
       setInstituteId(stored);
     }
   }, []);
@@ -261,10 +261,10 @@ export default function InstituteSettingsPage() {
         setFinancialForm(resSettings.financial);
         setSecurityForm(resSettings.security);
       }
-      if (resUsers && resUsers.length > 0) {
+      if (Array.isArray(resUsers)) {
         setUsersList(resUsers);
       }
-      if (resLogs && resLogs.length > 0) {
+      if (Array.isArray(resLogs)) {
         setAuditLogs(resLogs);
       }
     } catch {

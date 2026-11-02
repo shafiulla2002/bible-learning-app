@@ -57,8 +57,8 @@ export default function BatchDetailPage({
   const unwrappedParams = use(params);
   const batchId = unwrappedParams.id;
   const instituteId = typeof window !== 'undefined'
-    ? localStorage.getItem('current_institute_id') || 'inst-1'
-    : 'inst-1';
+    ? localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5'
+    : 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
 
   const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'faculty' | 'timetable'>('overview');
   const [isLiveApi, setIsLiveApi] = useState(false);
@@ -66,120 +66,58 @@ export default function BatchDetailPage({
   // Batch Details State
   const [batch, setBatch] = useState({
     id: batchId,
-    name: 'Diploma Cohort Alpha 2026',
-    code: 'DIB-2026-A',
-    courseTitle: 'Diploma in Biblical Studies',
-    courseSlug: 'diploma-biblical-studies',
-    academicYear: '2026-2027',
-    term: 'Fall Semester 2026',
-    startDate: '2026-07-01',
-    endDate: '2026-12-20',
+    name: 'Loading Cohort...',
+    code: '—',
+    courseTitle: '—',
+    courseSlug: '',
+    academicYear: '—',
+    term: '—',
+    startDate: '—',
+    endDate: '—',
     capacity: 40,
     status: 'ACTIVE' as 'UPCOMING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED',
   });
 
-  // Students List
-  const [students, setStudents] = useState([
-    {
-      id: 'stud-1',
-      admissionNo: 'ADM-2026-001',
-      fullName: 'Hannah Samuel',
-      email: 'hannah.samuel@example.com',
-      phone: '+91 98765 43210',
-      enrolledAt: '2026-06-25',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'stud-2',
-      admissionNo: 'ADM-2026-002',
-      fullName: 'David Livingstone',
-      email: 'david.livingstone@example.com',
-      phone: '+91 98765 43211',
-      enrolledAt: '2026-06-28',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'stud-3',
-      admissionNo: 'ADM-2026-003',
-      fullName: 'Grace Hopper',
-      email: 'grace.hopper@example.com',
-      phone: '+91 98765 43212',
-      enrolledAt: '2026-07-01',
-      status: 'ACTIVE',
-    },
-    {
-      id: 'stud-4',
-      admissionNo: 'ADM-2026-004',
-      fullName: 'John Wesley',
-      email: 'john.wesley@example.com',
-      phone: '+91 98765 43213',
-      enrolledAt: '2026-07-02',
-      status: 'ACTIVE',
-    },
-  ]);
+  // Live PostgreSQL State (Zero Mock Data)
+  const [students, setStudents] = useState<Array<{
+    id: string;
+    admissionNo: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    enrolledAt: string;
+    status: string;
+  }>>([]);
 
-  // Transfer Logs (Requirement 2)
-  const [transferLogs, setTransferLogs] = useState([
-    {
-      id: 'trans-1',
-      studentName: 'Priscilla Aquila',
-      admissionNo: 'ADM-2026-018',
-      sourceBatch: 'Diploma Cohort Beta 2026',
-      targetBatch: 'Diploma Cohort Alpha 2026',
-      reason: 'Shifted from evening to morning schedule',
-      transferredBy: 'Academic Registrar',
-      transferredAt: '2026-07-10 14:30',
-    },
-  ]);
+  const [transferLogs, setTransferLogs] = useState<Array<{
+    id: string;
+    studentName: string;
+    admissionNo: string;
+    sourceBatch: string;
+    targetBatch: string;
+    reason: string;
+    transferredBy: string;
+    transferredAt: string;
+  }>>([]);
 
-  // Teachers List (Requirement 5)
-  const [teachers, setTeachers] = useState([
-    {
-      id: 't1',
-      name: 'Dr. Timothy Keller',
-      email: 'timothy.keller@gbts.edu',
-      role: 'LEAD' as 'LEAD' | 'ASSISTANT',
-      specialization: 'Systematic & Pastoral Theology',
-    },
-    {
-      id: 't2',
-      name: 'Prof. Sarah Jenkins',
-      email: 'sarah.jenkins@gbts.edu',
-      role: 'ASSISTANT' as 'LEAD' | 'ASSISTANT',
-      specialization: 'Biblical Languages & Exegesis',
-    },
-    {
-      id: 't3',
-      name: 'Rev. Matthew Henry',
-      email: 'matthew.henry@gbts.edu',
-      role: 'ASSISTANT' as 'LEAD' | 'ASSISTANT',
-      specialization: 'Old Testament Commentary',
-    },
-  ]);
+  const [teachers, setTeachers] = useState<Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: 'LEAD' | 'ASSISTANT';
+    specialization: string;
+  }>>([]);
 
-  // Live Sessions Timetable (Requirements 1 & 4)
-  const [sessions, setSessions] = useState([
-    {
-      id: 'sess-1',
-      title: 'Hermeneutics & Exegesis Principles',
-      teacherName: 'Dr. Timothy Keller',
-      room: 'Lecture Hall A',
-      startsAt: '2026-09-02T10:00:00',
-      endsAt: '2026-09-02T11:30:00',
-      isRecurring: true,
-      status: 'SCHEDULED',
-    },
-    {
-      id: 'sess-2',
-      title: 'Greek Grammar Workshop',
-      teacherName: 'Prof. Sarah Jenkins',
-      room: 'Seminar Room 2',
-      startsAt: '2026-09-04T14:00:00',
-      endsAt: '2026-09-04T15:30:00',
-      isRecurring: true,
-      status: 'SCHEDULED',
-    },
-  ]);
+  const [sessions, setSessions] = useState<Array<{
+    id: string;
+    title: string;
+    teacherName: string;
+    room: string;
+    startsAt: string;
+    endsAt: string;
+    isRecurring: boolean;
+    status: string;
+  }>>([]);
 
   // Modals state
   const [showEnrolModal, setShowEnrolModal] = useState(false);
@@ -246,38 +184,65 @@ export default function BatchDetailPage({
           status: live.status || 'ACTIVE',
         });
 
-        if (Array.isArray(live.enrolments) && live.enrolments.length > 0) {
+        if (Array.isArray(live.enrolments)) {
           setStudents(
             live.enrolments.map((enr: any) => ({
               id: enr.studentProfileId || enr.id,
               admissionNo: enr.studentProfile?.admissionNo || `ADM-${enr.id.slice(0, 4)}`,
               fullName: enr.studentProfile?.membership?.user?.fullName || 'Student',
-              email: enr.studentProfile?.membership?.user?.email || 'student@gbts.edu',
-              phone: enr.studentProfile?.membership?.user?.phoneE164 || '+91 98765 00000',
-              enrolledAt: enr.enrolledAt?.slice(0, 10) || '2026-07-01',
+              email: enr.studentProfile?.membership?.user?.email || '',
+              phone: enr.studentProfile?.membership?.user?.phoneE164 || '',
+              enrolledAt: enr.enrolledAt ? String(enr.enrolledAt).slice(0, 10) : '',
               status: enr.status || 'ACTIVE',
             })),
           );
         }
 
-        if (Array.isArray(live.timetable) && live.timetable.length > 0) {
+        if (Array.isArray(live.teachers)) {
+          setTeachers(
+            live.teachers.map((t: any) => ({
+              id: t.teacherProfileId || t.id,
+              name: t.fullName || t.name || 'Faculty',
+              email: t.email || '',
+              role: (t.role === 'LEAD' ? 'LEAD' : 'ASSISTANT') as 'LEAD' | 'ASSISTANT',
+              specialization: t.specialization || 'Theological Studies',
+            })),
+          );
+        }
+
+        if (Array.isArray(live.timetable)) {
           setSessions(
             live.timetable.map((s: any) => ({
               id: s.id,
               title: s.title,
               teacherName: s.teacherName || 'Faculty',
               room: s.room || 'Lecture Hall A',
-              startsAt: s.startsAt?.replace('Z', '') || '2026-09-02T10:00:00',
-              endsAt: s.endsAt?.replace('Z', '') || '2026-09-02T11:30:00',
-              isRecurring: s.isRecurring || false,
+              startsAt: s.startsAt ? String(s.startsAt).replace('Z', '') : '',
+              endsAt: s.endsAt ? String(s.endsAt).replace('Z', '') : '',
+              isRecurring: Boolean(s.isRecurring),
               status: s.status || 'SCHEDULED',
+            })),
+          );
+        }
+
+        if (Array.isArray(live.transferLogs)) {
+          setTransferLogs(
+            live.transferLogs.map((tl: any) => ({
+              id: tl.id,
+              studentName: tl.studentName,
+              admissionNo: tl.admissionNo,
+              sourceBatch: tl.sourceBatch,
+              targetBatch: tl.targetBatch,
+              reason: tl.reason || 'Administrative Transfer',
+              transferredBy: tl.transferredBy || 'Administrator',
+              transferredAt: tl.transferredAt ? new Date(tl.transferredAt).toISOString().replace('T', ' ').slice(0, 16) : '',
             })),
           );
         }
 
         setIsLiveApi(true);
       } catch (err: any) {
-        console.warn('Live batch detail API unavailable, using verified mock state:', err.message);
+        console.error('Failed to load batch detail from PostgreSQL:', err.message);
       }
     }
     loadBatchDetail();

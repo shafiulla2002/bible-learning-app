@@ -44,7 +44,7 @@ const adminNav = [
 ];
 
 export default function TeachersDirectoryPage() {
-  const [instituteId, setInstituteId] = useState<string>('inst-1');
+  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
   const [teachers, setTeachers] = useState<TeacherSummaryDto[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -57,7 +57,7 @@ export default function TeachersDirectoryPage() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const storedId = localStorage.getItem('current_institute_id') || 'inst-1';
+      const storedId = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
       setInstituteId(storedId);
     }
   }, []);
@@ -128,9 +128,9 @@ export default function TeachersDirectoryPage() {
           createdAt: new Date().toISOString(),
         },
       ];
-      setTeachers(fallbackList);
+      setTeachers([]);
       setTotalPages(1);
-      setTotalCount(fallbackList.length);
+      setTotalCount(0);
     } finally {
       setIsLoading(false);
     }

@@ -56,7 +56,7 @@ export default function TeacherDetailPage({
   const teacherId = unwrappedParams.id;
   const router = useRouter();
 
-  const [instituteId, setInstituteId] = useState<string>('inst-1');
+  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
   const [teacher, setTeacher] = useState<TeacherDetailDto | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'courses' | 'batches' | 'workload' | 'account'>('overview');
@@ -92,7 +92,7 @@ export default function TeacherDetailPage({
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const storedId = localStorage.getItem('current_institute_id') || 'inst-1';
+      const storedId = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
       setInstituteId(storedId);
     }
   }, []);
@@ -211,7 +211,7 @@ export default function TeacherDetailPage({
   const openAssignCourse = async () => {
     setShowAssignCourseModal(true);
     try {
-      const res = await fetch(`http://localhost:4000/institutes/${instituteId}/courses`, {
+      const res = await fetch(`/institutes/${instituteId}/courses`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
         },

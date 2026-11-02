@@ -1,26 +1,30 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   BookOpen,
   Plus,
   Search,
-  Filter,
   GraduationCap,
   Clock,
   Layers,
   Users,
   Eye,
-  MoreVertical,
   CheckCircle,
   FileEdit,
   Archive,
   ArrowRight,
   Sparkles,
-  DollarSign,
   ChevronRight,
   FolderOpen,
+  LayoutDashboard,
+  Calendar,
+  CreditCard,
+  Settings,
+  AlertCircle,
+  RefreshCw,
+  RotateCcw,
 } from 'lucide-react';
 import { PortalShell } from '@/components/layout/portal-shell';
 import { StatCard } from '@/components/ui/stat-card';
@@ -28,154 +32,39 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import {
-  LayoutDashboard,
-  Calendar,
-  CreditCard,
-  Settings,
-} from 'lucide-react';
+  courseApi,
+  CourseDto,
+  CourseCategoryDto,
+  resolveVerifiedAdminContext,
+} from '@/lib/api';
 
 const adminNav = [
   { label: 'Overview', href: '/admin', icon: <LayoutDashboard size={18} /> },
-  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} />, badge: '3 Pending' },
+  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} /> },
   { label: 'Faculty & Teachers', href: '/admin/teachers', icon: <GraduationCap size={18} /> },
   { label: 'Courses & Curriculum', href: '/admin/courses', icon: <BookOpen size={18} /> },
   { label: 'Batches & Classes', href: '/admin/batches', icon: <Calendar size={18} /> },
+  { label: 'Attendance', href: '/admin/attendance', icon: <Calendar size={18} /> },
   { label: 'Finance & Payments', href: '/admin/finance', icon: <CreditCard size={18} /> },
-  { label: 'Institute Settings', href: '/admin/settings', icon: <Settings size={18} /> },
-];
-
-interface CourseItem {
-  id: string;
-  title: string;
-  slug: string;
-  category: string;
-  level: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
-  language: string;
-  pricing: 'FREE' | 'PAID';
-  price: number;
-  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
-  leadTeacher: string;
-  modulesCount: number;
-  lessonsCount: number;
-  durationHours: number;
-  enrolledStudents: number;
-  description: string;
-  gradient: string;
-}
-
-const INITIAL_COURSES: CourseItem[] = [
-  {
-    id: 'crs-1',
-    title: 'Building Biblical Theology',
-    slug: 'biblical-theology',
-    category: 'Biblical Theology',
-    level: 'BEGINNER',
-    language: 'English',
-    pricing: 'PAID',
-    price: 18500,
-    status: 'PUBLISHED',
-    leadTeacher: 'Dr. Samuel Mathew',
-    modulesCount: 4,
-    lessonsCount: 16,
-    durationHours: 32,
-    enrolledStudents: 42,
-    description: 'A comprehensive study of redemptive history, biblical covenants, and overarching theological narrative.',
-    gradient: 'from-blue-600 via-indigo-600 to-sky-700',
-  },
-  {
-    id: 'crs-2',
-    title: 'Church History: Reformation to Modern',
-    slug: 'church-history',
-    category: 'Church History',
-    level: 'INTERMEDIATE',
-    language: 'English',
-    pricing: 'PAID',
-    price: 16000,
-    status: 'PUBLISHED',
-    leadTeacher: 'Rev. Joseph David',
-    modulesCount: 5,
-    lessonsCount: 20,
-    durationHours: 40,
-    enrolledStudents: 36,
-    description: 'Surveying the major turning points in the Christian church, doctrinal confessions, and historical figures.',
-    gradient: 'from-amber-600 via-orange-600 to-red-700',
-  },
-  {
-    id: 'crs-3',
-    title: 'Biblical Hermeneutics & Exegesis',
-    slug: 'hermeneutics',
-    category: 'Biblical Studies',
-    level: 'INTERMEDIATE',
-    language: 'English',
-    pricing: 'PAID',
-    price: 19500,
-    status: 'PUBLISHED',
-    leadTeacher: 'Dr. Mary Thomas',
-    modulesCount: 4,
-    lessonsCount: 14,
-    durationHours: 28,
-    enrolledStudents: 51,
-    description: 'Practical principles and sound literary methods for interpreting Old and New Testament passages.',
-    gradient: 'from-emerald-600 via-teal-600 to-cyan-700',
-  },
-  {
-    id: 'crs-4',
-    title: 'Greek Grammar & Exegesis I',
-    slug: 'greek-grammar-1',
-    category: 'Biblical Languages',
-    level: 'BEGINNER',
-    language: 'English',
-    pricing: 'PAID',
-    price: 22000,
-    status: 'PUBLISHED',
-    leadTeacher: 'Dr. Mary Thomas',
-    modulesCount: 6,
-    lessonsCount: 24,
-    durationHours: 48,
-    enrolledStudents: 29,
-    description: 'Foundational study of Koine Greek alphabet, morphology, vocabulary, and basic syntax of the New Testament.',
-    gradient: 'from-purple-600 via-violet-600 to-fuchsia-700',
-  },
-  {
-    id: 'crs-5',
-    title: 'Systematic Theology: Doctrine of God',
-    slug: 'systematic-theology-god',
-    category: 'Biblical Theology',
-    level: 'ADVANCED',
-    language: 'English',
-    pricing: 'PAID',
-    price: 21000,
-    status: 'DRAFT',
-    leadTeacher: 'Dr. Samuel Mathew',
-    modulesCount: 3,
-    lessonsCount: 12,
-    durationHours: 24,
-    enrolledStudents: 0,
-    description: 'Exhaustive examination of divine attributes, the Trinity, divine sovereignty, creation, and providence.',
-    gradient: 'from-slate-700 via-zinc-800 to-neutral-900',
-  },
-  {
-    id: 'crs-6',
-    title: 'Old Testament Survey: Pentateuch',
-    slug: 'ot-survey-pentateuch',
-    category: 'Biblical Studies',
-    level: 'BEGINNER',
-    language: 'English',
-    pricing: 'FREE',
-    price: 0,
-    status: 'DRAFT',
-    leadTeacher: 'Rev. Joseph David',
-    modulesCount: 2,
-    lessonsCount: 8,
-    durationHours: 16,
-    enrolledStudents: 0,
-    description: 'Introduction to Genesis through Deuteronomy, historical background, legal codes, and covenant themes.',
-    gradient: 'from-rose-600 via-pink-600 to-amber-700',
-  },
 ];
 
 export default function AdminCoursesPage() {
-  const [courses, setCourses] = useState<CourseItem[]>(INITIAL_COURSES);
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('current_institute_id');
+      if (stored) return stored;
+    }
+    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+  });
+
+  // Real Database State (Strict Zero-Mock: empty by default)
+  const [courses, setCourses] = useState<CourseDto[]>([]);
+  const [categories, setCategories] = useState<CourseCategoryDto[]>([]);
+  const [totalCourses, setTotalCourses] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Filters
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -184,40 +73,102 @@ export default function AdminCoursesPage() {
 
   // New Course Form state
   const [newTitle, setNewTitle] = useState('');
-  const [newCategory, setNewCategory] = useState('Biblical Theology');
+  const [newCategoryId, setNewCategoryId] = useState('');
   const [newLevel, setNewLevel] = useState<'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'>('BEGINNER');
   const [newLanguage, setNewLanguage] = useState('English');
   const [newPricing, setNewPricing] = useState<'FREE' | 'PAID'>('PAID');
   const [newPrice, setNewPrice] = useState('18500');
-  const [newTeacher, setNewTeacher] = useState('Dr. Samuel Mathew');
   const [newDescription, setNewDescription] = useState('');
-  const [newStatus, setNewStatus] = useState<'DRAFT' | 'PUBLISHED'>('DRAFT');
+  const [newStatus, setNewStatus] = useState<'DRAFT' | 'PUBLISHED'>('PUBLISHED');
   const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Toast
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Resolve admin context
+  useEffect(() => {
+    let active = true;
+    resolveVerifiedAdminContext()
+      .then((ctx) => {
+        if (!active) return;
+        if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Fetch categories
+  useEffect(() => {
+    if (!instituteId) return;
+    courseApi
+      .getCategories(instituteId)
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setCategories(data);
+          if (data.length > 0 && !newCategoryId) {
+            setNewCategoryId(data[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [instituteId]);
+
+  // Fetch courses from PostgreSQL
+  const fetchCourses = useCallback(async () => {
+    if (!instituteId) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await courseApi.getCourses(instituteId, {
+        limit: 50,
+        search: search.trim() || undefined,
+        status: statusFilter !== 'ALL' ? (statusFilter as any) : undefined,
+        categoryId: categoryFilter !== 'ALL' ? categoryFilter : undefined,
+      });
+
+      if (res && Array.isArray(res.data)) {
+        setCourses(res.data);
+        setTotalCourses(res.meta?.total ?? res.data.length);
+      } else {
+        setCourses([]);
+        setTotalCourses(0);
+      }
+    } catch (err: any) {
+      setCourses([]);
+      setTotalCourses(0);
+      setErrorMessage(err?.message || 'Unable to connect to live courses database');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [instituteId, search, statusFilter, categoryFilter]);
+
+  useEffect(() => {
+    fetchCourses();
+  }, [fetchCourses]);
+
+  // Filtered List for client level filter
+  const filteredCourses = useMemo(() => {
+    return courses.filter((c) => {
+      const matchesLevel = levelFilter === 'ALL' || c.level === levelFilter;
+      return matchesLevel;
+    });
+  }, [courses, levelFilter]);
 
   // KPIs
-  const totalCourses = courses.length;
   const publishedCourses = courses.filter((c) => c.status === 'PUBLISHED').length;
   const draftCourses = courses.filter((c) => c.status === 'DRAFT').length;
-  const totalLessons = courses.reduce((acc, c) => acc + c.lessonsCount, 0);
+  const totalLessons = courses.reduce((acc, c) => acc + (c.lessonsCount || 0), 0);
 
-  // Filtered List
-  const filteredCourses = courses.filter((c) => {
-    const matchesSearch =
-      search === '' ||
-      c.title.toLowerCase().includes(search.toLowerCase()) ||
-      c.leadTeacher.toLowerCase().includes(search.toLowerCase()) ||
-      c.category.toLowerCase().includes(search.toLowerCase());
-
-    const matchesCategory =
-      categoryFilter === 'ALL' || c.category.toLowerCase().includes(categoryFilter.toLowerCase());
-
-    const matchesStatus = statusFilter === 'ALL' || c.status === statusFilter;
-    const matchesLevel = levelFilter === 'ALL' || c.level === levelFilter;
-
-    return matchesSearch && matchesCategory && matchesStatus && matchesLevel;
-  });
-
-  const handleCreateCourse = (e: React.FormEvent) => {
+  // Handle Create Course
+  const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) {
       setFormError('Please enter a valid course title');
@@ -228,37 +179,43 @@ export default function AdminCoursesPage() {
       return;
     }
 
-    const created: CourseItem = {
-      id: `crs-${Date.now().toString().slice(-4)}`,
-      title: newTitle.trim(),
-      slug: newTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      category: newCategory,
-      level: newLevel,
-      language: newLanguage,
-      pricing: newPricing,
-      price: newPricing === 'FREE' ? 0 : parseInt(newPrice, 10) || 0,
-      status: newStatus,
-      leadTeacher: newTeacher,
-      modulesCount: 0,
-      lessonsCount: 0,
-      durationHours: 0,
-      enrolledStudents: 0,
-      description: newDescription.trim(),
-      gradient: 'from-blue-600 via-indigo-600 to-sky-700',
-    };
-
-    setCourses([created, ...courses]);
-    setShowAddModal(false);
-    // Reset form
-    setNewTitle('');
-    setNewDescription('');
+    setIsSubmitting(true);
     setFormError('');
+
+    try {
+      const created = await courseApi.createCourse(instituteId, {
+        title: newTitle.trim(),
+        description: newDescription.trim(),
+        categoryId: newCategoryId || undefined,
+        level: newLevel,
+        language: newLanguage,
+        pricingType: newPricing,
+        price: newPricing === 'PAID' ? parseInt(newPrice, 10) || 0 : 0,
+        currency: 'INR',
+        status: newStatus,
+      });
+
+      showToast(`Course "${created.title}" successfully created and saved in PostgreSQL!`);
+      setShowAddModal(false);
+      setNewTitle('');
+      setNewDescription('');
+      fetchCourses();
+    } catch (err: any) {
+      setFormError(err?.message || 'Failed to create course');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleToggleStatus = (courseId: string, newStatus: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED') => {
-    setCourses((prev) =>
-      prev.map((c) => (c.id === courseId ? { ...c, status: newStatus } : c)),
-    );
+  // Handle Toggle Status
+  const handleToggleStatus = async (courseId: string, newStatus: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED') => {
+    try {
+      await courseApi.updateStatus(instituteId, courseId, newStatus);
+      showToast(`Course status updated to ${newStatus}`);
+      fetchCourses();
+    } catch (err: any) {
+      showToast(`Failed to update status: ${err?.message || 'Server error'}`);
+    }
   };
 
   return (
@@ -270,6 +227,27 @@ export default function AdminCoursesPage() {
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6">
+        {/* Toast Notification */}
+        {toastMessage && (
+          <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2">
+            <CheckCircle size={16} className="text-emerald-400" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+
+        {/* Database Status Alert Banner */}
+        {errorMessage && (
+          <div className="p-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-rose-600" />
+              <span>{errorMessage}</span>
+            </div>
+            <Button size="sm" variant="outline" onClick={fetchCourses} className="gap-1 h-7 text-xs">
+              <RefreshCw size={12} /> Retry
+            </Button>
+          </div>
+        )}
+
         {/* Header with Title and Actions */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -282,7 +260,7 @@ export default function AdminCoursesPage() {
               Courses & Curriculum Management
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Build theological courses, organize modules and chapters, attach lessons, and assign faculty.
+              Live PostgreSQL theological curriculum: modules, chapters, lessons, and assigned faculty.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -298,441 +276,410 @@ export default function AdminCoursesPage() {
           </div>
         </div>
 
-        {/* KPI Cards */}
-        {/* KPI Cards */}
+        {/* 4 Summary Stat Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Total Courses"
             value={totalCourses}
-            trend={`${publishedCourses} Active`}
+            icon={<BookOpen size={20} />}
+            trend={`${publishedCourses} Active in Catalog`}
             trendPositive={true}
             colorScheme="blue"
-            icon={<BookOpen size={20} className="text-blue-600" />}
           />
           <StatCard
-            title="Published Courses"
+            title="Published Catalog"
             value={publishedCourses}
-            trend="Ready for Enrolment"
+            icon={<CheckCircle size={20} />}
+            trend="Open for Admissions"
             trendPositive={true}
             colorScheme="emerald"
-            icon={<CheckCircle size={20} className="text-emerald-600" />}
           />
           <StatCard
-            title="Drafts in Progress"
+            title="Curriculum Drafts"
             value={draftCourses}
-            trend="Under Review / Setup"
+            icon={<FileEdit size={20} />}
+            trend={draftCourses > 0 ? 'Work in Progress' : 'All Published'}
             trendPositive={false}
             colorScheme="amber"
-            icon={<FileEdit size={20} className="text-amber-600" />}
           />
           <StatCard
             title="Curriculum Lessons"
             value={totalLessons}
-            trend="Across All Semesters"
+            icon={<Layers size={20} />}
+            trend="Structured Content"
             trendPositive={true}
             colorScheme="purple"
-            icon={<Layers size={20} className="text-indigo-600" />}
           />
         </div>
 
-        {/* Filter Toolbar */}
-        <Card className="p-4 bg-white border border-slate-200/80 shadow-sm">
-          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-            {/* Search Input */}
-            <div className="relative flex-1 min-w-[240px]">
-              <Search
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
+        {/* Filter and Search Bar */}
+        <Card className="p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
               <input
                 type="text"
+                placeholder="Search course title..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by course title, instructor, or subject..."
-                className="w-full pl-9 pr-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0">
-              {[
-                { key: 'ALL', label: 'All Categories' },
-                { key: 'Theology', label: 'Theology' },
-                { key: 'Biblical Studies', label: 'Biblical Studies' },
-                { key: 'Church History', label: 'Church History' },
-                { key: 'Languages', label: 'Languages' },
-              ].map((cat) => (
-                <button
-                  key={cat.key}
-                  onClick={() => setCategoryFilter(cat.key)}
-                  className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all whitespace-nowrap ${
-                    categoryFilter === cat.key
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {cat.label}
-                </button>
-              ))}
+            {/* Category Filter */}
+            <div>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="ALL">All Categories</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Status Dropdown */}
-            <div className="flex items-center gap-2">
+            {/* Status Filter */}
+            <div>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="ALL">All Statuses</option>
-                <option value="PUBLISHED">Published</option>
-                <option value="DRAFT">Draft</option>
-                <option value="ARCHIVED">Archived</option>
+                <option value="PUBLISHED">Published Only</option>
+                <option value="DRAFT">Drafts Only</option>
+                <option value="ARCHIVED">Archived Only</option>
               </select>
+            </div>
 
+            {/* Level Filter */}
+            <div>
               <select
                 value={levelFilter}
                 onChange={(e) => setLevelFilter(e.target.value)}
-                className="px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="ALL">All Levels</option>
-                <option value="BEGINNER">Beginner</option>
-                <option value="INTERMEDIATE">Intermediate</option>
-                <option value="ADVANCED">Advanced</option>
+                <option value="ALL">All Academic Levels</option>
+                <option value="BEGINNER">Beginner Level</option>
+                <option value="INTERMEDIATE">Intermediate Level</option>
+                <option value="ADVANCED">Advanced Level</option>
               </select>
             </div>
           </div>
+
+          {(search || categoryFilter !== 'ALL' || statusFilter !== 'ALL' || levelFilter !== 'ALL') && (
+            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span>Showing {filteredCourses.length} matching courses</span>
+              <button
+                onClick={() => {
+                  setSearch('');
+                  setCategoryFilter('ALL');
+                  setStatusFilter('ALL');
+                  setLevelFilter('ALL');
+                }}
+                className="inline-flex items-center gap-1 text-blue-600 hover:underline font-semibold"
+              >
+                <RotateCcw size={12} />
+                Clear Filters
+              </button>
+            </div>
+          )}
         </Card>
 
-        {/* Course Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredCourses.map((course) => (
-            <Card
-              key={course.id}
-              className="group overflow-hidden border border-slate-200/80 bg-white hover:shadow-md transition-all flex flex-col justify-between"
-            >
-              <div>
-                {/* Visual Header / Cover Banner */}
-                <div className={`h-32 bg-gradient-to-r ${course.gradient} p-4 flex flex-col justify-between text-white relative`}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-black/25 backdrop-blur-sm text-white border border-white/20">
-                      {course.category}
-                    </span>
-                    <span
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                        course.status === 'PUBLISHED'
-                          ? 'bg-emerald-500 text-white shadow-sm'
-                          : course.status === 'DRAFT'
-                          ? 'bg-amber-400 text-slate-900 font-bold'
-                          : 'bg-slate-700 text-slate-200'
-                      }`}
-                    >
-                      {course.status}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-white/80">
-                      {course.level} • {course.language}
-                    </span>
-                    <h3 className="text-base font-bold text-white line-clamp-1 leading-snug drop-shadow-sm">
-                      {course.title}
-                    </h3>
-                  </div>
-                </div>
-
-                {/* Body Content */}
-                <div className="p-4 space-y-3">
-                  <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
-                    {course.description}
-                  </p>
-
-                  {/* Instructor Pill */}
-                  <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
-                    <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-[10px]">
-                      {course.leadTeacher.charAt(course.leadTeacher.indexOf(' ') + 1) || 'T'}
-                    </div>
-                    <span className="text-xs text-slate-700 font-medium truncate">
-                      {course.leadTeacher}
-                    </span>
-                  </div>
-
-                  {/* Metadata Stats Grid */}
-                  <div className="grid grid-cols-3 gap-2 py-2 px-3 rounded-lg bg-slate-50 border border-slate-100 text-center">
-                    <div>
-                      <div className="text-[10px] text-slate-400 font-medium">Modules</div>
-                      <div className="text-xs font-bold text-slate-700">{course.modulesCount}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400 font-medium">Lessons</div>
-                      <div className="text-xs font-bold text-slate-700">{course.lessonsCount}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400 font-medium">Enrolled</div>
-                      <div className="text-xs font-bold text-slate-700">{course.enrolledStudents}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card Footer with Actions */}
-              <div className="p-4 pt-0 border-t border-slate-100 mt-2 flex items-center justify-between">
+        {/* Courses Grid */}
+        {isLoading ? (
+          <div className="bg-white rounded-2xl p-16 text-center text-slate-400 border border-slate-200">
+            <div className="inline-flex items-center gap-2 text-sm">
+              <RefreshCw size={18} className="animate-spin text-blue-600" />
+              <span>Querying verified courses from PostgreSQL...</span>
+            </div>
+          </div>
+        ) : filteredCourses.length === 0 ? (
+          <Card className="p-12 text-center">
+            <BookOpen size={36} className="mx-auto text-slate-300 mb-3" />
+            <h3 className="text-sm font-bold text-slate-700">No courses found in database</h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+              Click &apos;Create New Course&apos; above to add courses directly to PostgreSQL.
+            </p>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredCourses.map((c) => (
+              <div
+                key={c.id}
+                className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
+              >
+                {/* Course Header Banner */}
                 <div>
-                  <span className="text-xs font-bold text-slate-900">
-                    {course.pricing === 'FREE' ? (
-                      <span className="text-emerald-600 font-extrabold">FREE</span>
-                    ) : (
-                      `₹${course.price.toLocaleString('en-IN')}`
-                    )}
-                  </span>
+                  <div className="h-28 bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-800 p-4 flex flex-col justify-between text-white relative overflow-hidden">
+                    <div className="flex items-center justify-between relative z-10">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-md">
+                        {c.category?.name || 'Biblical Studies'}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                          c.status === 'PUBLISHED'
+                            ? 'bg-emerald-500/90 text-white'
+                            : c.status === 'DRAFT'
+                            ? 'bg-amber-500/90 text-white'
+                            : 'bg-slate-500/90 text-white'
+                        }`}
+                      >
+                        {c.status}
+                      </span>
+                    </div>
+                    <div className="relative z-10">
+                      <span className="text-[11px] font-medium text-blue-100 flex items-center gap-1">
+                        <GraduationCap size={13} />
+                        {c.level} · {c.language}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Body Content */}
+                  <div className="p-5 space-y-3">
+                    <div>
+                      <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition text-sm leading-snug">
+                        <Link href={`/admin/courses/${c.id}`}>{c.title}</Link>
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1.5 line-clamp-2 leading-relaxed">
+                        {c.description || 'Comprehensive biblical theology curriculum and theological instruction.'}
+                      </p>
+                    </div>
+
+                    {/* Quick Stats Grid */}
+                    <div className="grid grid-cols-3 gap-2 py-3 border-y border-slate-100 text-center">
+                      <div className="px-1">
+                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
+                          Modules
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 mt-0.5 block">
+                          {c.modulesCount || 0}
+                        </span>
+                      </div>
+                      <div className="px-1 border-x border-slate-100">
+                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
+                          Lessons
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 mt-0.5 block">
+                          {c.lessonsCount || 0}
+                        </span>
+                      </div>
+                      <div className="px-1">
+                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
+                          Students
+                        </span>
+                        <span className="text-xs font-bold text-blue-600 mt-0.5 block">
+                          {c.enrolledCount || 0}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Pricing */}
+                    <div className="flex items-center justify-between text-xs pt-1">
+                      <div className="text-slate-500">Tuition Fee:</div>
+                      <div className="font-bold text-slate-900">
+                        {c.pricing === 'FREE' || c.price === 0
+                          ? 'Free'
+                          : `₹${(c.price || 0).toLocaleString('en-IN')}`}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <Link href={`/admin/courses/${course.id}`}>
-                    <Button variant="primary" size="sm" className="gap-1 text-xs">
-                      Curriculum Builder
+                {/* Footer Actions */}
+                <div className="p-4 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    {c.status === 'DRAFT' && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleToggleStatus(c.id, 'PUBLISHED')}
+                        className="text-[11px] text-emerald-600 hover:text-emerald-700 h-7 px-2"
+                      >
+                        Publish
+                      </Button>
+                    )}
+                    {c.status === 'PUBLISHED' && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleToggleStatus(c.id, 'ARCHIVED')}
+                        className="text-[11px] text-slate-400 hover:text-slate-600 h-7 px-2"
+                      >
+                        Archive
+                      </Button>
+                    )}
+                  </div>
+
+                  <Link href={`/admin/courses/${c.id}`}>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      className="text-xs gap-1 h-8 px-3 shadow-none bg-blue-600 hover:bg-blue-700"
+                    >
+                      Curriculum Studio
                       <ChevronRight size={13} />
                     </Button>
                   </Link>
-
-                  {/* Quick Toggle Status */}
-                  <select
-                    value={course.status}
-                    onChange={(e) =>
-                      handleToggleStatus(course.id, e.target.value as any)
-                    }
-                    className="text-[11px] py-1 px-1.5 rounded border border-slate-200 text-slate-600 bg-white focus:outline-none"
-                  >
-                    <option value="DRAFT">Draft</option>
-                    <option value="PUBLISHED">Publish</option>
-                    <option value="ARCHIVED">Archive</option>
-                  </select>
                 </div>
               </div>
-            </Card>
-          ))}
-        </div>
-
-        {filteredCourses.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
-            <BookOpen size={36} className="mx-auto text-slate-300 mb-2" />
-            <h4 className="text-sm font-semibold text-slate-700">No courses match your filter</h4>
-            <p className="text-xs text-slate-400 mt-1">Try resetting your search query or category filter.</p>
+            ))}
           </div>
         )}
-      </div>
 
-      {/* CREATE COURSE MODAL */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Create New Theological Course</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Set up basic course details, category, pricing, and assigned lead instructor.
-                </p>
+        {/* Modal: Create New Course */}
+        {showAddModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 my-8">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Create New Course</h3>
+                  <p className="text-xs text-slate-500">
+                    Saves a verified course record directly in the PostgreSQL database
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="text-slate-400 hover:text-slate-600 text-lg leading-none"
+                >
+                  ✕
+                </button>
               </div>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-lg leading-none p-1"
-              >
-                ✕
-              </button>
-            </div>
 
-            <form onSubmit={handleCreateCourse} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
               {formError && (
-                <div className="p-3 bg-red-50 text-red-700 text-xs rounded-lg border border-red-200">
+                <div className="p-3 mb-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
                   {formError}
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Course Title <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="e.g. Biblical Hermeneutics & Exegesis"
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <form onSubmit={handleCreateCourse} className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Category <span className="text-red-500">*</span>
+                    Course Title *
                   </label>
-                  <select
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="Biblical Theology">Biblical Theology</option>
-                    <option value="Biblical Studies">Biblical Studies</option>
-                    <option value="Church History">Church History</option>
-                    <option value="Biblical Languages">Biblical Languages</option>
-                    <option value="Pastoral Care">Pastoral Care</option>
-                  </select>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Systematic Theology: Doctrine of Salvation"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Academic Level
-                  </label>
-                  <select
-                    value={newLevel}
-                    onChange={(e) => setNewLevel(e.target.value as any)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="BEGINNER">Beginner (Certificate / Dip)</option>
-                    <option value="INTERMEDIATE">Intermediate (B.Th)</option>
-                    <option value="ADVANCED">Advanced (M.Div)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Lead Faculty / Teacher
-                  </label>
-                  <select
-                    value={newTeacher}
-                    onChange={(e) => setNewTeacher(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="Dr. Samuel Mathew">Dr. Samuel Mathew (Theology)</option>
-                    <option value="Dr. Mary Thomas">Dr. Mary Thomas (Biblical Studies)</option>
-                    <option value="Rev. Joseph David">Rev. Joseph David (Church History)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Language
-                  </label>
-                  <select
-                    value={newLanguage}
-                    onChange={(e) => setNewLanguage(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="English">English</option>
-                    <option value="Malayalam">Malayalam</option>
-                    <option value="Tamil">Tamil</option>
-                    <option value="Hindi">Hindi</option>
-                    <option value="Telugu">Telugu</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Pricing Type
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setNewPricing('PAID')}
-                      className={`flex-1 py-1.5 text-xs rounded-lg border font-medium ${
-                        newPricing === 'PAID'
-                          ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold'
-                          : 'border-slate-200 bg-white text-slate-600'
-                      }`}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Category</label>
+                    <select
+                      value={newCategoryId}
+                      onChange={(e) => setNewCategoryId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
                     >
-                      Paid Course
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNewPricing('FREE')}
-                      className={`flex-1 py-1.5 text-xs rounded-lg border font-medium ${
-                        newPricing === 'FREE'
-                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700 font-bold'
-                          : 'border-slate-200 bg-white text-slate-600'
-                      }`}
-                    >
-                      Free Course
-                    </button>
+                      {categories.map((cat) => (
+                        <option key={cat.id} value={cat.id}>
+                          {cat.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                </div>
 
-                {newPricing === 'PAID' && (
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Price (₹ INR)
+                      Academic Level
                     </label>
-                    <input
-                      type="number"
-                      value={newPrice}
-                      onChange={(e) => setNewPrice(e.target.value)}
-                      placeholder="18500"
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    <select
+                      value={newLevel}
+                      onChange={(e) => setNewLevel(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="BEGINNER">Beginner Level</option>
+                      <option value="INTERMEDIATE">Intermediate Level</option>
+                      <option value="ADVANCED">Advanced Level</option>
+                    </select>
                   </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Description & Syllabus Overview <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  placeholder="Outline key theological themes, learning objectives, and recommended background reading..."
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Initial Publication Status
-                </label>
-                <div className="flex gap-2">
-                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="initStatus"
-                      checked={newStatus === 'DRAFT'}
-                      onChange={() => setNewStatus('DRAFT')}
-                    />
-                    Save as Draft (Build curriculum before publishing)
-                  </label>
-                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer ml-3">
-                    <input
-                      type="radio"
-                      name="initStatus"
-                      checked={newStatus === 'PUBLISHED'}
-                      onChange={() => setNewStatus('PUBLISHED')}
-                    />
-                    Publish Immediately
-                  </label>
                 </div>
-              </div>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowAddModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" variant="primary" size="sm" className="gap-1.5">
-                  <Plus size={14} />
-                  Create Course
-                </Button>
-              </div>
-            </form>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Pricing</label>
+                    <select
+                      value={newPricing}
+                      onChange={(e) => setNewPricing(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="PAID">Paid Tuition Course</option>
+                      <option value="FREE">Free Public Course</option>
+                    </select>
+                  </div>
+
+                  {newPricing === 'PAID' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Tuition Fee (₹ INR)
+                      </label>
+                      <input
+                        type="number"
+                        value={newPrice}
+                        onChange={(e) => setNewPrice(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Course Description *
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    placeholder="Provide a theological overview of what this course covers..."
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Initial Status
+                  </label>
+                  <select
+                    value={newStatus}
+                    onChange={(e) => setNewStatus(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="PUBLISHED">Published (Visible in Catalog)</option>
+                    <option value="DRAFT">Draft (Under Development)</option>
+                  </select>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAddModal(false)}
+                    disabled={isSubmitting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
+                    {isSubmitting ? 'Saving to Database...' : 'Create Course'}
+                  </Button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </PortalShell>
   );
 }
