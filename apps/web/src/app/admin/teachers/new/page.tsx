@@ -25,6 +25,9 @@ import {
   FileText,
   Save,
   RotateCcw,
+  Camera,
+  Upload,
+  Lock,
 } from 'lucide-react';
 
 const adminNav = [
@@ -51,6 +54,9 @@ export default function RegisterTeacherPage() {
   const [joiningDate, setJoiningDate] = useState(new Date().toISOString().split('T')[0]);
   const [status, setStatus] = useState<'ACTIVE' | 'DRAFT'>('ACTIVE');
   const [bio, setBio] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
 
   // Address
   const [street, setStreet] = useState('');
@@ -103,6 +109,8 @@ export default function RegisterTeacherPage() {
       if (employeeCode.trim()) payload.employeeCode = employeeCode.trim();
       if (experienceYears !== '') payload.experienceYears = Number(experienceYears);
       if (joiningDate) payload.joiningDate = new Date(joiningDate).toISOString();
+      if (photoUrl) payload.photoUrl = photoUrl;
+      if (password.trim()) payload.password = password.trim();
 
       if (street.trim() || city.trim() || state.trim() || postalCode.trim()) {
         payload.address = {
@@ -177,6 +185,61 @@ export default function RegisterTeacherPage() {
 
         {/* Form Container */}
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Faculty Photo Upload */}
+          <Card className="border shadow-sm bg-card p-6">
+            <h2 className="text-sm font-semibold flex items-center gap-2 mb-4">
+              <Camera className="h-4 w-4 text-primary" />
+              Faculty Profile Photograph
+            </h2>
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 border-2 border-slate-200 flex items-center justify-center shrink-0 shadow-inner">
+                {photoPreview || photoUrl ? (
+                  <img src={photoPreview || photoUrl} alt="Preview" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-slate-400 font-bold text-xl">
+                    {fullName ? fullName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'FAC'}
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 space-y-2 w-full text-xs">
+                <label className="font-medium text-slate-700 block">Upload Photo (JPG, PNG, WebP up to 5MB)</label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium transition">
+                    <Upload size={14} />
+                    <span>Choose File</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            setPhotoPreview(reader.result as string);
+                            setPhotoUrl(reader.result as string);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                  </label>
+                  <span className="text-slate-400">or enter image URL:</span>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/photo.jpg"
+                    value={photoUrl.startsWith('data:') ? '' : photoUrl}
+                    onChange={(e) => {
+                      setPhotoUrl(e.target.value);
+                      setPhotoPreview(null);
+                    }}
+                    className="flex-1 min-w-[200px] px-3 py-1.5 border rounded-lg text-xs bg-background"
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+
           {/* 1. Personal & Contact Information */}
           <Card className="border shadow-sm bg-card">
             <div className="px-6 py-4 border-b bg-muted/20">
@@ -339,6 +402,31 @@ export default function RegisterTeacherPage() {
                   <option value="ACTIVE">ACTIVE (Ready for Course/Batch Assignment)</option>
                   <option value="DRAFT">DRAFT (Pending Credential Verification)</option>
                 </select>
+              </div>
+            </div>
+          </Card>
+
+          {/* Portal Account Credentials */}
+          <Card className="border shadow-sm bg-card">
+            <div className="px-6 py-4 border-b bg-muted/20">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <Lock className="h-4 w-4 text-primary" />
+                Faculty Portal Account Credentials (Optional)
+              </h2>
+            </div>
+            <div className="p-6 space-y-3 text-xs">
+              <p className="text-muted-foreground">
+                Provide an initial password if this faculty member requires immediate login access to the Teacher Portal.
+              </p>
+              <div className="max-w-md">
+                <label className="block font-medium text-foreground mb-1">Initial Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Minimum 8 characters (optional)"
+                  className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
               </div>
             </div>
           </Card>

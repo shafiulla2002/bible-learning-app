@@ -74,6 +74,34 @@ export async function apiFetch<T>(
   return response.json();
 }
 
+
+// Fast In-Memory Request Cache with TTL & Scope Isolation (Phase 7)
+const memoryCache = new Map<string, { data: any; expiry: number }>();
+
+export function getCached<T>(key: string): T | null {
+  const item = memoryCache.get(key);
+  if (!item) return null;
+  if (Date.now() > item.expiry) {
+    memoryCache.delete(key);
+    return null;
+  }
+  return item.data as T;
+}
+
+export function setCached<T>(key: string, data: T, ttlMs = 30000): void {
+  memoryCache.set(key, { data, expiry: Date.now() + ttlMs });
+}
+
+export function clearCache(prefix?: string): void {
+  if (!prefix) {
+    memoryCache.clear();
+    return;
+  }
+  for (const k of memoryCache.keys()) {
+    if (k.startsWith(prefix)) memoryCache.delete(k);
+  }
+}
+
 function buildCleanQueryString(params?: Record<string, any>): string {
   if (!params) return '';
   const searchParams = new URLSearchParams();
@@ -91,6 +119,7 @@ function buildCleanQueryString(params?: Record<string, any>): string {
 // -----------------------------------------------------------------------------
 
 export interface StudentProfileSummaryDto {
+  avatarUrl?: string | null;
   id: string;
   userId: string;
   admissionNo: string;
@@ -108,6 +137,7 @@ export interface StudentProfileSummaryDto {
 }
 
 export interface StudentDetailDto extends StudentProfileSummaryDto {
+  avatarUrl?: string | null;
   dateOfBirth?: string;
   educationLevel?: string;
   emergencyContact?: string;
@@ -210,6 +240,9 @@ export const studentApi = {
       method: 'POST',
       body: JSON.stringify({ rows, execute }),
     }),
+
+  getFinanceHistory: (instituteId: string, studentId: string) =>
+    apiFetch<any>(`/institutes/${instituteId}/students/${studentId}/finance`),
 };
 
 // -----------------------------------------------------------------------------
@@ -313,11 +346,13 @@ export const courseApi = {
   getCourse: (instituteId: string, courseId: string) =>
     apiFetch<CourseDto>(`/institutes/${instituteId}/courses/${courseId}`),
 
-  createCourse: (instituteId: string, data: any) =>
-    apiFetch<CourseDto>(`/institutes/${instituteId}/courses`, {
+  createCourse: (instituteId: string, data: any) => {
+    clearCache(`courses:${instituteId}`);
+    return apiFetch<CourseDto>(`/institutes/${instituteId}/courses`, {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
+    });
+  },
 
   updateCourse: (instituteId: string, courseId: string, data: any) =>
     apiFetch<CourseDto>(`/institutes/${instituteId}/courses/${courseId}`, {
@@ -747,6 +782,7 @@ export const attendanceApi = {
 // -----------------------------------------------------------------------------
 
 export interface TeacherSummaryDto {
+  photoUrl?: string | null;
   id: string;
   employeeCode?: string | null;
   fullName: string;
@@ -763,6 +799,7 @@ export interface TeacherSummaryDto {
 }
 
 export interface TeacherDetailDto extends TeacherSummaryDto {
+  photoUrl?: string | null;
   bio?: string | null;
   address?: any;
   courses: Array<{

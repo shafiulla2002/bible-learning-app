@@ -72,6 +72,11 @@ export default function StudentsDirectoryPage() {
 
   // Filters
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [courseFilter, setCourseFilter] = useState<string>('ALL');
 
@@ -162,7 +167,7 @@ export default function StudentsDirectoryPage() {
       const res = await studentApi.getStudents(instituteId, {
         page: currentPage,
         limit: pageSize,
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         status: statusFilter !== 'ALL' ? (statusFilter as any) : undefined,
         courseId: courseFilter !== 'ALL' ? courseFilter : undefined,
       });
@@ -183,7 +188,7 @@ export default function StudentsDirectoryPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [instituteId, currentPage, pageSize, search, statusFilter, courseFilter]);
+  }, [instituteId, currentPage, pageSize, debouncedSearch, statusFilter, courseFilter]);
 
   useEffect(() => {
     fetchStudents();

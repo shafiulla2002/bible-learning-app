@@ -19,6 +19,7 @@ export async function GET(
       `SELECT
          sp.id,
          u.id as "userId",
+         u."avatarUrl",
          sp."admissionNo",
          u."fullName",
          u."phoneE164" as "phoneNumber",
@@ -53,7 +54,7 @@ export async function GET(
          e."batchId",
          b.name as "batchName",
          e.status,
-         0 as "progressPct",
+         e."progressPct",
          e."createdAt" as "enrolledAt"
        FROM "Enrolment" e
        JOIN "Course" c ON c.id = e."courseId"
@@ -75,6 +76,7 @@ export async function GET(
     return NextResponse.json({
       id: s.id,
       userId: s.userId,
+      avatarUrl: s.avatarUrl,
       admissionNo: s.admissionNo,
       fullName: s.fullName,
       phoneNumber: s.phoneNumber,
@@ -125,10 +127,12 @@ export async function PATCH(
       preferredLanguage,
       address,
       guardian,
+      status,
+      avatarUrl,
     } = body;
 
-    // 1. Find student profile and user
-    const studentRows = await queryDb(
+    // Check student profile
+    const existing = await queryDb(
       `SELECT sp.id, sp."membershipId", m."userId"
        FROM "StudentProfile" sp
        JOIN "Membership" m ON m.id = sp."membershipId"
@@ -136,55 +140,67 @@ export async function PATCH(
       [id, effectiveInstituteId]
     );
 
-    if (studentRows.length === 0) {
+    if (existing.length === 0) {
       return NextResponse.json({ message: 'Student profile not found' }, { status: 404 });
     }
 
-    const { userId } = studentRows[0];
+    const { membershipId, userId } = existing[0];
 
-    // 2. Update User if name/phone/email provided
-    if (fullName || phoneNumber || email !== undefined) {
+    // Update User
+    if (fullName || phoneNumber || email !== undefined || avatarUrl !== undefined) {
       await queryDb(
         `UPDATE "User"
          SET "fullName" = COALESCE($1, "fullName"),
              "phoneE164" = COALESCE($2, "phoneE164"),
              email = COALESCE($3, email),
+             "avatarUrl" = COALESCE($4, "avatarUrl"),
              "updatedAt" = NOW()
-         WHERE id = $4`,
-        [fullName || null, phoneNumber || null, email || null, userId]
+         WHERE id = $5`,
+        [fullName || null, phoneNumber || null, email, avatarUrl, userId]
       );
     }
 
-    // 3. Update StudentProfile
+    // Update StudentProfile
     await queryDb(
       `UPDATE "StudentProfile"
        SET gender = COALESCE($1, gender),
-           "dateOfBirth" = CASE WHEN $2::text IS NOT NULL THEN $2::timestamp ELSE "dateOfBirth" END,
+           "dateOfBirth" = COALESCE($2, "dateOfBirth"),
            church = COALESCE($3, church),
            "preferredLanguage" = COALESCE($4, "preferredLanguage"),
-           address = CASE WHEN $5::text IS NOT NULL THEN $5::jsonb ELSE address END,
-           guardian = CASE WHEN $6::text IS NOT NULL THEN $6::jsonb ELSE guardian END,
+           address = COALESCE($5, address),
+           guardian = COALESCE($6, guardian),
+           status = COALESCE($7, status),
            "updatedAt" = NOW()
-       WHERE id = $7 AND "instituteId" = $8`,
+       WHERE id = $8 AND "instituteId" = $9`,
       [
         gender || null,
-        dateOfBirth || null,
+        dateOfBirth ? new Date(dateOfBirth) : null,
         church || null,
         preferredLanguage || null,
         address ? JSON.stringify(address) : null,
         guardian ? JSON.stringify(guardian) : null,
+        status || null,
         id,
         effectiveInstituteId,
       ]
     );
 
-    return NextResponse.json({ message: 'Student updated successfully' });
+    // Update Membership status if status changed
+    if (status) {
+      const memStatus = status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED';
+      await queryDb(
+        `UPDATE "Membership" SET status = $1, "updatedAt" = NOW() WHERE id = $2`,
+        [memStatus, membershipId]
+      );
+    }
+
+    // Return updated details
+    return GET(request, { params });
   } catch (error: any) {
     console.error('Error in /institutes/[instituteId]/students/[id] PATCH:', error);
     return NextResponse.json(
-      { message: error?.message || 'Failed to update student' },
+      { message: error?.message || 'Failed to update student profile' },
       { status: 500 }
     );
   }
 }
-

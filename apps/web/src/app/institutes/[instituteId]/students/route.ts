@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import bcrypt from 'bcrypt';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,7 @@ export async function GET(
       `SELECT
          sp.id,
          u.id as "userId",
+         u."avatarUrl",
          sp."admissionNo",
          u."fullName",
          u."phoneE164" as "phoneNumber",
@@ -92,6 +94,7 @@ export async function GET(
     const data = dataRows.map((r) => ({
       id: r.id,
       userId: r.userId,
+      avatarUrl: r.avatarUrl,
       admissionNo: r.admissionNo,
       fullName: r.fullName,
       phoneNumber: r.phoneNumber,
@@ -152,6 +155,8 @@ export async function POST(
       courseId,
       batchId,
       status = 'ACTIVE',
+      avatarUrl,
+      password,
     } = body;
 
     if (!fullName || !phoneNumber) {
@@ -179,6 +184,9 @@ export async function POST(
     }
     const admissionNo = `${prefix}${String(nextNum).padStart(4, '0')}`;
 
+    // Hash password if account creation requested
+    const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+
     // 1. Create or Find User
     const existingUser = await queryDb(
       `SELECT id FROM "User" WHERE "phoneE164" = $1`,
@@ -189,15 +197,20 @@ export async function POST(
     if (existingUser.length > 0) {
       userId = existingUser[0].id;
       await queryDb(
-        `UPDATE "User" SET "fullName" = $1, email = COALESCE($2, email) WHERE id = $3`,
-        [fullName, email || null, userId]
+        `UPDATE "User"
+         SET "fullName" = $1,
+             email = COALESCE($2, email),
+             "avatarUrl" = COALESCE($3, "avatarUrl"),
+             "passwordHash" = COALESCE($4, "passwordHash")
+         WHERE id = $5`,
+        [fullName, email || null, avatarUrl || null, passwordHash, userId]
       );
     } else {
       const newUser = await queryDb(
-        `INSERT INTO "User" (id, "phoneE164", "fullName", email, status, "updatedAt")
-         VALUES (gen_random_uuid(), $1, $2, $3, 'ACTIVE', NOW())
+        `INSERT INTO "User" (id, "phoneE164", "fullName", email, "avatarUrl", "passwordHash", status, "updatedAt")
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'ACTIVE', NOW())
          RETURNING id`,
-        [phoneNumber, fullName, email || null]
+        [phoneNumber, fullName, email || null, avatarUrl || null, passwordHash]
       );
       userId = newUser[0].id;
     }
@@ -251,10 +264,9 @@ export async function POST(
     // 5. Course Enrolment if courseId provided
     let enrolledCourseTitle: string | undefined;
     if (courseId) {
-      const enr = await queryDb(
+      await queryDb(
         `INSERT INTO "Enrolment" (id, "instituteId", "studentProfileId", "courseId", "batchId", source, status, "updatedAt")
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'ADMIN', 'ACTIVE', NOW())
-         RETURNING id`,
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'ADMIN', 'ACTIVE', NOW())`,
         [effectiveInstituteId, studentProfile.id, courseId, batchId || null]
       );
       const courseRow = await queryDb(`SELECT title FROM "Course" WHERE id = $1`, [courseId]);
@@ -264,6 +276,7 @@ export async function POST(
     return NextResponse.json({
       id: studentProfile.id,
       userId,
+      avatarUrl,
       admissionNo: studentProfile.admissionNo,
       fullName,
       phoneNumber,
@@ -284,4 +297,3 @@ export async function POST(
     );
   }
 }
-

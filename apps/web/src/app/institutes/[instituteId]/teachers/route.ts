@@ -1,3 +1,4 @@
+import bcrypt from 'bcrypt';
 import { NextRequest, NextResponse } from 'next/server';
 import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
 

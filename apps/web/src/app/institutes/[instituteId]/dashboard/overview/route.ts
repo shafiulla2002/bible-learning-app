@@ -9,6 +9,9 @@ export async function GET(
 ) {
   try {
     const { instituteId } = await params;
+    const { searchParams } = new URL(request.url);
+    const presetParam = (searchParams.get('preset') || '30D').toUpperCase();
+
     const ctx = await resolveServerAdminContext();
     const effectiveInstituteId =
       instituteId && instituteId !== 'null' && instituteId !== 'undefined'
@@ -166,20 +169,60 @@ export async function GET(
       [effectiveInstituteId]
     );
 
-    // 4. Monthly Enrolment Trend (Real monthly grouping)
-    const enrolmentTrendRows = await queryDb(
-      `SELECT
-         TO_CHAR("createdAt", 'YYYY-MM') as month,
-         TO_CHAR("createdAt", 'Mon') as label,
-         COUNT(*)::int as count,
-         COUNT(*)::int as registrations
-       FROM "Enrolment"
-       WHERE "instituteId" = $1
-       GROUP BY TO_CHAR("createdAt", 'YYYY-MM'), TO_CHAR("createdAt", 'Mon')
-       ORDER BY month ASC
-       LIMIT 6`,
-      [effectiveInstituteId]
-    );
+    // 4. Monthly & Periodic Enrolment Trend (Real database aggregation)
+    let enrolmentTrendRows: any[] = [];
+    let dateFilterLabel = 'Last 30 Days (Database Live)';
+
+    if (presetParam === '7D') {
+      dateFilterLabel = 'Last 7 Days (Database Live)';
+      enrolmentTrendRows = await queryDb(
+        `SELECT
+           TO_CHAR(d.day, 'YYYY-MM-DD') as month,
+           TO_CHAR(d.day, 'Dy DD') as label,
+           COALESCE(COUNT(e.id), 0)::int as count,
+           COALESCE(COUNT(DISTINCT sp.id), 0)::int as registrations,
+           COALESCE(COUNT(CASE WHEN sp.status = 'INACTIVE' THEN 1 END), 0)::int as "leftCount"
+         FROM GENERATE_SERIES(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, '1 day'::interval) d(day)
+         LEFT JOIN "StudentProfile" sp ON sp."instituteId" = $1 AND sp."createdAt"::date = d.day::date
+         LEFT JOIN "Enrolment" e ON e."instituteId" = $1 AND e."createdAt"::date = d.day::date
+         GROUP BY d.day
+         ORDER BY d.day ASC`,
+        [effectiveInstituteId]
+      );
+    } else if (presetParam === 'THIS_MONTH') {
+      dateFilterLabel = 'This Month (Database Live)';
+      enrolmentTrendRows = await queryDb(
+        `SELECT
+           TO_CHAR(d.day, 'YYYY-MM-DD') as month,
+           TO_CHAR(d.day, 'DD Mon') as label,
+           COALESCE(COUNT(e.id), 0)::int as count,
+           COALESCE(COUNT(DISTINCT sp.id), 0)::int as registrations,
+           COALESCE(COUNT(CASE WHEN sp.status = 'INACTIVE' THEN 1 END), 0)::int as "leftCount"
+         FROM GENERATE_SERIES(DATE_TRUNC('month', CURRENT_DATE), CURRENT_DATE, '1 day'::interval) d(day)
+         LEFT JOIN "StudentProfile" sp ON sp."instituteId" = $1 AND sp."createdAt"::date = d.day::date
+         LEFT JOIN "Enrolment" e ON e."instituteId" = $1 AND e."createdAt"::date = d.day::date
+         GROUP BY d.day
+         ORDER BY d.day ASC`,
+        [effectiveInstituteId]
+      );
+    } else {
+      dateFilterLabel = presetParam === 'ALL' ? 'All Time (Database Live)' : 'Last 30 Days (Database Live)';
+      enrolmentTrendRows = await queryDb(
+        `SELECT
+           TO_CHAR(e."createdAt", 'YYYY-MM') as month,
+           TO_CHAR(e."createdAt", 'Mon') as label,
+           COUNT(e.id)::int as count,
+           COUNT(DISTINCT sp.id)::int as registrations,
+           COUNT(CASE WHEN e.status = 'REVOKED' OR sp.status = 'INACTIVE' THEN 1 END)::int as "leftCount"
+         FROM "Enrolment" e
+         JOIN "StudentProfile" sp ON sp.id = e."studentProfileId"
+         WHERE e."instituteId" = $1
+         GROUP BY TO_CHAR(e."createdAt", 'YYYY-MM'), TO_CHAR(e."createdAt", 'Mon')
+         ORDER BY month ASC
+         LIMIT 6`,
+        [effectiveInstituteId]
+      );
+    }
 
     const enrolmentTrend =
       enrolmentTrendRows.length > 0
@@ -190,6 +233,7 @@ export async function GET(
               label: new Date().toLocaleString('default', { month: 'short' }),
               count: totalStudents,
               registrations: totalStudents,
+              leftCount: 0,
             },
           ];
 
@@ -249,28 +293,27 @@ export async function GET(
        LEFT JOIN "User" u ON u.id = m."userId"
        LEFT JOIN "Enrolment" e ON e."studentProfileId" = sp.id
        LEFT JOIN "Course" c ON c.id = e."courseId"
-       WHERE p."instituteId" = $1
+       WHERE p."instituteId" = $1 AND p.status = 'COMPLETED'
        ORDER BY p."paymentDate" DESC
-       LIMIT 5`,
+       LIMIT 10`,
       [effectiveInstituteId]
     );
 
-    const recentPayments = recentPaymentsRows.map((r) => ({
-      id: r.id,
-      paymentNumber: r.paymentNumber,
-      receiptNumber: r.receiptNumber || `REC-${r.paymentNumber}`,
-      studentId: r.admissionNo,
-      studentName: r.studentName || 'Student',
-      admissionNo: r.admissionNo || '—',
-      courseName: r.courseName || 'Theology Course',
-      invoiceId: r.invoiceNumber,
-      invoiceNumber: r.invoiceNumber || '—',
-      amount: Number(r.amount),
-      netAmount: Number(r.netAmount),
-      paymentMode: r.paymentMode,
-      referenceNumber: r.referenceNumber,
-      status: r.status,
-      paymentDate: r.paymentDate ? new Date(r.paymentDate).toISOString() : new Date().toISOString(),
+    const recentPayments = recentPaymentsRows.map((p) => ({
+      id: p.id,
+      paymentNumber: p.paymentNumber,
+      receiptNumber: p.receiptNumber || '—',
+      studentId: p.admissionNo || '—',
+      studentName: p.studentName || 'Student',
+      admissionNo: p.admissionNo || '—',
+      courseName: p.courseName || 'General Program',
+      invoiceId: p.invoiceNumber || '—',
+      invoiceNumber: p.invoiceNumber || '—',
+      amount: Number(p.netAmount || p.amount || 0),
+      paymentMode: p.paymentMode || 'ONLINE',
+      referenceNumber: p.referenceNumber || '—',
+      status: p.status || 'COMPLETED',
+      paymentDate: p.paymentDate ? new Date(p.paymentDate).toISOString() : new Date().toISOString(),
     }));
 
     return NextResponse.json({
@@ -292,8 +335,8 @@ export async function GET(
         role: ctx.user.role,
       },
       dateFilter: {
-        preset: '30D',
-        label: 'Last 30 Days (Database Live)',
+        preset: presetParam,
+        label: dateFilterLabel,
         from: null,
         to: null,
         previousFrom: null,

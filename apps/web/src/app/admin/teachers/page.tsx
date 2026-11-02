@@ -48,6 +48,11 @@ export default function TeachersDirectoryPage() {
   const [teachers, setTeachers] = useState<TeacherSummaryDto[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedSearch, setDebouncedSearch] = useState<string>('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [specializationFilter, setSpecializationFilter] = useState<string>('ALL');
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -70,7 +75,7 @@ export default function TeachersDirectoryPage() {
         page: currentPage,
         limit: 10,
       };
-      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
       if (statusFilter !== 'ALL') params.status = statusFilter;
       if (specializationFilter !== 'ALL') params.specialization = specializationFilter;
 
@@ -134,7 +139,7 @@ export default function TeachersDirectoryPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [instituteId, currentPage, searchQuery, statusFilter, specializationFilter]);
+  }, [instituteId, currentPage, debouncedSearch, statusFilter, specializationFilter]);
 
   useEffect(() => {
     loadTeachers();

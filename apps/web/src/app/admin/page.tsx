@@ -626,7 +626,7 @@ export default function AdminDashboardPage() {
     return overview.enrolmentTrend.map((item) => ({
       label: item.label,
       enrolled: item.count,
-      left: Math.max(0, (item.registrations ?? item.count) - item.count),
+      left: (item as any).leftCount !== undefined ? (item as any).leftCount : Math.max(0, (item.registrations ?? item.count) - item.count),
     }));
   }, [overview]);
 
