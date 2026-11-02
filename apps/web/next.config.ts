@@ -12,11 +12,16 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
-    const apiHost = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    const apiHost = process.env.NEXT_PUBLIC_API_URL;
+    if (!apiHost) {
+      return [];
+    }
+    const cleanHost = apiHost.endsWith('/') ? apiHost.slice(0, -1) : apiHost;
+    const targetHost = cleanHost.endsWith('/api/v1') ? cleanHost : `${cleanHost}/api/v1`;
     return [
       {
         source: '/api/:path*',
-        destination: `${apiHost}/api/v1/:path*`,
+        destination: `${targetHost}/:path*`,
       },
     ];
   },

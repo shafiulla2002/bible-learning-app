@@ -736,3 +736,419 @@ export function AttendanceDonutChart({
     </div>
   );
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. OVERVIEW STACKED BAR CHART (Matches Screenshot 8 Reference UI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface OverviewBarDataPoint {
+  label: string; // e.g. 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'
+  teachers: number;
+  students: number;
+  other: number;
+  tooltipInfo?: string;
+}
+
+interface OverviewStackedBarChartProps {
+  data: OverviewBarDataPoint[];
+}
+
+export function OverviewStackedBarChart({ data }: OverviewStackedBarChartProps) {
+  const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
+
+  if (
+    !data ||
+    data.length === 0 ||
+    data.every((d) => d.teachers === 0 && d.students === 0 && d.other === 0)
+  ) {
+    return (
+      <div className="h-64 flex flex-col items-center justify-center text-center px-4 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+        <p className="text-xs font-semibold text-slate-600">
+          No activity recorded for this period
+        </p>
+        <p className="text-[11px] text-slate-400 mt-1 max-w-xs">
+          Activity across teachers, students, and course cohorts will appear
+          here once academic sessions and admissions occur.
+        </p>
+      </div>
+    );
+  }
+
+  const chartHeight = 220;
+  const chartWidth = 540;
+  const paddingLeft = 36;
+  const paddingRight = 16;
+  const paddingTop = 24;
+  const paddingBottom = 34;
+
+  const innerWidth = chartWidth - paddingLeft - paddingRight;
+  const innerHeight = chartHeight - paddingTop - paddingBottom;
+  const step = innerWidth / Math.max(1, data.length);
+  const barWidth = Math.min(24, Math.max(14, step * 0.38));
+
+  const maxVal = Math.max(
+    ...data.map((d) => d.teachers + d.students + d.other),
+    80,
+  );
+
+  return (
+    <div className="relative w-full">
+      <svg
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+        className="w-full h-64 overflow-visible"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {/* Horizontal gridlines */}
+        {[0, 20, 40, 60, 80].map((val) => {
+          const y = paddingTop + innerHeight * (1 - val / maxVal);
+          return (
+            <g key={val}>
+              <line
+                x1={paddingLeft}
+                y1={y}
+                x2={chartWidth - paddingRight}
+                y2={y}
+                stroke="#f1f5f9"
+                strokeDasharray={val === 0 ? 'none' : '3 3'}
+                strokeWidth="1"
+              />
+              <text
+                x={paddingLeft - 8}
+                y={y + 3.5}
+                textAnchor="end"
+                className="text-[10px] fill-slate-400 font-medium"
+              >
+                {val}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Stacked Bars */}
+        {data.map((d, idx) => {
+          const isHovered = hoveredIdx === idx;
+          const x = paddingLeft + idx * step + (step - barWidth) / 2;
+
+          const hTeachers = (d.teachers / maxVal) * innerHeight;
+          const hStudents = (d.students / maxVal) * innerHeight;
+          const hOther = (d.other / maxVal) * innerHeight;
+
+          const yTeachers = paddingTop + innerHeight - hTeachers;
+          const yStudents = yTeachers - hStudents;
+          const yOther = yStudents - hOther;
+
+          return (
+            <g
+              key={idx}
+              className="cursor-pointer transition-opacity"
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            >
+              {/* Background hover column */}
+              <rect
+                x={paddingLeft + idx * step + 2}
+                y={paddingTop}
+                width={Math.max(4, step - 4)}
+                height={innerHeight}
+                fill={isHovered ? 'rgba(99, 102, 241, 0.05)' : 'transparent'}
+                rx="6"
+              />
+
+              {/* Bottom: Teachers (Dark Purple #4f46e5) */}
+              <rect
+                x={x}
+                y={yTeachers}
+                width={barWidth}
+                height={Math.max(2, hTeachers)}
+                fill="#4f46e5"
+                rx={hStudents === 0 && hOther === 0 ? 4 : 0}
+              />
+
+              {/* Middle: Students (Vibrant Purple #818cf8) */}
+              <rect
+                x={x}
+                y={yStudents}
+                width={barWidth}
+                height={Math.max(2, hStudents)}
+                fill="#818cf8"
+                rx={hOther === 0 ? 4 : 0}
+              />
+
+              {/* Top: Other / Batches (Light Soft Purple #c7d2fe) */}
+              <rect
+                x={x}
+                y={yOther}
+                width={barWidth}
+                height={Math.max(2, hOther)}
+                fill="#c7d2fe"
+                rx="4"
+              />
+
+              {/* Day Label */}
+              <text
+                x={x + barWidth / 2}
+                y={chartHeight - 12}
+                textAnchor="middle"
+                className={`text-[11px] font-medium ${
+                  isHovered ? 'fill-slate-900 font-bold' : 'fill-slate-400'
+                }`}
+              >
+                {d.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Hover Tooltip */}
+      {hoveredIdx !== null && data[hoveredIdx] && (
+        <div
+          className="absolute z-20 bg-slate-900 text-white rounded-xl shadow-lg px-3 py-2 text-xs pointer-events-none transform -translate-x-1/2"
+          style={{
+            left: `${Math.min(
+              86,
+              Math.max(
+                14,
+                ((paddingLeft + hoveredIdx * step + step / 2) / chartWidth) * 100,
+              ),
+            )}%`,
+            top: '4px',
+          }}
+        >
+          <div className="font-semibold text-slate-200 border-b border-slate-700 pb-1 mb-1">
+            {data[hoveredIdx].label} Activity
+          </div>
+          <div className="flex items-center gap-2 text-indigo-300">
+            <span className="w-2 h-2 rounded-full bg-indigo-500" />
+            <span>Teachers: <strong>{data[hoveredIdx].teachers}</strong></span>
+          </div>
+          <div className="flex items-center gap-2 text-indigo-200 mt-0.5">
+            <span className="w-2 h-2 rounded-full bg-indigo-400" />
+            <span>Students: <strong>{data[hoveredIdx].students}</strong></span>
+          </div>
+          <div className="flex items-center gap-2 text-indigo-100 mt-0.5">
+            <span className="w-2 h-2 rounded-full bg-indigo-200" />
+            <span>Batches & Other: <strong>{data[hoveredIdx].other}</strong></span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. STUDENT ANALYSIS LINE CHART (Matches Screenshot 8 Reference UI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface StudentAnalysisDataPoint {
+  label: string; // e.g. 'Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'
+  enrolled: number;
+  left: number;
+}
+
+interface StudentAnalysisLineChartProps {
+  data: StudentAnalysisDataPoint[];
+}
+
+export function StudentAnalysisLineChart({ data }: StudentAnalysisLineChartProps) {
+  const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
+
+  if (
+    !data ||
+    data.length === 0 ||
+    data.every((d) => d.enrolled === 0 && d.left === 0)
+  ) {
+    return (
+      <div className="h-64 flex flex-col items-center justify-center text-center px-4 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+        <p className="text-xs font-semibold text-slate-600">
+          No student enrollment activity in this period
+        </p>
+        <p className="text-[11px] text-slate-400 mt-1 max-w-xs">
+          Student admissions and course enrollments will be graphed here
+          automatically from actual student records.
+        </p>
+      </div>
+    );
+  }
+
+  const chartHeight = 220;
+  const chartWidth = 540;
+  const paddingLeft = 36;
+  const paddingRight = 16;
+  const paddingTop = 24;
+  const paddingBottom = 34;
+
+  const innerWidth = chartWidth - paddingLeft - paddingRight;
+  const innerHeight = chartHeight - paddingTop - paddingBottom;
+  const step = innerWidth / Math.max(1, data.length - 1);
+
+  const maxVal = Math.max(
+    ...data.map((d) => Math.max(d.enrolled, d.left)),
+    80,
+  );
+
+  const points = data.map((d, i) => ({
+    x: paddingLeft + i * step,
+    y: paddingTop + innerHeight - (d.enrolled / maxVal) * innerHeight,
+    enrolled: d.enrolled,
+    left: d.left,
+    label: d.label,
+  }));
+
+  // Create smooth curved path
+  const linePath = points.reduce((acc, pt, i) => {
+    if (i === 0) return `M ${pt.x} ${pt.y}`;
+    const prev = points[i - 1];
+    const cpX = (prev.x + pt.x) / 2;
+    return `${acc} C ${cpX} ${prev.y}, ${cpX} ${pt.y}, ${pt.x} ${pt.y}`;
+  }, '');
+
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${
+    paddingTop + innerHeight
+  } L ${points[0].x} ${paddingTop + innerHeight} Z`;
+
+  return (
+    <div className="relative w-full">
+      <svg
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+        className="w-full h-64 overflow-visible"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <linearGradient id="studentAnalysisGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+
+        {/* Gridlines */}
+        {[0, 20, 40, 60, 80].map((val) => {
+          const y = paddingTop + innerHeight * (1 - val / maxVal);
+          return (
+            <g key={val}>
+              <line
+                x1={paddingLeft}
+                y1={y}
+                x2={chartWidth - paddingRight}
+                y2={y}
+                stroke="#f1f5f9"
+                strokeDasharray={val === 0 ? 'none' : '3 3'}
+                strokeWidth="1"
+              />
+              <text
+                x={paddingLeft - 8}
+                y={y + 3.5}
+                textAnchor="end"
+                className="text-[10px] fill-slate-400 font-medium"
+              >
+                {val}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Area fill */}
+        <path d={areaPath} fill="url(#studentAnalysisGrad)" />
+
+        {/* Smooth Purple Line */}
+        <path
+          d={linePath}
+          fill="none"
+          stroke="#7c3aed"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+
+        {/* Interactive points & vertical indicators */}
+        {points.map((pt, idx) => {
+          const isHovered = hoveredIdx === idx;
+          return (
+            <g
+              key={idx}
+              className="cursor-pointer"
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            >
+              {isHovered && (
+                <line
+                  x1={pt.x}
+                  y1={paddingTop}
+                  x2={pt.x}
+                  y2={paddingTop + innerHeight}
+                  stroke="#c4b5fd"
+                  strokeDasharray="2 2"
+                  strokeWidth="1.5"
+                />
+              )}
+
+              {/* Outer halo on hover */}
+              {isHovered && (
+                <circle
+                  cx={pt.x}
+                  cy={pt.y}
+                  r="7"
+                  fill="#7c3aed"
+                  fillOpacity="0.2"
+                />
+              )}
+
+              <circle
+                cx={pt.x}
+                cy={pt.y}
+                r={isHovered ? 4.5 : 3.5}
+                fill="#ffffff"
+                stroke="#7c3aed"
+                strokeWidth="2"
+              />
+
+              <text
+                x={pt.x}
+                y={chartHeight - 12}
+                textAnchor="middle"
+                className={`text-[11px] font-medium ${
+                  isHovered ? 'fill-slate-900 font-bold' : 'fill-slate-400'
+                }`}
+              >
+                {pt.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Floating Tooltip matching Screenshot 8 */}
+      {hoveredIdx !== null && points[hoveredIdx] && (
+        <div
+          className="absolute z-20 bg-white/95 backdrop-blur-xs border border-slate-200/90 text-slate-900 rounded-xl shadow-xl px-3 py-2 text-xs pointer-events-none transform -translate-x-1/2"
+          style={{
+            left: `${Math.min(
+              84,
+              Math.max(16, (points[hoveredIdx].x / chartWidth) * 100),
+            )}%`,
+            top: '8px',
+          }}
+        >
+          <div className="flex items-center gap-1.5 font-semibold text-slate-800 border-b border-slate-100 pb-1 mb-1">
+            <span>{points[hoveredIdx].label} Analysis</span>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-slate-700">
+            <span className="flex items-center gap-1.5 text-purple-700">
+              <span className="w-2 h-2 rounded-full bg-purple-600" />
+              Enrolled:
+            </span>
+            <span className="font-bold text-slate-900">{points[hoveredIdx].enrolled}</span>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-slate-600 mt-0.5">
+            <span className="flex items-center gap-1.5 text-rose-600">
+              <span className="w-2 h-2 rounded-full bg-rose-500" />
+              Left:
+            </span>
+            <span className="font-bold text-slate-900">{points[hoveredIdx].left}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

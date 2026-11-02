@@ -4,7 +4,25 @@
  * to demo mock data when running in detached/prototype preview mode.
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+export function resolveApiBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (isLocalhost) {
+      return 'http://localhost:4000';
+    }
+    return '';
+  }
+  if (process.env.NODE_ENV === 'development') {
+    return 'http://localhost:4000';
+  }
+  return '';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 export interface ApiFetchOptions extends RequestInit {
   token?: string;
