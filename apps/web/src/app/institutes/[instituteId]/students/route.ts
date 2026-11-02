@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
 
