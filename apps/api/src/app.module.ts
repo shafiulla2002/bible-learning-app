@@ -7,6 +7,7 @@ import { BatchesModule } from './modules/batches/batches.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { PrismaService } from './core/prisma/prisma.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { PrismaService } from './core/prisma/prisma.service';
     AttendanceModule,
     TeachersModule,
     DashboardModule,
+    SettingsModule,
   ],
   providers: [PrismaService],
   exports: [PrismaService],

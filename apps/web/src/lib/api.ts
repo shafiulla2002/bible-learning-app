@@ -654,3 +654,150 @@ export const dashboardApi = {
     return apiFetch<DashboardOverviewDto>(`/institutes/${instituteId}/dashboard/overview${q}`);
   },
 };
+
+
+// --- INSTITUTE SETTINGS & BRANDING (MILESTONE 2.7) ---
+
+export interface InstituteProfileData {
+  name: string;
+  displayName: string;
+  code: string;
+  registrationNumber?: string;
+  description?: string;
+  email?: string;
+  phone?: string;
+  alternatePhone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+  primaryContactName?: string;
+  timezone: string;
+  status: string;
+}
+
+export interface InstituteBrandingData {
+  logoUrl?: string;
+  faviconUrl?: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  displayName?: string;
+}
+
+export interface AcademicSettingsData {
+  currentAcademicYearId?: string | null;
+  currentAcademicYearName?: string | null;
+  currentAcademicTermId?: string | null;
+  currentAcademicTermName?: string | null;
+  timezone: string;
+  workingDays: string[];
+  defaultSessionDurationMinutes: number;
+  minAttendancePercentage: number;
+  academicCalendarType: string;
+  availableYears: Array<{ id: string; name: string; isCurrent: boolean }>;
+  availableTerms: Array<{ id: string; name: string; isCurrent: boolean; academicYearId: string }>;
+}
+
+export interface FinancialSettingsData {
+  currency: string;
+  invoicePrefix: string;
+  receiptPrefix: string;
+  defaultDueDays: number;
+  financialContactEmail?: string;
+  financialContactPhone?: string;
+  billingAddress?: string;
+  taxOrGstNumber?: string;
+  showInstituteLogoOnInvoice: boolean;
+}
+
+export interface SecurityPreferencesData {
+  sessionTimeoutMinutes: number;
+  studentSelfRegistration: boolean;
+  notifyOnStudentRegistration: boolean;
+  notifyOnFeePayment: boolean;
+  notifyOnAttendanceAlert: boolean;
+}
+
+export interface FullInstituteSettingsResponse {
+  profile: InstituteProfileData;
+  branding: InstituteBrandingData;
+  academic: AcademicSettingsData;
+  financial: FinancialSettingsData;
+  security: SecurityPreferencesData;
+}
+
+export interface InstituteUserItemDto {
+  id: string;
+  membershipId: string;
+  fullName: string;
+  email?: string | null;
+  phone: string;
+  role: string;
+  status: string;
+  joinedAt: string;
+}
+
+export interface AuditLogItemDto {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  actorUserId: string;
+  actorName?: string;
+  metadata?: any;
+  createdAt: string;
+}
+
+export const settingsApi = {
+  getSettings: (instituteId: string) =>
+    apiFetch<FullInstituteSettingsResponse>(`/institutes/${instituteId}/settings`),
+  updateProfile: (instituteId: string, data: Partial<InstituteProfileData>) =>
+    apiFetch<InstituteProfileData>(`/institutes/${instituteId}/settings/profile`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  updateBranding: (instituteId: string, data: Partial<InstituteBrandingData>) =>
+    apiFetch<InstituteBrandingData>(`/institutes/${instituteId}/settings/branding`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  resetBranding: (instituteId: string) =>
+    apiFetch<InstituteBrandingData>(`/institutes/${instituteId}/settings/branding/reset`, {
+      method: 'POST',
+    }),
+  updateAcademic: (instituteId: string, data: Partial<AcademicSettingsData>) =>
+    apiFetch<AcademicSettingsData>(`/institutes/${instituteId}/settings/academic`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  updateFinancial: (instituteId: string, data: Partial<FinancialSettingsData>) =>
+    apiFetch<FinancialSettingsData>(`/institutes/${instituteId}/settings/financial`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  updateSecurity: (instituteId: string, data: Partial<SecurityPreferencesData>) =>
+    apiFetch<SecurityPreferencesData>(`/institutes/${instituteId}/settings/security`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  getUsers: (instituteId: string, query?: { role?: string; status?: string; search?: string }) => {
+    const q = query ? '?' + new URLSearchParams(query as any).toString() : '';
+    return apiFetch<InstituteUserItemDto[]>(`/institutes/${instituteId}/settings/users${q}`);
+  },
+  updateUserStatus: (
+    instituteId: string,
+    membershipId: string,
+    status: 'ACTIVE' | 'INVITED' | 'SUSPENDED',
+  ) =>
+    apiFetch<{ membershipId: string; userId: string; status: string; message: string }>(
+      `/institutes/${instituteId}/settings/users/${membershipId}/status`,
+      { method: 'PATCH', body: JSON.stringify({ status }) },
+    ),
+  getAuditLogs: (instituteId: string, limit?: number) => {
+    const q = limit ? `?limit=${limit}` : '';
+    return apiFetch<AuditLogItemDto[]>(`/institutes/${instituteId}/settings/audit-logs${q}`);
+  },
+};
