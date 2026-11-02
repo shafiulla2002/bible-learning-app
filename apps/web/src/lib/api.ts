@@ -567,3 +567,90 @@ export const teacherApi = {
   },
 };
 
+
+
+// --- DASHBOARD OVERVIEW & ANALYTICS ---
+
+export interface DashboardKpiDto {
+  totalStudents: number;
+  activeStudents: number;
+  totalTeachers: number;
+  activeTeachers: number;
+  totalCourses: number;
+  publishedCourses: number;
+  activeBatches: number;
+  totalFeeCollected: number; // in paise
+  totalFeePending: number;   // in paise
+  upcomingSessionsCount: number;
+  attendancePercentage: number | null;
+}
+
+export interface EnrolmentTrendItem {
+  month: string;
+  label: string;
+  count: number;
+}
+
+export interface FinancialTrendItem {
+  month: string;
+  label: string;
+  collected: number; // in paise
+  pending: number;   // in paise
+}
+
+export interface CourseDistributionItem {
+  courseTitle: string;
+  studentCount: number;
+}
+
+export interface RecentAdmissionDto {
+  id: string;
+  admissionNo: string;
+  fullName: string;
+  email?: string | null;
+  courseName?: string;
+  batchName?: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface UpcomingSessionDto {
+  id: string;
+  title: string;
+  batchName: string;
+  courseTitle: string;
+  teacherName: string;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  room?: string | null;
+}
+
+export interface RecentPaymentDto {
+  id: string;
+  invoiceNumber: string;
+  paymentNumber: string;
+  studentName: string;
+  courseName?: string;
+  amount: number; // in paise
+  paymentMode: string;
+  paymentDate: string;
+  status: string;
+}
+
+export interface DashboardOverviewDto {
+  kpi: DashboardKpiDto;
+  enrolmentTrend: EnrolmentTrendItem[];
+  financialTrend: FinancialTrendItem[];
+  courseDistribution: CourseDistributionItem[];
+  recentAdmissions: RecentAdmissionDto[];
+  upcomingSessions: UpcomingSessionDto[];
+  recentPayments: RecentPaymentDto[];
+}
+
+export const dashboardApi = {
+  getOverview: (instituteId: string, params?: { from?: string; to?: string }) => {
+    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return apiFetch<DashboardOverviewDto>(`/institutes/${instituteId}/dashboard/overview${q}`);
+  },
+};
