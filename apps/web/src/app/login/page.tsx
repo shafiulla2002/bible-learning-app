@@ -39,6 +39,9 @@ export default function LoginPage() {
     setIsLoading(true);
     setTimeout(() => {
       setIsLoading(false);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('current_institute_id', 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+      }
       router.push('/admin');
     }, 800);
   };
@@ -211,7 +214,12 @@ export default function LoginPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push('/admin')}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem('current_institute_id', 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+                  }
+                  router.push('/admin');
+                }}
                 className="text-xs justify-start gap-2"
               >
                 <Building2 size={14} className="text-emerald-600" />
