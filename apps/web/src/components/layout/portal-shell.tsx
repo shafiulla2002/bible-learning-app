@@ -21,6 +21,7 @@ import {
   ShieldAlert,
   ChevronRight,
 } from 'lucide-react';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 
 export interface NavItem {
   label: string;
@@ -70,13 +71,16 @@ export function PortalShell({
           </div>
           <span className="font-bold text-slate-900 text-sm tracking-tight">{portalTitle}</span>
         </div>
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="p-2 rounded-lg text-slate-600 hover:bg-slate-100"
-          aria-label="Toggle menu"
-        >
-          {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        <div className="flex items-center gap-1.5">
+          {portalRole === 'ADMIN' && <NotificationBell />}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-2 rounded-lg text-slate-600 hover:bg-slate-100"
+            aria-label="Toggle menu"
+          >
+            {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
       </header>
 
       {/* Sidebar Navigation */}
@@ -209,13 +213,17 @@ export function PortalShell({
 
           {/* Top Actions */}
           <div className="flex items-center gap-4">
-            <button
-              className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer"
-              aria-label="Notifications"
-            >
-              <Bell size={18} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white" />
-            </button>
+            {portalRole === 'ADMIN' ? (
+              <NotificationBell />
+            ) : (
+              <button
+                className="relative p-2 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer"
+                aria-label="Notifications"
+              >
+                <Bell size={18} />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white" />
+              </button>
+            )}
             <div className="h-6 w-px bg-slate-200" />
             <div className="flex items-center gap-2 text-xs">
               <span className="font-medium text-slate-700">{userName}</span>

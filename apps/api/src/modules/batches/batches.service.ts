@@ -1,12 +1,14 @@
 import { Prisma } from '@prisma/client';
 import {
   Injectable,
+  Optional,
   NotFoundException,
   BadRequestException,
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreateAcademicYearInput,
   CreateAcademicTermInput,
@@ -23,7 +25,10 @@ import {
 
 @Injectable()
 export class BatchesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notificationsService?: NotificationsService,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // 1. ACADEMIC PERIODS (YEARS & TERMS)
@@ -318,7 +323,7 @@ export class BatchesService {
       input.code?.trim() ||
       `B-${course.title.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}`;
 
-    return this.prisma.$transaction(async (tx) => {
+    const createdBatch = await this.prisma.$transaction(async (tx) => {
       const batch = await tx.batch.create({
         data: {
           instituteId,
@@ -359,6 +364,20 @@ export class BatchesService {
 
       return batch;
     });
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitAcademicEvent(instituteId, {
+          eventType: 'BATCH_CREATED',
+          referenceId: createdBatch.id,
+          title: 'New Academic Batch Created',
+          body: `Batch "${createdBatch.name}" (${createdBatch.code}) was created for ${course.title}.`,
+          link: `/admin/batches/${createdBatch.id}`,
+        })
+        .catch(() => {});
+    }
+
+    return createdBatch;
   }
 
   async findAll(instituteId: string, query: BatchFilterQuery) {
@@ -1169,7 +1188,21 @@ export class BatchesService {
       });
     };
 
-    return this.executeWithRetry(executeScheduleCreation);
+    const createdSession = await this.executeWithRetry(executeScheduleCreation);
+
+    if (this.notificationsService && createdSession) {
+      await this.notificationsService
+        .emitAcademicEvent(instituteId, {
+          eventType: 'LIVE_SESSION_SCHEDULED',
+          referenceId: createdSession.id,
+          title: 'Live Session Scheduled',
+          body: `"${createdSession.title}" was scheduled for batch "${batch.name}" on ${startsAt.toISOString().slice(0, 10)}.`,
+          link: `/admin/batches/${batch.id}`,
+        })
+        .catch(() => {});
+    }
+
+    return createdSession;
   }
 
   // ---------------------------------------------------------------------------

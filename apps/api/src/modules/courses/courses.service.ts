@@ -1,11 +1,13 @@
 import {
   Injectable,
+  Optional,
   NotFoundException,
   ConflictException,
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CourseSummaryItem,
   CourseHierarchyDetail,
@@ -32,7 +34,10 @@ import { CourseLevel, CourseStatus, PricingType, LessonType } from '@prisma/clie
 
 @Injectable()
 export class CoursesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private readonly notificationsService?: NotificationsService,
+  ) {}
 
   /**
    * Helper to generate unique slug per institute
@@ -405,7 +410,25 @@ export class CoursesService {
       return newCourse;
     });
 
-    return this.findOne(instituteId, course.id);
+    const detail = await this.findOne(instituteId, course.id);
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitAcademicEvent(instituteId, {
+          eventType:
+            detail.status === 'PUBLISHED' ? 'COURSE_PUBLISHED' : 'COURSE_CREATED',
+          referenceId: detail.id,
+          title:
+            detail.status === 'PUBLISHED'
+              ? 'New Course Published'
+              : 'New Course Created',
+          body: `Course "${detail.title}" (${detail.level}) was created in ${detail.categoryName}.`,
+          link: `/admin/courses/${detail.id}`,
+        })
+        .catch(() => {});
+    }
+
+    return detail;
   }
 
   /**

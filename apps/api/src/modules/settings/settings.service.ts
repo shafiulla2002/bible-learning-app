@@ -1,10 +1,12 @@
 import {
   Injectable,
+  Optional,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   UpdateInstituteProfileDto,
   UpdateBrandingDto,
@@ -76,6 +78,9 @@ export interface SecurityPreferencesData {
   notifyOnStudentRegistration: boolean;
   notifyOnFeePayment: boolean;
   notifyOnAttendanceAlert: boolean;
+  notifyOnTeacherManagement: boolean;
+  notifyOnAcademicActivity: boolean;
+  notifyOnAdminSecurity: boolean;
 }
 
 export interface FullInstituteSettingsResponse {
@@ -102,7 +107,10 @@ const DEFAULT_WORKING_DAYS = [
 
 @Injectable()
 export class SettingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notificationsService?: NotificationsService,
+  ) {}
 
   /**
    * Helper to verify target institute exists and return it.
@@ -274,6 +282,9 @@ export class SettingsService {
       notifyOnStudentRegistration: notificationJson.notifyOnStudentRegistration !== false,
       notifyOnFeePayment: notificationJson.notifyOnFeePayment !== false,
       notifyOnAttendanceAlert: notificationJson.notifyOnAttendanceAlert !== false,
+      notifyOnTeacherManagement: notificationJson.notifyOnTeacherManagement !== false,
+      notifyOnAcademicActivity: notificationJson.notifyOnAcademicActivity !== false,
+      notifyOnAdminSecurity: notificationJson.notifyOnAdminSecurity !== false,
     };
 
     return {
@@ -345,6 +356,17 @@ export class SettingsService {
       { updatedFields: Object.keys(dto) },
     );
 
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitAdminEvent(instituteId, {
+          eventType: 'SETTINGS_UPDATED',
+          title: 'Institute Profile Updated',
+          body: `Institute profile settings for "${dto.name}" were updated.`,
+          link: '/admin/settings',
+        })
+        .catch(() => {});
+    }
+
     return {
       name: dto.name,
       displayName: updatedProfile.displayName,
@@ -411,6 +433,17 @@ export class SettingsService {
       instituteId,
       { branding: updatedBranding },
     );
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitAdminEvent(instituteId, {
+          eventType: 'BRANDING_UPDATED',
+          title: 'Institute Branding Updated',
+          body: `Portal theme colors and branding preferences were updated.`,
+          link: '/admin/settings',
+        })
+        .catch(() => {});
+    }
 
     return updatedBranding;
   }
@@ -626,6 +659,12 @@ export class SettingsService {
         dto.notifyOnFeePayment ?? existingNotification.notifyOnFeePayment ?? true,
       notifyOnAttendanceAlert:
         dto.notifyOnAttendanceAlert ?? existingNotification.notifyOnAttendanceAlert ?? true,
+      notifyOnTeacherManagement:
+        dto.notifyOnTeacherManagement ?? existingNotification.notifyOnTeacherManagement ?? true,
+      notifyOnAcademicActivity:
+        dto.notifyOnAcademicActivity ?? existingNotification.notifyOnAcademicActivity ?? true,
+      notifyOnAdminSecurity:
+        dto.notifyOnAdminSecurity ?? existingNotification.notifyOnAdminSecurity ?? true,
     };
 
     const updateData: any = {
@@ -749,6 +788,18 @@ export class SettingsService {
       membershipId,
       { targetUserId: membership.userId, newStatus: status },
     );
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitAdminEvent(instituteId, {
+          eventType: 'USER_ACCESS_CHANGED',
+          referenceId: `${membershipId}:${status}:${Date.now()}`,
+          title: 'User Access Status Updated',
+          body: `Access for ${membership.user.fullName} (${membership.role}) was changed to ${status}.`,
+          link: '/admin/settings',
+        })
+        .catch(() => {});
+    }
 
     return {
       membershipId: updated.id,

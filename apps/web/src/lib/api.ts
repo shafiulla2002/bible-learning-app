@@ -569,38 +569,161 @@ export const teacherApi = {
 
 
 
-// --- DASHBOARD OVERVIEW & ANALYTICS ---
+// --- DASHBOARD OVERVIEW & ANALYTICS (MILESTONE 2.8) ---
+
+export type DateRangePreset =
+  | 'TODAY'
+  | '7D'
+  | '30D'
+  | 'THIS_MONTH'
+  | 'PREV_MONTH'
+  | 'THIS_TERM'
+  | 'THIS_YEAR'
+  | 'CUSTOM'
+  | 'ALL';
+
+export type ExportReportType =
+  | 'enrollments'
+  | 'fee-collection'
+  | 'pending-fees'
+  | 'attendance'
+  | 'teacher-workload'
+  | 'transactions';
+
+export interface DashboardContextDto {
+  instituteId: string;
+  instituteName: string;
+  displayName: string;
+  code: string;
+  currency: string;
+  timezone: string;
+  user: {
+    id: string;
+    fullName: string;
+    email: string | null;
+    role: string;
+  };
+}
+
+export interface KpiComparisonDto {
+  periodValue: number;
+  previousPeriodValue: number | null;
+  changePct: number | null;
+  direction: 'UP' | 'DOWN' | 'FLAT' | 'NONE';
+  periodLabel: string;
+}
 
 export interface DashboardKpiDto {
   totalStudents: number;
   activeStudents: number;
+  pendingAdmissionsCount: number;
   totalTeachers: number;
   activeTeachers: number;
+  onLeaveTeachers: number;
   totalCourses: number;
   publishedCourses: number;
+  draftCourses: number;
   activeBatches: number;
+  totalBatches: number;
   totalFeeCollected: number; // in paise
   totalFeePending: number;   // in paise
+  overdueFeeAmount: number;  // in paise
+  pendingInvoicesCount: number;
   upcomingSessionsCount: number;
+  sessionsTodayCount: number;
   attendancePercentage: number | null;
+  comparisons?: {
+    studentsRegistered: KpiComparisonDto;
+    feeCollection: KpiComparisonDto;
+    enrolments: KpiComparisonDto;
+  };
 }
 
 export interface EnrolmentTrendItem {
   month: string;
   label: string;
   count: number;
+  registrations?: number;
 }
 
 export interface FinancialTrendItem {
   month: string;
   label: string;
   collected: number; // in paise
+  invoiced?: number; // in paise
   pending: number;   // in paise
 }
 
 export interface CourseDistributionItem {
+  courseId?: string;
   courseTitle: string;
+  fullTitle?: string;
+  status?: string;
   studentCount: number;
+  activeEnrolments?: number;
+  completedEnrolments?: number;
+}
+
+export interface BatchDistributionItem {
+  batchId: string;
+  batchName: string;
+  courseTitle: string;
+  status: string;
+  capacity: number;
+  enrolledCount: number;
+  utilizationPct: number;
+}
+
+export interface PaymentStatusBreakdownItem {
+  status: string;
+  label: string;
+  count: number;
+  amountPaise: number;
+}
+
+export interface BatchAttendancePerformanceItem {
+  batchId: string;
+  batchName: string;
+  courseTitle: string;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  excusedCount: number;
+  totalRecords: number;
+  attendancePercentage: number | null;
+}
+
+export interface CourseAttendanceSummaryItem {
+  courseId: string;
+  courseTitle: string;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  excusedCount: number;
+  totalRecords: number;
+  attendancePercentage: number | null;
+}
+
+export interface AttendanceTrendItem {
+  period: string;
+  label: string;
+  percentage: number | null;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  totalRecords: number;
+}
+
+export interface TeacherWorkloadItemDto {
+  teacherId: string;
+  employeeCode: string | null;
+  fullName: string;
+  specialization: string | null;
+  status: string;
+  assignedCoursesCount: number;
+  assignedBatchesCount: number;
+  upcomingSessionsCount: number;
+  scheduledHoursInPeriod: number;
 }
 
 export interface RecentAdmissionDto {
@@ -614,9 +737,28 @@ export interface RecentAdmissionDto {
   createdAt: string;
 }
 
+export interface RecentActivityItemDto {
+  id: string;
+  category:
+    | 'STUDENT'
+    | 'TEACHER'
+    | 'COURSE'
+    | 'BATCH'
+    | 'ATTENDANCE'
+    | 'FEE'
+    | 'ADMIN';
+  action: string;
+  title: string;
+  description: string;
+  status: string;
+  timestamp: string;
+  link: string;
+}
+
 export interface UpcomingSessionDto {
   id: string;
   title: string;
+  batchId?: string;
   batchName: string;
   courseTitle: string;
   teacherName: string;
@@ -626,32 +768,229 @@ export interface UpcomingSessionDto {
   room?: string | null;
 }
 
-export interface RecentPaymentDto {
+export interface TransactionItemDto {
   id: string;
+  invoiceId?: string;
   invoiceNumber: string;
+  invoiceStatus?: string;
   paymentNumber: string;
+  receiptNumber?: string | null;
+  studentId?: string;
+  admissionNo?: string;
   studentName: string;
   courseName?: string;
-  amount: number; // in paise
+  batchName?: string;
+  amount: number; // gross in paise
+  reversedAmount?: number;
+  netAmount?: number;
   paymentMode: string;
   paymentDate: string;
   status: string;
+  referenceNumber?: string | null;
+}
+
+export type RecentPaymentDto = TransactionItemDto;
+
+export interface PaginatedTransactionsDto {
+  data: TransactionItemDto[];
+  summary: {
+    totalTransactions: number;
+    totalGrossPaise: number;
+    totalNetPaise: number;
+  };
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
+}
+
+export interface DashboardExportResponseDto {
+  filename: string;
+  mimeType: string;
+  reportTitle: string;
+  instituteName: string;
+  dateRangeLabel: string;
+  generatedAt: string;
+  rowCount: number;
+  csvContent: string;
 }
 
 export interface DashboardOverviewDto {
+  institute?: {
+    id: string;
+    name: string;
+    displayName: string;
+    code: string;
+    currency: string;
+    timezone: string;
+    logoUrl: string | null;
+    primaryColor: string;
+    secondaryColor: string;
+    accentColor: string;
+  };
+  viewer?: {
+    userId: string;
+    fullName: string;
+    role: string;
+  };
+  dateFilter?: {
+    preset: DateRangePreset;
+    label: string;
+    from: string | null;
+    to: string | null;
+    previousFrom: string | null;
+    previousTo: string | null;
+  };
   kpi: DashboardKpiDto;
   enrolmentTrend: EnrolmentTrendItem[];
   financialTrend: FinancialTrendItem[];
   courseDistribution: CourseDistributionItem[];
+  batchDistribution?: BatchDistributionItem[];
+  financialAnalytics?: {
+    totalCollectedPaise: number;
+    collectedInPeriodPaise: number;
+    pendingAmountPaise: number;
+    overdueAmountPaise: number;
+    invoiceTotals: {
+      totalInvoicedPaise: number;
+      totalPaidPaise: number;
+      outstandingBalancePaise: number;
+      issuedInvoicesCount: number;
+      paidCount: number;
+      partiallyPaidCount: number;
+      unpaidIssuedCount: number;
+      overdueCount: number;
+      draftCount: number;
+      cancelledCount: number;
+    };
+    paymentSummary: {
+      successfulPaymentsCount: number;
+      successfulAmountPaise: number;
+      periodSuccessfulCount: number;
+      periodSuccessfulAmountPaise: number;
+      partiallyReversedCount: number;
+      reversedCount: number;
+      totalReversedAmountPaise: number;
+    };
+    paymentStatusBreakdown: PaymentStatusBreakdownItem[];
+  };
+  attendanceAnalytics?: {
+    overallPercentage: number | null;
+    periodPercentage: number | null;
+    minThresholdPct: number;
+    presentCount: number;
+    lateCount: number;
+    absentCount: number;
+    excusedCount: number;
+    totalRecords: number;
+    trend: AttendanceTrendItem[];
+    byBatch: BatchAttendancePerformanceItem[];
+    byCourse: CourseAttendanceSummaryItem[];
+  };
+  teacherAcademicAnalytics?: {
+    summary: {
+      totalTeachers: number;
+      activeTeachers: number;
+      onLeaveTeachers: number;
+      inactiveTeachers: number;
+      totalCourseAssignments: number;
+      totalBatchAssignments: number;
+      upcomingScheduledSessions: number;
+    };
+    teacherWorkload: TeacherWorkloadItemDto[];
+  };
   recentAdmissions: RecentAdmissionDto[];
+  recentActivities?: RecentActivityItemDto[];
   upcomingSessions: UpcomingSessionDto[];
-  recentPayments: RecentPaymentDto[];
+  recentPayments: TransactionItemDto[];
+}
+
+let cachedContextPromise: Promise<DashboardContextDto> | null = null;
+
+/**
+ * Resolves the verified administrative institute context once per browser session,
+ * avoiding duplicate /dashboard/context calls across header NotificationBell and pages.
+ */
+export async function resolveVerifiedAdminContext(
+  forceRefresh = false,
+): Promise<DashboardContextDto> {
+  if (!cachedContextPromise || forceRefresh) {
+    cachedContextPromise = apiFetch<DashboardContextDto>('/dashboard/context')
+      .then((ctx) => {
+        if (typeof window !== 'undefined' && ctx?.instituteId) {
+          localStorage.setItem('current_institute_id', ctx.instituteId);
+        }
+        return ctx;
+      })
+      .catch((err) => {
+        cachedContextPromise = null;
+        throw err;
+      });
+  }
+  return cachedContextPromise;
+}
+
+function buildCleanQueryString(params?: Record<string, any>): string {
+  if (!params) return '';
+  const searchParams = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      searchParams.set(k, String(v));
+    }
+  }
+  const str = searchParams.toString();
+  return str ? `?${str}` : '';
 }
 
 export const dashboardApi = {
-  getOverview: (instituteId: string, params?: { from?: string; to?: string }) => {
-    const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
-    return apiFetch<DashboardOverviewDto>(`/institutes/${instituteId}/dashboard/overview${q}`);
+  getContext: () => resolveVerifiedAdminContext(),
+
+  getOverview: (
+    instituteId: string,
+    params?: { preset?: DateRangePreset; from?: string; to?: string },
+  ) => {
+    const q = buildCleanQueryString(params);
+    return apiFetch<DashboardOverviewDto>(
+      `/institutes/${instituteId}/dashboard/overview${q}`,
+    );
+  },
+
+  getTransactions: (
+    instituteId: string,
+    params?: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      paymentMode?: string;
+      preset?: DateRangePreset;
+      from?: string;
+      to?: string;
+    },
+  ) => {
+    const q = buildCleanQueryString(params);
+    return apiFetch<PaginatedTransactionsDto>(
+      `/institutes/${instituteId}/dashboard/transactions${q}`,
+    );
+  },
+
+  exportReport: (
+    instituteId: string,
+    params: {
+      type: ExportReportType;
+      preset?: DateRangePreset;
+      from?: string;
+      to?: string;
+    },
+  ) => {
+    const q = buildCleanQueryString(params);
+    return apiFetch<DashboardExportResponseDto>(
+      `/institutes/${instituteId}/dashboard/export${q}`,
+    );
   },
 };
 
@@ -719,6 +1058,9 @@ export interface SecurityPreferencesData {
   notifyOnStudentRegistration: boolean;
   notifyOnFeePayment: boolean;
   notifyOnAttendanceAlert: boolean;
+  notifyOnTeacherManagement?: boolean;
+  notifyOnAcademicActivity?: boolean;
+  notifyOnAdminSecurity?: boolean;
 }
 
 export interface FullInstituteSettingsResponse {
@@ -800,4 +1142,115 @@ export const settingsApi = {
     const q = limit ? `?limit=${limit}` : '';
     return apiFetch<AuditLogItemDto[]>(`/institutes/${instituteId}/settings/audit-logs${q}`);
   },
+};
+
+// --- ADMIN NOTIFICATION CENTER (MILESTONE 2.8) ---
+
+export type NotificationCategory =
+  | 'STUDENT'
+  | 'TEACHER'
+  | 'ATTENDANCE'
+  | 'FEE'
+  | 'ACADEMIC'
+  | 'ADMIN';
+
+export interface NotificationItemDto {
+  id: string;
+  instituteId: string | null;
+  userId: string;
+  category: NotificationCategory;
+  eventType: string;
+  referenceId: string | null;
+  title: string;
+  body: string;
+  link: string;
+  isRead: boolean;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface PaginatedNotificationsDto {
+  data: NotificationItemDto[];
+  unreadCount: number;
+  byCategory: Record<NotificationCategory, number>;
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
+}
+
+export interface UnreadCountDto {
+  unreadCount: number;
+  byCategory: Record<NotificationCategory, number>;
+}
+
+export interface NotificationPreferencesDto {
+  notifyOnStudentRegistration: boolean;
+  notifyOnFeePayment: boolean;
+  notifyOnAttendanceAlert: boolean;
+  notifyOnTeacherManagement: boolean;
+  notifyOnAcademicActivity: boolean;
+  notifyOnAdminSecurity: boolean;
+}
+
+export const notificationsApi = {
+  getNotifications: (
+    instituteId: string,
+    query?: {
+      page?: number;
+      limit?: number;
+      category?: 'ALL' | NotificationCategory;
+      status?: 'ALL' | 'UNREAD' | 'READ';
+      search?: string;
+    },
+  ) => {
+    const q = buildCleanQueryString(query);
+    return apiFetch<PaginatedNotificationsDto>(
+      `/institutes/${instituteId}/notifications${q}`,
+    );
+  },
+
+  getUnreadCount: (instituteId: string) =>
+    apiFetch<UnreadCountDto>(
+      `/institutes/${instituteId}/notifications/unread-count`,
+    ),
+
+  markAsRead: (instituteId: string, notificationId: string) =>
+    apiFetch<NotificationItemDto>(
+      `/institutes/${instituteId}/notifications/${notificationId}/read`,
+      { method: 'PATCH' },
+    ),
+
+  markAllAsRead: (
+    instituteId: string,
+    category?: 'ALL' | NotificationCategory,
+  ) =>
+    apiFetch<{ updatedCount: number; unreadCount: number }>(
+      `/institutes/${instituteId}/notifications/mark-all-read`,
+      {
+        method: 'POST',
+        body: JSON.stringify(category ? { category } : {}),
+      },
+    ),
+
+  getPreferences: (instituteId: string) =>
+    apiFetch<NotificationPreferencesDto>(
+      `/institutes/${instituteId}/notifications/preferences`,
+    ),
+
+  updatePreferences: (
+    instituteId: string,
+    data: Partial<NotificationPreferencesDto>,
+  ) =>
+    apiFetch<NotificationPreferencesDto>(
+      `/institutes/${instituteId}/notifications/preferences`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    ),
 };

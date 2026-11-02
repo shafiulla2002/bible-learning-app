@@ -1,10 +1,12 @@
 import {
   Injectable,
+  Optional,
   NotFoundException,
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreateTeacherInput,
   UpdateTeacherProfileInput,
@@ -25,7 +27,10 @@ import { Role, MembershipStatus, LiveSessionStatus } from '@prisma/client';
 
 @Injectable()
 export class TeachersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private readonly notificationsService?: NotificationsService,
+  ) {}
 
   /**
    * Sequential employee code generator per institute per year
@@ -235,6 +240,17 @@ export class TeachersService {
       { employeeCode, fullName: input.fullName, phone: input.phoneE164 },
       actorUserId,
     );
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitTeacherEvent(instituteId, {
+          eventType: 'TEACHER_REGISTERED',
+          teacherId: teacher.id,
+          fullName: teacher.membership.user.fullName,
+          employeeCode: teacher.employeeCode ?? undefined,
+        })
+        .catch(() => {});
+    }
 
     return {
       id: teacher.id,
@@ -605,7 +621,7 @@ export class TeachersService {
   ): Promise<{ success: boolean; message: string; status: TeacherStatus }> {
     const teacher = await this.prisma.teacherProfile.findFirst({
       where: { id: teacherProfileId, instituteId },
-      include: { membership: true },
+      include: { membership: { include: { user: true } } },
     });
 
     if (!teacher) {
@@ -636,6 +652,20 @@ export class TeachersService {
       { previousStatus: teacher.status, newStatus: status, reason },
       actorUserId,
     );
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitTeacherEvent(instituteId, {
+          eventType:
+            status === 'ACTIVE' ? 'TEACHER_ACTIVATED' : 'TEACHER_DEACTIVATED',
+          teacherId: teacherProfileId,
+          fullName: teacher.membership?.user?.fullName || 'Faculty Member',
+          employeeCode: teacher.employeeCode ?? undefined,
+          detail: reason,
+          referenceSuffix: `${status}:${Date.now()}`,
+        })
+        .catch(() => {});
+    }
 
     return {
       success: true,
@@ -699,6 +729,19 @@ export class TeachersService {
       { courseId: input.courseId, role: input.role },
       actorUserId,
     );
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitTeacherEvent(instituteId, {
+          eventType: 'TEACHER_ASSIGNMENT_CHANGED',
+          teacherId: teacherProfileId,
+          fullName: 'Faculty Member',
+          employeeCode: teacher.employeeCode ?? undefined,
+          detail: `Faculty member (${teacher.employeeCode || teacherProfileId.slice(0, 6)}) was assigned as ${instructor.role} instructor for course "${course.title}".`,
+          referenceSuffix: `course:${course.id}`,
+        })
+        .catch(() => {});
+    }
 
     return {
       id: instructor.id,
@@ -805,6 +848,19 @@ export class TeachersService {
       { batchId: input.batchId, role: input.role },
       actorUserId,
     );
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitTeacherEvent(instituteId, {
+          eventType: 'TEACHER_ASSIGNMENT_CHANGED',
+          teacherId: teacherProfileId,
+          fullName: 'Faculty Member',
+          employeeCode: teacher.employeeCode ?? undefined,
+          detail: `Faculty member (${teacher.employeeCode || teacherProfileId.slice(0, 6)}) was assigned as ${batchTeacher.role} faculty for batch "${batch.name}".`,
+          referenceSuffix: `batch:${batch.id}`,
+        })
+        .catch(() => {});
+    }
 
     return {
       id: batchTeacher.id,

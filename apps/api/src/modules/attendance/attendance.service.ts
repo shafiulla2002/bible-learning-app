@@ -1,10 +1,12 @@
 import {
   Injectable,
+  Optional,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   MarkBulkAttendanceInput,
   UpdateIndividualAttendanceInput,
@@ -15,7 +17,10 @@ import {
 
 @Injectable()
 export class AttendanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notificationsService?: NotificationsService,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // 1. ATTENDANCE OVERVIEW & METRICS (ADMIN & COORDINATOR)
@@ -291,7 +296,7 @@ export class AttendanceService {
     const enrolmentMap = new Map(validEnrolments.map((e) => [e.studentProfileId, e.id]));
 
     // Atomic transaction for bulk upsert + immutable audit history
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       let createdCount = 0;
       let updatedCount = 0;
 
@@ -373,6 +378,43 @@ export class AttendanceService {
         updatedCount,
       };
     }, { maxWait: 10000, timeout: 30000 });
+
+    if (this.notificationsService && input.records.length > 0) {
+      try {
+        const presentOrLate = input.records.filter(
+          (r) => r.status === 'PRESENT' || r.status === 'LATE',
+        ).length;
+        const excused = input.records.filter((r) => r.status === 'EXCUSED').length;
+        const absent = input.records.filter((r) => r.status === 'ABSENT').length;
+        const denom = input.records.length - excused;
+        if (denom > 0) {
+          const pct = Math.round((presentOrLate / denom) * 100);
+          const settings = await this.prisma.instituteSettings.findUnique({
+            where: { instituteId },
+            select: { enrolmentRules: true },
+          });
+          const threshold =
+            ((settings?.enrolmentRules as any)?.minAttendancePercentage as number) ||
+            75;
+          if (pct < threshold) {
+            await this.notificationsService.emitAttendanceAlert(instituteId, {
+              eventType: 'LOW_ATTENDANCE_ALERT',
+              batchId: batch.id,
+              batchName: batch.name,
+              date: input.date.slice(0, 10),
+              attendancePct: pct,
+              thresholdPct: threshold,
+              absentCount: absent,
+              totalCount: input.records.length,
+            });
+          }
+        }
+      } catch {
+        // Non-blocking alert emission
+      }
+    }
+
+    return result;
   }
 
   // ---------------------------------------------------------------------------

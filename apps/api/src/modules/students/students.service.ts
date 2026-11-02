@@ -1,10 +1,12 @@
 import {
   Injectable,
+  Optional,
   NotFoundException,
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreateStudentAdmissionInput,
   UpdateStudentProfileInput,
@@ -19,7 +21,10 @@ import { Role } from '@prisma/client';
 
 @Injectable()
 export class StudentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() private readonly notificationsService?: NotificationsService,
+  ) {}
 
   /**
    * Safe sequential admission number generator per institute per year
@@ -106,7 +111,7 @@ export class StudentsService {
     }
 
     // 5. Execute atomic transaction
-    return this.prisma.$transaction(async (tx) => {
+    const createdStudent = await this.prisma.$transaction(async (tx) => {
       // Find or create User
       let user = await tx.user.findUnique({
         where: { phoneE164: input.phoneNumber },
@@ -200,6 +205,26 @@ export class StudentsService {
         totalEnrolments: input.courseId ? 1 : 0,
       };
     });
+
+    if (this.notificationsService) {
+      const evtType =
+        createdStudent.status === 'UNDER_REVIEW' ||
+        createdStudent.status === 'PENDING'
+          ? 'ADMISSION_AWAITING_APPROVAL'
+          : 'STUDENT_REGISTERED';
+      await this.notificationsService
+        .emitStudentEvent(instituteId, {
+          eventType: evtType,
+          studentId: createdStudent.id,
+          fullName: createdStudent.fullName,
+          admissionNo: createdStudent.admissionNo,
+          status: createdStudent.status,
+          courseTitle: createdStudent.enrolledCourseName,
+        })
+        .catch(() => {});
+    }
+
+    return createdStudent;
   }
 
   /**
@@ -447,7 +472,21 @@ export class StudentsService {
       });
     });
 
-    return this.findOne(instituteId, studentId);
+    const detail = await this.findOne(instituteId, studentId);
+
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitStudentEvent(instituteId, {
+          eventType: 'STUDENT_STATUS_UPDATED',
+          studentId: detail.id,
+          fullName: detail.fullName,
+          admissionNo: detail.admissionNo,
+          status: newStatus,
+        })
+        .catch(() => {});
+    }
+
+    return detail;
   }
 
   /**

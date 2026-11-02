@@ -1511,6 +1511,57 @@ export default function InstituteSettingsPage() {
                         Attendance Alert when Course Average Falls Below Threshold
                       </span>
                     </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={securityForm.notifyOnTeacherManagement !== false}
+                        onChange={(e) =>
+                          setSecurityForm({
+                            ...securityForm,
+                            notifyOnTeacherManagement: e.target.checked,
+                          })
+                        }
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="font-semibold text-slate-800">
+                        In-App Alert on Teacher Registration & Faculty Assignments
+                      </span>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={securityForm.notifyOnAcademicActivity !== false}
+                        onChange={(e) =>
+                          setSecurityForm({
+                            ...securityForm,
+                            notifyOnAcademicActivity: e.target.checked,
+                          })
+                        }
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="font-semibold text-slate-800">
+                        In-App Alert on New Courses, Batches & Live Sessions
+                      </span>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={securityForm.notifyOnAdminSecurity !== false}
+                        onChange={(e) =>
+                          setSecurityForm({
+                            ...securityForm,
+                            notifyOnAdminSecurity: e.target.checked,
+                          })
+                        }
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="font-semibold text-slate-800">
+                        In-App Alert on Institute Settings & User Access Changes
+                      </span>
+                    </label>
                   </div>
                 </div>
 

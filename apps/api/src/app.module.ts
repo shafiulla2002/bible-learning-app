@@ -8,12 +8,14 @@ import { AttendanceModule } from './modules/attendance/attendance.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PrismaService } from './core/prisma/prisma.service';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
+    NotificationsModule,
     StudentsModule,
     CoursesModule,
     BatchesModule,

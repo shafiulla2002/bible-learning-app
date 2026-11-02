@@ -200,6 +200,18 @@ export class UpdateSecurityPreferencesDto {
   @IsOptional()
   @IsBoolean()
   notifyOnAttendanceAlert?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  notifyOnTeacherManagement?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  notifyOnAcademicActivity?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  notifyOnAdminSecurity?: boolean;
 }
 
 export class UpdateUserStatusDto {
