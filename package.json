@@ -19,6 +19,9 @@
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
+  "dependencies": {
+    "prisma": "^6.3.0"
+  },
   "devDependencies": {
     "typescript": "^5.7.3"
   }
