@@ -217,29 +217,64 @@ export async function POST(
       membershipId = insertedMem[0].id;
     }
 
-    // 3. TeacherProfile
-    const tpRows = await queryDb(
-      `INSERT INTO "TeacherProfile" (
-        id, "instituteId", "membershipId", "employeeCode", qualifications, specialization,
-        "experienceYears", "joiningDate", address, bio, status, "createdAt", "updatedAt"
-      ) VALUES (
-        gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
-      ) RETURNING *`,
-      [
-        effectiveInstituteId,
-        membershipId,
-        finalCode,
-        highestDegree || null,
-        specialization || null,
-        experienceYears !== undefined ? Number(experienceYears) : null,
-        joiningDate ? new Date(joiningDate) : new Date(),
-        address ? JSON.stringify(address) : null,
-        bio || null,
-        status,
-      ]
+    // 3. TeacherProfile - Check if profile already exists for this membership
+    const existingProfile = await queryDb(
+      `SELECT id FROM "TeacherProfile" WHERE "membershipId" = $1`,
+      [membershipId]
     );
 
-    const tp = tpRows[0];
+    let tp: any;
+    if (existingProfile.length > 0) {
+      // Safe update existing instructor profile without unique constraint violation
+      const updatedRows = await queryDb(
+        `UPDATE "TeacherProfile"
+         SET "employeeCode" = COALESCE($1, "employeeCode"),
+             qualifications = COALESCE($2, qualifications),
+             specialization = COALESCE($3, specialization),
+             "experienceYears" = COALESCE($4, "experienceYears"),
+             "joiningDate" = COALESCE($5, "joiningDate"),
+             address = COALESCE($6, address),
+             bio = COALESCE($7, bio),
+             status = $8,
+             "updatedAt" = NOW()
+         WHERE id = $9
+         RETURNING *`,
+        [
+          finalCode,
+          highestDegree || null,
+          specialization || null,
+          experienceYears !== undefined ? Number(experienceYears) : null,
+          joiningDate ? new Date(joiningDate) : null,
+          address ? JSON.stringify(address) : null,
+          bio || null,
+          status,
+          existingProfile[0].id,
+        ]
+      );
+      tp = updatedRows[0];
+    } else {
+      const tpRows = await queryDb(
+        `INSERT INTO "TeacherProfile" (
+          id, "instituteId", "membershipId", "employeeCode", qualifications, specialization,
+          "experienceYears", "joiningDate", address, bio, status, "createdAt", "updatedAt"
+        ) VALUES (
+          gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()
+        ) RETURNING *`,
+        [
+          effectiveInstituteId,
+          membershipId,
+          finalCode,
+          highestDegree || null,
+          specialization || null,
+          experienceYears !== undefined ? Number(experienceYears) : null,
+          joiningDate ? new Date(joiningDate) : new Date(),
+          address ? JSON.stringify(address) : null,
+          bio || null,
+          status,
+        ]
+      );
+      tp = tpRows[0];
+    }
 
     // Trigger Admin Notification for teacher registration
     try {
