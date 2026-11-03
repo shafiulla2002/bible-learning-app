@@ -12,171 +12,23 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const presetParam = (searchParams.get('preset') || '30D').toUpperCase();
 
-    const ctx = await resolveServerAdminContext();
-    const effectiveInstituteId =
-      instituteId && instituteId !== 'null' && instituteId !== 'undefined'
-        ? instituteId
-        : ctx.instituteId;
+    // Fast-path instituteId resolution
+    let effectiveInstituteId = instituteId && instituteId !== 'null' && instituteId !== 'undefined'
+      ? instituteId
+      : '';
 
-    // 1. Institute Info
-    const instRows = await queryDb(
-      `SELECT i.id, i.name, i.slug, i.timezone, i.currency, i."logoUrl",
-              s.branding
-       FROM "Institute" i
-       LEFT JOIN "InstituteSettings" s ON s."instituteId" = i.id
-       WHERE i.id = $1`,
-      [effectiveInstituteId]
-    );
+    let ctx: any = null;
+    if (!effectiveInstituteId) {
+      ctx = await resolveServerAdminContext();
+      effectiveInstituteId = ctx.instituteId;
+    }
 
-    const inst = instRows[0] || {
-      id: effectiveInstituteId,
-      name: ctx.name,
-      slug: ctx.instituteSlug,
-      timezone: ctx.timezone,
-      currency: ctx.currency,
-      logoUrl: ctx.logoUrl,
-      branding: {
-        instituteName: ctx.displayName,
-        primaryColor: ctx.primaryColor,
-        secondaryColor: ctx.secondaryColor,
-        accentColor: ctx.accentColor,
-      },
-    };
-    const branding = inst.branding || {};
-
-    // 2. Real KPI Counts from PostgreSQL
-    // Students
-    const studentStats = await queryDb(
-      `SELECT
-         COUNT(*)::int as "totalStudents",
-         COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeStudents"
-       FROM "StudentProfile"
-       WHERE "instituteId" = $1`,
-      [effectiveInstituteId]
-    );
-    const totalStudents = studentStats[0]?.totalStudents || 0;
-    const activeStudents = studentStats[0]?.activeStudents || 0;
-
-    // Pending Admissions
-    const admissionStats = await queryDb(
-      `SELECT COUNT(*)::int as "pendingAdmissions"
-       FROM "Admission"
-       WHERE "instituteId" = $1 AND status IN ('APPLIED', 'UNDER_REVIEW')`,
-      [effectiveInstituteId]
-    );
-    const pendingAdmissionsCount = admissionStats[0]?.pendingAdmissions || 0;
-
-    // Teachers
-    const teacherStats = await queryDb(
-      `SELECT
-         COUNT(*)::int as "totalTeachers",
-         COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeTeachers",
-         COUNT(CASE WHEN status = 'ON_LEAVE' THEN 1 END)::int as "onLeaveTeachers"
-       FROM "TeacherProfile"
-       WHERE "instituteId" = $1`,
-      [effectiveInstituteId]
-    );
-    const totalTeachers = teacherStats[0]?.totalTeachers || 0;
-    const activeTeachers = teacherStats[0]?.activeTeachers || 0;
-    const onLeaveTeachers = teacherStats[0]?.onLeaveTeachers || 0;
-
-    // Courses
-    const courseStats = await queryDb(
-      `SELECT
-         COUNT(*)::int as "totalCourses",
-         COUNT(CASE WHEN status = 'PUBLISHED' THEN 1 END)::int as "publishedCourses",
-         COUNT(CASE WHEN status = 'DRAFT' THEN 1 END)::int as "draftCourses"
-       FROM "Course"
-       WHERE "instituteId" = $1`,
-      [effectiveInstituteId]
-    );
-    const totalCourses = courseStats[0]?.totalCourses || 0;
-    const publishedCourses = courseStats[0]?.publishedCourses || 0;
-    const draftCourses = courseStats[0]?.draftCourses || 0;
-
-    // Batches
-    const batchStats = await queryDb(
-      `SELECT
-         COUNT(*)::int as "totalBatches",
-         COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeBatches"
-       FROM "Batch"
-       WHERE "instituteId" = $1`,
-      [effectiveInstituteId]
-    );
-    const totalBatches = batchStats[0]?.totalBatches || 0;
-    const activeBatches = batchStats[0]?.activeBatches || 0;
-
-    // Finance (Invoices & Payments in paise)
-    const paymentStats = await queryDb(
-      `SELECT COALESCE(SUM("netAmount"), 0)::bigint as "totalCollected"
-       FROM "FeePayment"
-       WHERE "instituteId" = $1 AND status = 'COMPLETED'`,
-      [effectiveInstituteId]
-    );
-    const totalFeeCollected = Number(paymentStats[0]?.totalCollected || 0);
-
-    const invoiceStats = await queryDb(
-      `SELECT
-         COALESCE(SUM("balanceAmount"), 0)::bigint as "totalPending",
-         COALESCE(SUM(CASE WHEN "dueDate" < CURRENT_DATE AND status != 'PAID' THEN "balanceAmount" ELSE 0 END), 0)::bigint as "overdueAmount",
-         COUNT(CASE WHEN status IN ('ISSUED', 'PARTIALLY_PAID') THEN 1 END)::int as "pendingInvoicesCount"
-       FROM "Invoice"
-       WHERE "instituteId" = $1`,
-      [effectiveInstituteId]
-    );
-    const totalFeePending = Number(invoiceStats[0]?.totalPending || 0);
-    const overdueFeeAmount = Number(invoiceStats[0]?.overdueAmount || 0);
-    const pendingInvoicesCount = invoiceStats[0]?.pendingInvoicesCount || 0;
-
-    // Attendance
-    const attendanceStats = await queryDb(
-      `SELECT
-         COUNT(*)::int as "totalRecords",
-         COUNT(CASE WHEN status = 'PRESENT' THEN 1 END)::int as "presentCount"
-       FROM "Attendance"
-       WHERE "instituteId" = $1`,
-      [effectiveInstituteId]
-    );
-    const totalAttRecords = attendanceStats[0]?.totalRecords || 0;
-    const presentAttCount = attendanceStats[0]?.presentCount || 0;
-    const attendancePercentage =
-      totalAttRecords > 0 ? Math.round((presentAttCount / totalAttRecords) * 100) : null;
-
-    // Sessions
-    const sessionStats = await queryDb(
-      `SELECT
-         COUNT(CASE WHEN "startsAt" >= NOW() THEN 1 END)::int as "upcomingCount",
-         COUNT(CASE WHEN "startsAt"::date = CURRENT_DATE THEN 1 END)::int as "todayCount"
-       FROM "LiveSession"
-       WHERE "instituteId" = $1`,
-      [effectiveInstituteId]
-    );
-    const upcomingSessionsCount = sessionStats[0]?.upcomingCount || 0;
-    const sessionsTodayCount = sessionStats[0]?.todayCount || 0;
-
-    // 3. Course Distribution
-    const courseDistRows = await queryDb(
-      `SELECT
-         c.id as "courseId",
-         c.title as "courseTitle",
-         c.status,
-         COUNT(e.id)::int as "studentCount"
-       FROM "Course" c
-       LEFT JOIN "Enrolment" e ON e."courseId" = c.id AND e.status = 'ACTIVE'
-       WHERE c."instituteId" = $1
-       GROUP BY c.id, c.title, c.status
-       ORDER BY "studentCount" DESC, c.title ASC`,
-      [effectiveInstituteId]
-    );
-
-    // 4. Monthly & Periodic Enrolment Trend (Real database aggregation)
-    let enrolmentTrendRows: any[] = [];
+    // Determine enrolment trend query based on preset
     let dateFilterLabel = 'Last 30 Days (Database Live)';
-
+    let trendSql = '';
     if (presetParam === '7D') {
       dateFilterLabel = 'Last 7 Days (Database Live)';
-      enrolmentTrendRows = await queryDb(
-        `SELECT
+      trendSql = `SELECT
            TO_CHAR(d.day, 'YYYY-MM-DD') as month,
            TO_CHAR(d.day, 'Dy DD') as label,
            COALESCE(COUNT(e.id), 0)::int as count,
@@ -186,13 +38,10 @@ export async function GET(
          LEFT JOIN "StudentProfile" sp ON sp."instituteId" = $1 AND sp."createdAt"::date = d.day::date
          LEFT JOIN "Enrolment" e ON e."instituteId" = $1 AND e."createdAt"::date = d.day::date
          GROUP BY d.day
-         ORDER BY d.day ASC`,
-        [effectiveInstituteId]
-      );
+         ORDER BY d.day ASC`;
     } else if (presetParam === 'THIS_MONTH') {
       dateFilterLabel = 'This Month (Database Live)';
-      enrolmentTrendRows = await queryDb(
-        `SELECT
+      trendSql = `SELECT
            TO_CHAR(d.day, 'YYYY-MM-DD') as month,
            TO_CHAR(d.day, 'DD Mon') as label,
            COALESCE(COUNT(e.id), 0)::int as count,
@@ -202,13 +51,10 @@ export async function GET(
          LEFT JOIN "StudentProfile" sp ON sp."instituteId" = $1 AND sp."createdAt"::date = d.day::date
          LEFT JOIN "Enrolment" e ON e."instituteId" = $1 AND e."createdAt"::date = d.day::date
          GROUP BY d.day
-         ORDER BY d.day ASC`,
-        [effectiveInstituteId]
-      );
+         ORDER BY d.day ASC`;
     } else {
       dateFilterLabel = presetParam === 'ALL' ? 'All Time (Database Live)' : 'Last 30 Days (Database Live)';
-      enrolmentTrendRows = await queryDb(
-        `SELECT
+      trendSql = `SELECT
            TO_CHAR(e."createdAt", 'YYYY-MM') as month,
            TO_CHAR(e."createdAt", 'Mon') as label,
            COUNT(e.id)::int as count,
@@ -219,10 +65,219 @@ export async function GET(
          WHERE e."instituteId" = $1
          GROUP BY TO_CHAR(e."createdAt", 'YYYY-MM'), TO_CHAR(e."createdAt", 'Mon')
          ORDER BY month ASC
+         LIMIT 6`;
+    }
+
+    // Execute ALL independent DB queries in parallel
+    const [
+      instRows,
+      studentStats,
+      admissionStats,
+      teacherStats,
+      courseStats,
+      batchStats,
+      paymentStats,
+      invoiceStats,
+      attendanceStats,
+      sessionStats,
+      courseDistRows,
+      enrolmentTrendRows,
+      financialTrendRows,
+      recentPaymentsRows,
+      resolvedCtx,
+    ] = await Promise.all([
+      // 1. Institute Info
+      queryDb(
+        `SELECT i.id, i.name, i.slug, i.timezone, i.currency, i."logoUrl", s.branding
+         FROM "Institute" i
+         LEFT JOIN "InstituteSettings" s ON s."instituteId" = i.id
+         WHERE i.id = $1`,
+        [effectiveInstituteId]
+      ),
+      // 2. Students
+      queryDb(
+        `SELECT
+           COUNT(*)::int as "totalStudents",
+           COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeStudents"
+         FROM "StudentProfile"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+      // 3. Pending Admissions
+      queryDb(
+        `SELECT COUNT(*)::int as "pendingAdmissions"
+         FROM "Admission"
+         WHERE "instituteId" = $1 AND status IN ('APPLIED', 'UNDER_REVIEW')`,
+        [effectiveInstituteId]
+      ),
+      // 4. Teachers
+      queryDb(
+        `SELECT
+           COUNT(*)::int as "totalTeachers",
+           COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeTeachers",
+           COUNT(CASE WHEN status = 'ON_LEAVE' THEN 1 END)::int as "onLeaveTeachers"
+         FROM "TeacherProfile"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+      // 5. Courses
+      queryDb(
+        `SELECT
+           COUNT(*)::int as "totalCourses",
+           COUNT(CASE WHEN status = 'PUBLISHED' THEN 1 END)::int as "publishedCourses",
+           COUNT(CASE WHEN status = 'DRAFT' THEN 1 END)::int as "draftCourses"
+         FROM "Course"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+      // 6. Batches
+      queryDb(
+        `SELECT
+           COUNT(*)::int as "totalBatches",
+           COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeBatches"
+         FROM "Batch"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+      // 7. Finance (Payments)
+      queryDb(
+        `SELECT COALESCE(SUM("netAmount"), 0)::bigint as "totalCollected"
+         FROM "FeePayment"
+         WHERE "instituteId" = $1 AND status = 'COMPLETED'`,
+        [effectiveInstituteId]
+      ),
+      // 8. Finance (Invoices)
+      queryDb(
+        `SELECT
+           COALESCE(SUM("balanceAmount"), 0)::bigint as "totalPending",
+           COALESCE(SUM(CASE WHEN "dueDate" < CURRENT_DATE AND status != 'PAID' THEN "balanceAmount" ELSE 0 END), 0)::bigint as "overdueAmount",
+           COUNT(CASE WHEN status IN ('ISSUED', 'PARTIALLY_PAID') THEN 1 END)::int as "pendingInvoicesCount"
+         FROM "Invoice"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+      // 9. Attendance
+      queryDb(
+        `SELECT
+           COUNT(*)::int as "totalRecords",
+           COUNT(CASE WHEN status = 'PRESENT' THEN 1 END)::int as "presentCount"
+         FROM "Attendance"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+      // 10. Sessions
+      queryDb(
+        `SELECT
+           COUNT(CASE WHEN "startsAt" >= NOW() THEN 1 END)::int as "upcomingCount",
+           COUNT(CASE WHEN "startsAt"::date = CURRENT_DATE THEN 1 END)::int as "todayCount"
+         FROM "LiveSession"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+      // 11. Course Distribution
+      queryDb(
+        `SELECT
+           c.id as "courseId",
+           c.title as "courseTitle",
+           c.status,
+           COUNT(e.id)::int as "studentCount"
+         FROM "Course" c
+         LEFT JOIN "Enrolment" e ON e."courseId" = c.id AND e.status = 'ACTIVE'
+         WHERE c."instituteId" = $1
+         GROUP BY c.id, c.title, c.status
+         ORDER BY "studentCount" DESC, c.title ASC`,
+        [effectiveInstituteId]
+      ),
+      // 12. Enrolment Trend
+      queryDb(trendSql, [effectiveInstituteId]),
+      // 13. Financial Trend
+      queryDb(
+        `SELECT
+           TO_CHAR("paymentDate", 'YYYY-MM') as month,
+           TO_CHAR("paymentDate", 'Mon') as label,
+           SUM("netAmount")::bigint as collected,
+           0::bigint as pending
+         FROM "FeePayment"
+         WHERE "instituteId" = $1 AND status = 'COMPLETED'
+         GROUP BY TO_CHAR("paymentDate", 'YYYY-MM'), TO_CHAR("paymentDate", 'Mon')
+         ORDER BY month ASC
          LIMIT 6`,
         [effectiveInstituteId]
-      );
-    }
+      ),
+      // 14. Recent Payments
+      queryDb(
+        `SELECT
+           p.id,
+           p."paymentNumber",
+           p.amount,
+           p."netAmount",
+           p."paymentMode",
+           p.status,
+           p."referenceNumber",
+           p."paymentDate",
+           r."receiptNumber",
+           inv."invoiceNumber",
+           sp."admissionNo",
+           u."fullName" as "studentName",
+           c.title as "courseName"
+         FROM "FeePayment" p
+         LEFT JOIN "FeeReceipt" r ON r."paymentId" = p.id
+         LEFT JOIN "Invoice" inv ON inv.id = p."invoiceId"
+         LEFT JOIN "StudentProfile" sp ON sp.id = inv."studentProfileId"
+         LEFT JOIN "Membership" m ON m.id = sp."membershipId"
+         LEFT JOIN "User" u ON u.id = m."userId"
+         LEFT JOIN "Enrolment" e ON e."studentProfileId" = sp.id
+         LEFT JOIN "Course" c ON c.id = e."courseId"
+         WHERE p."instituteId" = $1 AND p.status = 'COMPLETED'
+         ORDER BY p."paymentDate" DESC
+         LIMIT 10`,
+        [effectiveInstituteId]
+      ),
+      // 15. Context if not already fetched
+      ctx ? Promise.resolve(ctx) : resolveServerAdminContext(),
+    ]);
+
+    const adminCtx = resolvedCtx || ctx;
+    const inst = instRows[0] || {
+      id: effectiveInstituteId,
+      name: adminCtx.name,
+      slug: adminCtx.instituteSlug,
+      timezone: adminCtx.timezone,
+      currency: adminCtx.currency,
+      logoUrl: adminCtx.logoUrl,
+      branding: {
+        instituteName: adminCtx.displayName,
+        primaryColor: adminCtx.primaryColor,
+        secondaryColor: adminCtx.secondaryColor,
+        accentColor: adminCtx.accentColor,
+      },
+    };
+    const branding = inst.branding || {};
+
+    const totalStudents = studentStats[0]?.totalStudents || 0;
+    const activeStudents = studentStats[0]?.activeStudents || 0;
+    const pendingAdmissionsCount = admissionStats[0]?.pendingAdmissions || 0;
+    const totalTeachers = teacherStats[0]?.totalTeachers || 0;
+    const activeTeachers = teacherStats[0]?.activeTeachers || 0;
+    const onLeaveTeachers = teacherStats[0]?.onLeaveTeachers || 0;
+    const totalCourses = courseStats[0]?.totalCourses || 0;
+    const publishedCourses = courseStats[0]?.publishedCourses || 0;
+    const draftCourses = courseStats[0]?.draftCourses || 0;
+    const totalBatches = batchStats[0]?.totalBatches || 0;
+    const activeBatches = batchStats[0]?.activeBatches || 0;
+
+    const totalFeeCollected = Number(paymentStats[0]?.totalCollected || 0);
+    const totalFeePending = Number(invoiceStats[0]?.totalPending || 0);
+    const overdueFeeAmount = Number(invoiceStats[0]?.overdueAmount || 0);
+    const pendingInvoicesCount = invoiceStats[0]?.pendingInvoicesCount || 0;
+
+    const totalAttRecords = attendanceStats[0]?.totalRecords || 0;
+    const presentAttCount = attendanceStats[0]?.presentCount || 0;
+    const attendancePercentage =
+      totalAttRecords > 0 ? Math.round((presentAttCount / totalAttRecords) * 100) : null;
+
+    const upcomingSessionsCount = sessionStats[0]?.upcomingCount || 0;
+    const sessionsTodayCount = sessionStats[0]?.todayCount || 0;
 
     const enrolmentTrend =
       enrolmentTrendRows.length > 0
@@ -237,24 +292,9 @@ export async function GET(
             },
           ];
 
-    // 5. Monthly Financial Trend
-    const financialTrendRows = await queryDb(
-      `SELECT
-         TO_CHAR("paymentDate", 'YYYY-MM') as month,
-         TO_CHAR("paymentDate", 'Mon') as label,
-         SUM("netAmount")::bigint as collected,
-         0::bigint as pending
-       FROM "FeePayment"
-       WHERE "instituteId" = $1 AND status = 'COMPLETED'
-       GROUP BY TO_CHAR("paymentDate", 'YYYY-MM'), TO_CHAR("paymentDate", 'Mon')
-       ORDER BY month ASC
-       LIMIT 6`,
-      [effectiveInstituteId]
-    );
-
     const financialTrend =
       financialTrendRows.length > 0
-        ? financialTrendRows.map((r) => ({
+        ? financialTrendRows.map((r: any) => ({
             month: r.month,
             label: r.label,
             collected: Number(r.collected),
@@ -269,37 +309,7 @@ export async function GET(
             },
           ];
 
-    // 6. Recent Payments
-    const recentPaymentsRows = await queryDb(
-      `SELECT
-         p.id,
-         p."paymentNumber",
-         p.amount,
-         p."netAmount",
-         p."paymentMode",
-         p.status,
-         p."referenceNumber",
-         p."paymentDate",
-         r."receiptNumber",
-         inv."invoiceNumber",
-         sp."admissionNo",
-         u."fullName" as "studentName",
-         c.title as "courseName"
-       FROM "FeePayment" p
-       LEFT JOIN "FeeReceipt" r ON r."paymentId" = p.id
-       LEFT JOIN "Invoice" inv ON inv.id = p."invoiceId"
-       LEFT JOIN "StudentProfile" sp ON sp.id = inv."studentProfileId"
-       LEFT JOIN "Membership" m ON m.id = sp."membershipId"
-       LEFT JOIN "User" u ON u.id = m."userId"
-       LEFT JOIN "Enrolment" e ON e."studentProfileId" = sp.id
-       LEFT JOIN "Course" c ON c.id = e."courseId"
-       WHERE p."instituteId" = $1 AND p.status = 'COMPLETED'
-       ORDER BY p."paymentDate" DESC
-       LIMIT 10`,
-      [effectiveInstituteId]
-    );
-
-    const recentPayments = recentPaymentsRows.map((p) => ({
+    const recentPayments = recentPaymentsRows.map((p: any) => ({
       id: p.id,
       paymentNumber: p.paymentNumber,
       receiptNumber: p.receiptNumber || '—',
@@ -321,7 +331,7 @@ export async function GET(
         id: inst.id,
         name: inst.name,
         displayName: branding.instituteName || inst.name,
-        code: inst.slug.toUpperCase(),
+        code: (inst.slug || 'INST').toUpperCase(),
         currency: inst.currency || 'INR',
         timezone: inst.timezone || 'Asia/Kolkata',
         logoUrl: inst.logoUrl,
@@ -330,9 +340,9 @@ export async function GET(
         accentColor: branding.accentColor || '#10b981',
       },
       viewer: {
-        userId: ctx.user.userId,
-        fullName: ctx.user.fullName,
-        role: ctx.user.role,
+        userId: adminCtx.user.userId,
+        fullName: adminCtx.user.fullName,
+        role: adminCtx.user.role,
       },
       dateFilter: {
         preset: presetParam,
@@ -387,7 +397,7 @@ export async function GET(
       },
       enrolmentTrend,
       financialTrend,
-      courseDistribution: courseDistRows.map((c) => ({
+      courseDistribution: courseDistRows.map((c: any) => ({
         courseId: c.courseId,
         courseTitle: c.courseTitle,
         studentCount: c.studentCount,
