@@ -218,9 +218,8 @@ export async function DELETE(
         : ctx.instituteId;
 
     const existing = await queryDb(
-      `SELECT sp.id, sp."membershipId", m."userId"
+      `SELECT sp.id, sp."membershipId"
        FROM "StudentProfile" sp
-       JOIN "Membership" m ON m.id = sp."membershipId"
        WHERE sp.id = $1 AND sp."instituteId" = $2`,
       [id, effectiveInstituteId]
     );
@@ -231,24 +230,34 @@ export async function DELETE(
 
     const { membershipId } = existing[0];
 
-    // Safely delete dependent records
-    await queryDb(`DELETE FROM "Admission" WHERE "studentProfileId" = $1`, [id]);
-    await queryDb(`DELETE FROM "Enrolment" WHERE "studentProfileId" = $1`, [id]);
-    await queryDb(`DELETE FROM "Attendance" WHERE "studentProfileId" = $1`, [id]);
-    await queryDb(`DELETE FROM "StudentFeeAllocation" WHERE "studentProfileId" = $1`, [id]);
-    await queryDb(`DELETE FROM "BatchTransferLog" WHERE "studentProfileId" = $1`, [id]);
-    await queryDb(`DELETE FROM "StudentProfile" WHERE id = $1 AND "instituteId" = $2`, [id, effectiveInstituteId]);
+    // Safe Archival & Deactivation (Zero-Loss):
+    // Preserves all Attendance, Enrolments, Invoices, Payments, Receipts, and Audit Logs
+    await queryDb(
+      `UPDATE "StudentProfile" SET status = 'INACTIVE', "updatedAt" = NOW() WHERE id = $1 AND "instituteId" = $2`,
+      [id, effectiveInstituteId]
+    );
 
-    // Clean up membership
     if (membershipId) {
-      await queryDb(`DELETE FROM "Membership" WHERE id = $1 AND "instituteId" = $2`, [membershipId, effectiveInstituteId]);
+      await queryDb(
+        `UPDATE "Membership" SET status = 'SUSPENDED', "updatedAt" = NOW() WHERE id = $1 AND "instituteId" = $2`,
+        [membershipId, effectiveInstituteId]
+      );
     }
 
-    return NextResponse.json({ success: true, message: 'Student permanently deleted from database', id });
+    await queryDb(
+      `UPDATE "Admission" SET status = 'WITHDRAWN', "updatedAt" = NOW() WHERE "studentProfileId" = $1 AND "instituteId" = $2`,
+      [id, effectiveInstituteId]
+    );
+
+    return NextResponse.json({
+      success: true,
+      message: 'Student account safely archived. Historical attendance, financial, and enrollment records preserved.',
+      id,
+    });
   } catch (error: any) {
-    console.error('Error in student DELETE route:', error);
+    console.error('Error in student safe archival route:', error);
     return NextResponse.json(
-      { message: error?.message || 'Failed to delete student record' },
+      { message: error?.message || 'Failed to archive student record' },
       { status: 500 }
     );
   }

@@ -748,17 +748,6 @@ export default function StudentsDirectoryPage() {
                             </Button>
                           )}
 
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleDeleteStudent(s.id, s.fullName)}
-                            className="h-8 px-2 text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 border-slate-200"
-                            title="Delete Student"
-                          >
-                            <Trash2 size={13} className="mr-1 text-rose-500" />
-                            Delete
-                          </Button>
-
                           {s.status === 'INACTIVE' && (
                             <Button
                               size="sm"
