@@ -103,3 +103,47 @@ export async function GET(
     );
   }
 }
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ instituteId: string }> },
+) {
+  try {
+    const { instituteId } = await params;
+    const body = await request.json();
+    const { userId, title, body: content, link } = body;
+
+    if (!title || !content) {
+      return NextResponse.json({ message: 'Title and body are required' }, { status: 400 });
+    }
+
+    let targetUserId = userId;
+    if (!targetUserId) {
+      const adminRows = await queryDb(
+        `SELECT m."userId" FROM "Membership" m WHERE m."instituteId" = $1 AND m.role IN ('ADMIN', 'SUPER_ADMIN') LIMIT 1`,
+        [instituteId]
+      );
+      targetUserId = adminRows[0]?.userId;
+    }
+
+    if (!targetUserId) {
+      const anyUser = await queryDb(`SELECT id FROM "User" LIMIT 1`);
+      targetUserId = anyUser[0]?.id;
+    }
+
+    const inserted = await queryDb(
+      `INSERT INTO "Notification" (id, "instituteId", "userId", title, body, link, "createdAt")
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
+       RETURNING id, title, body, link, "createdAt"`,
+      [instituteId, targetUserId, title, content, link || '/admin']
+    );
+
+    return NextResponse.json(inserted[0]);
+  } catch (error: any) {
+    console.error('[POST /notifications] Error:', error);
+    return NextResponse.json(
+      { message: error?.message || 'Failed to create notification' },
+      { status: 500 }
+    );
+  }
+}

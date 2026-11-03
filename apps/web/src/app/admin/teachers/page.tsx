@@ -84,55 +84,8 @@ export default function TeachersDirectoryPage() {
       setTotalPages(res.meta.totalPages || 1);
       setTotalCount(res.meta.total || 0);
     } catch (err: any) {
-      console.warn('Teacher fetch fallback:', err.message);
-      // Fallback preview data for prototype navigation if API not directly reachable
-      const fallbackList: TeacherSummaryDto[] = [
-        {
-          id: 'fac-1',
-          employeeCode: 'FAC-2026-0001',
-          fullName: 'Dr. Samuel V. Mathews',
-          phoneE164: '+91 98401 23456',
-          email: 's.mathews@faithseminary.edu',
-          specialization: 'Systematic Theology',
-          highestDegree: 'Ph.D in Biblical Studies',
-          experienceYears: 14,
-          status: 'ACTIVE',
-          assignedCoursesCount: 3,
-          assignedBatchesCount: 2,
-          joiningDate: '2020-06-01',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'fac-2',
-          employeeCode: 'FAC-2026-0002',
-          fullName: 'Prof. Deborah Livingstone',
-          phoneE164: '+91 98402 34567',
-          email: 'deborah.l@faithseminary.edu',
-          specialization: 'Biblical Languages (Hebrew/Greek)',
-          highestDegree: 'M.Th (Old Testament)',
-          experienceYears: 9,
-          status: 'ACTIVE',
-          assignedCoursesCount: 2,
-          assignedBatchesCount: 1,
-          joiningDate: '2022-01-15',
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'fac-3',
-          employeeCode: 'FAC-2026-0003',
-          fullName: 'Pastor John Mark K.',
-          phoneE164: '+91 98403 45678',
-          email: 'johnmark@faithseminary.edu',
-          specialization: 'Church History & Missions',
-          highestDegree: 'D.Min (Pastoral Ministry)',
-          experienceYears: 18,
-          status: 'ACTIVE',
-          assignedCoursesCount: 1,
-          assignedBatchesCount: 2,
-          joiningDate: '2018-08-01',
-          createdAt: new Date().toISOString(),
-        },
-      ];
+      console.error('Error fetching teachers from database:', err.message);
+      setErrorMsg(err.message || 'Unable to load faculty from database');
       setTeachers([]);
       setTotalPages(1);
       setTotalCount(0);

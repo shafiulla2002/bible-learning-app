@@ -114,6 +114,23 @@ export async function POST(
       [newPaid, newBalance, newStatus, invoiceId, effectiveInstituteId]
     );
 
+    // 4. Trigger Admin Notification for Payment Recorded
+    try {
+      await queryDb(
+        `INSERT INTO "Notification" (id, "instituteId", "userId", title, body, link, "createdAt")
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())`,
+        [
+          effectiveInstituteId,
+          ctx.user.userId,
+          `Fee Payment Recorded: ₹${(payPaise / 100).toLocaleString('en-IN')}`,
+          `Payment of ₹${(payPaise / 100).toLocaleString('en-IN')} recorded for invoice ${inv.invoiceNumber} (Receipt: ${receiptNumber}).`,
+          `/admin/finance`,
+        ]
+      );
+    } catch (notifErr) {
+      console.warn('Failed to insert notification for payment:', notifErr);
+    }
+
     return NextResponse.json(
       {
         ...payment,

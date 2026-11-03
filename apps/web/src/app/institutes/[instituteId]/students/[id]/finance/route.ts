@@ -8,79 +8,44 @@ export async function GET(
   { params }: { params: Promise<{ instituteId: string; id: string }> }
 ) {
   try {
-    const { instituteId, id: studentProfileId } = await params;
+    const { instituteId, id: studentId } = await params;
     const ctx = await resolveServerAdminContext();
     const effectiveInstituteId =
       instituteId && instituteId !== 'null' && instituteId !== 'undefined'
         ? instituteId
         : ctx.instituteId;
 
-    // 1. Invoices summary
-    const summaryRows = await queryDb(
-      `SELECT
-         COALESCE(SUM("totalAmount"), 0)::bigint as "totalFeeAmount",
-         COALESCE(SUM("paidAmount"), 0)::bigint as "totalPaidAmount",
-         COALESCE(SUM("balanceAmount"), 0)::bigint as "pendingBalance",
-         COUNT(id)::int as "totalInvoices"
-       FROM "Invoice"
-       WHERE "studentProfileId" = $1 AND "instituteId" = $2 AND status != 'CANCELLED'`,
-      [studentProfileId, effectiveInstituteId]
-    );
-
-    const s = summaryRows[0] || {
-      totalFeeAmount: 0,
-      totalPaidAmount: 0,
-      pendingBalance: 0,
-      totalInvoices: 0,
-    };
-
-    // 2. Next due date
-    const nextDueRows = await queryDb(
-      `SELECT MIN("dueDate") as "nextDueDate"
-       FROM "Invoice"
-       WHERE "studentProfileId" = $1 AND "instituteId" = $2 AND status IN ('ISSUED', 'PARTIALLY_PAID') AND "balanceAmount" > 0`,
-      [studentProfileId, effectiveInstituteId]
-    );
-    const nextDueDate = nextDueRows[0]?.nextDueDate
-      ? new Date(nextDueRows[0].nextDueDate).toISOString().slice(0, 10)
-      : null;
-
-    // 3. Installments count
-    const instCountRows = await queryDb(
-      `SELECT COUNT(inst.id)::int as count
-       FROM "InvoiceInstallment" inst
-       JOIN "Invoice" inv ON inv.id = inst."invoiceId"
-       WHERE inv."studentProfileId" = $1 AND inv."instituteId" = $2`,
-      [studentProfileId, effectiveInstituteId]
-    );
-    const totalInstallments = instCountRows[0]?.count > 0 ? instCountRows[0].count : Number(s.totalInvoices);
-
-    // 4. Invoices List
+    // 1. Fetch Invoices for this student
     const invoices = await queryDb(
       `SELECT
-         id,
-         "invoiceNumber",
-         status,
-         "issueDate",
-         "dueDate",
-         "totalAmount",
-         "paidAmount",
-         "balanceAmount",
-         currency,
-         notes
-       FROM "Invoice"
-       WHERE "studentProfileId" = $1 AND "instituteId" = $2
-       ORDER BY "createdAt" DESC`,
-      [studentProfileId, effectiveInstituteId]
+         i.id,
+         i."invoiceNumber",
+         i.status,
+         i."issueDate",
+         i."dueDate",
+         i."totalAmount",
+         i."paidAmount",
+         i."balanceAmount",
+         i.currency,
+         i.notes,
+         (
+           SELECT string_agg(item.description, ', ')
+           FROM "InvoiceItem" item
+           WHERE item."invoiceId" = i.id
+         ) as description
+       FROM "Invoice" i
+       WHERE i."instituteId" = $1 AND i."studentProfileId" = $2
+       ORDER BY i."createdAt" DESC`,
+      [effectiveInstituteId, studentId]
     );
 
-    // 5. Payments & Receipts List
-    const payments = await queryDb(
+    // 2. Fetch Payments for this student's invoices
+    const transactions = await queryDb(
       `SELECT
          p.id,
          p."paymentNumber",
-         p.amount,
-         p."netAmount",
+         p.amount as "grossAmount",
+         p."netAmount" as "amountPaid",
          p."reversedAmount",
          p."paymentMode",
          p."paymentDate",
@@ -89,59 +54,73 @@ export async function GET(
          p.remarks,
          inv.id as "invoiceId",
          inv."invoiceNumber",
-         inv.notes as "feeDescription",
          inv."totalAmount" as "invoiceTotalAmount",
          r."receiptNumber",
-         r."pdfUrl"
+         COALESCE(
+           (SELECT string_agg(item.description, ', ') FROM "InvoiceItem" item WHERE item."invoiceId" = inv.id),
+           'Tuition & Academic Fee'
+         ) as "feeDescription"
        FROM "FeePayment" p
        JOIN "Invoice" inv ON inv.id = p."invoiceId"
        LEFT JOIN "FeeReceipt" r ON r."paymentId" = p.id
-       WHERE inv."studentProfileId" = $1 AND p."instituteId" = $2
+       WHERE p."instituteId" = $1 AND inv."studentProfileId" = $2
        ORDER BY p."paymentDate" DESC`,
-      [studentProfileId, effectiveInstituteId]
+      [effectiveInstituteId, studentId]
     );
+
+    // 3. Fetch Installments count and next due date
+    const installmentRows = await queryDb(
+      `SELECT
+         COUNT(inst.id)::int as "totalInstallments",
+         MIN(CASE WHEN inst.status = 'PENDING' AND inst."dueDate" >= CURRENT_DATE THEN inst."dueDate" END) as "nextDueDate"
+       FROM "InvoiceInstallment" inst
+       JOIN "Invoice" inv ON inv.id = inst."invoiceId"
+       WHERE inst."instituteId" = $1 AND inv."studentProfileId" = $2`,
+      [effectiveInstituteId, studentId]
+    );
+
+    // Calculate integer paise summary
+    let totalFeeAmount = 0;
+    let totalPaidAmount = 0;
+    let pendingBalance = 0;
+
+    for (const inv of invoices) {
+      totalFeeAmount += Number(inv.totalAmount || 0);
+      totalPaidAmount += Number(inv.paidAmount || 0);
+      pendingBalance += Number(inv.balanceAmount || 0);
+    }
+
+    const totalInstallments = Number(installmentRows[0]?.totalInstallments || (invoices.length > 0 ? invoices.length : 1));
+    const nextDueRaw = installmentRows[0]?.nextDueDate;
+    const nextDueDate = nextDueRaw ? new Date(nextDueRaw).toISOString().slice(0, 10) : (pendingBalance > 0 ? 'Upcoming' : 'Fully Paid');
 
     return NextResponse.json({
       summary: {
-        totalFeeAmount: Number(s.totalFeeAmount),
-        totalPaidAmount: Number(s.totalPaidAmount),
-        pendingBalance: Number(s.pendingBalance),
+        totalFeeAmount,
+        totalPaidAmount,
+        pendingBalance,
         totalInstallments,
         nextDueDate,
       },
-      invoices: invoices.map((inv) => ({
-        id: inv.id,
-        invoiceNumber: inv.invoiceNumber,
-        status: inv.status,
-        issueDate: inv.issueDate ? new Date(inv.issueDate).toISOString().slice(0, 10) : null,
-        dueDate: inv.dueDate ? new Date(inv.dueDate).toISOString().slice(0, 10) : null,
-        totalAmount: Number(inv.totalAmount),
-        paidAmount: Number(inv.paidAmount),
-        balanceAmount: Number(inv.balanceAmount),
-        currency: inv.currency,
-        notes: inv.notes,
-      })),
-      transactions: payments.map((p) => ({
-        id: p.id,
-        paymentNumber: p.paymentNumber,
-        receiptNumber: p.receiptNumber || '—',
-        paymentDate: p.paymentDate ? new Date(p.paymentDate).toISOString() : new Date().toISOString(),
-        feeDescription: p.feeDescription || 'Tuition & Academic Term Fee',
-        invoiceNumber: p.invoiceNumber,
-        invoiceTotalAmount: Number(p.invoiceTotalAmount || p.amount),
-        amountPaid: Number(p.netAmount || p.amount),
-        paymentMode: p.paymentMode,
-        referenceNumber: p.referenceNumber || '—',
-        status: p.status,
-        receiptUrl: p.pdfUrl || `/receipts/${p.receiptNumber || p.paymentNumber}.pdf`,
+      invoices,
+      transactions: transactions.map((tx: any) => ({
+        id: tx.id,
+        invoiceNumber: tx.invoiceNumber || '—',
+        receiptNumber: tx.receiptNumber || '—',
+        paymentDate: tx.paymentDate ? new Date(tx.paymentDate).toISOString() : new Date().toISOString(),
+        feeDescription: tx.feeDescription || 'Tuition & Academic Fee',
+        invoiceTotalAmount: Number(tx.invoiceTotalAmount || 0),
+        amountPaid: Number(tx.amountPaid || 0),
+        paymentMode: tx.paymentMode || 'ONLINE',
+        referenceNumber: tx.referenceNumber || '—',
+        status: tx.status || 'COMPLETED',
       })),
     });
   } catch (error: any) {
     console.error('Error fetching student finance history:', error);
     return NextResponse.json(
-      { message: error?.message || 'Failed to fetch student finance history' },
+      { error: error?.message || 'Failed to fetch student finance history' },
       { status: 500 }
     );
   }
 }
-

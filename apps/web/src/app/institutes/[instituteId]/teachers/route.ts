@@ -229,6 +229,24 @@ export async function POST(
     );
 
     const tp = tpRows[0];
+
+    // Trigger Admin Notification for teacher registration
+    try {
+      await queryDb(
+        `INSERT INTO "Notification" (id, "instituteId", "userId", title, body, link, "createdAt")
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())`,
+        [
+          effectiveInstituteId,
+          ctx?.user?.userId || userId,
+          `New Faculty Registered: ${fullName}`,
+          `Teacher ${fullName} (${tp.employeeCode}) was registered for ${tp.specialization || 'Theology'}.`,
+          `/admin/teachers/${tp.id}`,
+        ]
+      );
+    } catch (notifErr) {
+      console.warn('Failed to insert notification for teacher registration:', notifErr);
+    }
+
     return NextResponse.json(
       {
         id: tp.id,

@@ -136,13 +136,21 @@ export default function StudentsDirectoryPage() {
     fullName: '',
     phoneNumber: '+91 ',
     email: '',
+    dateOfBirth: '',
     gender: 'Male',
     church: '',
     preferredLanguage: 'English',
+    addressStreet: '',
+    addressCity: '',
+    academicYear: '2026-2027',
+    admissionDate: new Date().toISOString().slice(0, 10),
     courseId: '',
     batchId: '',
     guardianName: '',
-    addressCity: '',
+    guardianPhone: '',
+    guardianEmail: '',
+    username: '',
+    password: '',
     status: 'ACTIVE' as const,
   });
 
@@ -270,13 +278,24 @@ export default function StudentsDirectoryPage() {
         phoneNumber: newStudent.phoneNumber,
         avatarUrl: newStudent.avatarUrl || undefined,
         email: newStudent.email || undefined,
+        dateOfBirth: newStudent.dateOfBirth || undefined,
         gender: newStudent.gender,
         church: newStudent.church || undefined,
         preferredLanguage: newStudent.preferredLanguage,
+        address: {
+          street: newStudent.addressStreet || undefined,
+          city: newStudent.addressCity || undefined,
+        },
+        guardian: {
+          name: newStudent.guardianName || undefined,
+          phone: newStudent.guardianPhone || undefined,
+          email: newStudent.guardianEmail || undefined,
+        },
         courseId: newStudent.courseId || undefined,
         batchId: newStudent.batchId || undefined,
-        guardianName: newStudent.guardianName || undefined,
-        addressCity: newStudent.addressCity || undefined,
+        admissionDate: newStudent.admissionDate || undefined,
+        username: newStudent.username || undefined,
+        password: newStudent.password || undefined,
         status: newStudent.status,
       });
 
@@ -288,13 +307,21 @@ export default function StudentsDirectoryPage() {
         fullName: '',
         phoneNumber: '+91 ',
         email: '',
+        dateOfBirth: '',
         gender: 'Male',
         church: '',
         preferredLanguage: 'English',
+        addressStreet: '',
+        addressCity: '',
+        academicYear: '2026-2027',
+        admissionDate: new Date().toISOString().slice(0, 10),
         courseId: courses[0]?.id || '',
         batchId: batches[0]?.id || '',
         guardianName: '',
-        addressCity: '',
+        guardianPhone: '',
+        guardianEmail: '',
+        username: '',
+        password: '',
         status: 'ACTIVE',
       });
       fetchStudents();
@@ -863,7 +890,7 @@ export default function StudentsDirectoryPage() {
                   </div>
                 </div>
 
-                {/* Personal Info */}
+                {/* 1. Personal Information */}
                 <div>
                   <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
                     1. Personal Information
@@ -911,6 +938,16 @@ export default function StudentsDirectoryPage() {
                     </div>
 
                     <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Date of Birth</label>
+                      <input
+                        type="date"
+                        value={newStudent.dateOfBirth}
+                        onChange={(e) => setNewStudent({ ...newStudent, dateOfBirth: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                    </div>
+
+                    <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">Gender</label>
                       <select
                         value={newStudent.gender}
@@ -951,15 +988,66 @@ export default function StudentsDirectoryPage() {
                         <option value="Hindi">Hindi</option>
                       </select>
                     </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Street Address
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 12 Church Road, Indiranagar"
+                        value={newStudent.addressStreet}
+                        onChange={(e) => setNewStudent({ ...newStudent, addressStreet: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        City / Location
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Bangalore, Karnataka"
+                        value={newStudent.addressCity}
+                        onChange={(e) => setNewStudent({ ...newStudent, addressCity: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* Course & Batch */}
+                {/* 2. Academic Information */}
                 <div className="pt-2 border-t border-slate-100">
                   <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
-                    2. Course & Cohort Enrollment
+                    2. Academic Information
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Academic Year
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 2026-2027"
+                        value={newStudent.academicYear}
+                        onChange={(e) => setNewStudent({ ...newStudent, academicYear: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Admission Date
+                      </label>
+                      <input
+                        type="date"
+                        value={newStudent.admissionDate}
+                        onChange={(e) => setNewStudent({ ...newStudent, admissionDate: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                    </div>
+
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
                         Course Selection
@@ -994,7 +1082,7 @@ export default function StudentsDirectoryPage() {
                       </select>
                     </div>
 
-                    <div>
+                    <div className="sm:col-span-2">
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
                         Initial Admission Status
                       </label>
@@ -1011,15 +1099,15 @@ export default function StudentsDirectoryPage() {
                   </div>
                 </div>
 
-                {/* Guardian / City */}
+                {/* 3. Parent / Guardian Information */}
                 <div className="pt-2 border-t border-slate-100">
                   <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
-                    3. Emergency Contact & City
+                    3. Parent / Guardian Information
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Guardian / Emergency Contact Name
+                        Parent / Guardian Name
                       </label>
                       <input
                         type="text"
@@ -1032,15 +1120,68 @@ export default function StudentsDirectoryPage() {
 
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        City / Location
+                        Parent Mobile Phone
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="+91 98765 00000"
+                        value={newStudent.guardianPhone}
+                        onChange={(e) => setNewStudent({ ...newStudent, guardianPhone: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Parent Email Address
+                      </label>
+                      <input
+                        type="email"
+                        placeholder="parent@example.com"
+                        value={newStudent.guardianEmail}
+                        onChange={(e) => setNewStudent({ ...newStudent, guardianEmail: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Student Account & Login Credentials */}
+                <div className="pt-2 border-t border-slate-100">
+                  <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">
+                    4. Account & Login Credentials
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Username / Login ID
                       </label>
                       <input
                         type="text"
-                        placeholder="e.g. Bangalore, Karnataka"
-                        value={newStudent.addressCity}
-                        onChange={(e) => setNewStudent({ ...newStudent, addressCity: e.target.value })}
+                        placeholder={newStudent.phoneNumber.trim() || 'e.g. phone or username'}
+                        value={newStudent.username}
+                        onChange={(e) => setNewStudent({ ...newStudent, username: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
                       />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">
+                        Defaults to student phone number
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Initial Login Password
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="Leave blank for OTP-only login"
+                        value={newStudent.password}
+                        onChange={(e) => setNewStudent({ ...newStudent, password: e.target.value })}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">
+                        Hashed securely with bcrypt before saving
+                      </span>
                     </div>
                   </div>
                 </div>

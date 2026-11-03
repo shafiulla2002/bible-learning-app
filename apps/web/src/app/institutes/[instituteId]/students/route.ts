@@ -294,6 +294,23 @@ export async function POST(
       enrolledCourseTitle = courseRow[0]?.title;
     }
 
+    // Trigger Admin Notification for cross-module integration
+    try {
+      await queryDb(
+        `INSERT INTO "Notification" (id, "instituteId", "userId", title, body, link, "createdAt")
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())`,
+        [
+          effectiveInstituteId,
+          ctx?.user?.userId || userId,
+          `New Student Registered: ${fullName}`,
+          `Student ${fullName} (${studentProfile.admissionNo}) was successfully registered and admitted.`,
+          `/admin/students/${studentProfile.id}`,
+        ]
+      );
+    } catch (notifErr) {
+      console.warn('Failed to insert notification for student registration:', notifErr);
+    }
+
     return NextResponse.json({
       id: studentProfile.id,
       userId,
