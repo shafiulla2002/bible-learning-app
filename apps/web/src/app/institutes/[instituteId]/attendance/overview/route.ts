@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb } from '@/lib/server-db';
+import { queryDb, getServerRouteCache, setServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,13 @@ export async function GET(
   try {
     const { instituteId } = await params;
 
-    // 1. Overall stats
+    const cacheKey = `attendance:overview:${instituteId}`;
+    const cached = getServerRouteCache<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
+    // 1. Overall stats query
     const statsQuery = `
       SELECT
         COUNT(*)::int as "totalRecords",
@@ -21,19 +27,8 @@ export async function GET(
       FROM "Attendance"
       WHERE "instituteId" = $1
     `;
-    const statsRes = await queryDb(statsQuery, [instituteId]);
-    const s = statsRes[0] || {
-      totalRecords: 0,
-      presentCount: 0,
-      lateCount: 0,
-      absentCount: 0,
-      excusedCount: 0,
-    };
 
-    const presentOrLate = (s.presentCount || 0) + (s.lateCount || 0);
-    const attendancePercentage = s.totalRecords > 0 ? Math.round((presentOrLate / s.totalRecords) * 100) : null;
-
-    // 2. Batches breakdown
+    // 2. Batches breakdown query
     const batchesQuery = `
       SELECT
         b.id as "batchId",
@@ -57,7 +52,23 @@ export async function GET(
       GROUP BY b.id, b.name, c.title, y.name, t.name
       ORDER BY b.name ASC
     `;
-    const batchesRes = await queryDb(batchesQuery, [instituteId]);
+
+    // Concurrently fetch stats and batches
+    const [statsRes, batchesRes] = await Promise.all([
+      queryDb(statsQuery, [instituteId]),
+      queryDb(batchesQuery, [instituteId]),
+    ]);
+
+    const s = statsRes[0] || {
+      totalRecords: 0,
+      presentCount: 0,
+      lateCount: 0,
+      absentCount: 0,
+      excusedCount: 0,
+    };
+
+    const presentOrLate = (s.presentCount || 0) + (s.lateCount || 0);
+    const attendancePercentage = s.totalRecords > 0 ? Math.round((presentOrLate / s.totalRecords) * 100) : null;
 
     const formattedBatches = batchesRes.map((b: any) => {
       const pL = (b.presentCount || 0) + (b.lateCount || 0);
@@ -68,7 +79,7 @@ export async function GET(
       };
     });
 
-    return NextResponse.json({
+    const responsePayload = {
       summary: {
         totalRecords: s.totalRecords,
         presentCount: s.presentCount,
@@ -78,7 +89,10 @@ export async function GET(
         attendancePercentage,
       },
       batches: formattedBatches,
-    });
+    };
+
+    setServerRouteCache(cacheKey, responsePayload, 25000);
+    return NextResponse.json(responsePayload);
   } catch (error: any) {
     console.error('Error fetching attendance overview:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });

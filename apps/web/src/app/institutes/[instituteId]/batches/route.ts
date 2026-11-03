@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, getServerRouteCache, setServerRouteCache, invalidateServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +22,12 @@ export async function GET(
     const status = searchParams.get('status');
     const courseId = searchParams.get('courseId');
     const termId = searchParams.get('termId');
+
+    const cacheKey = `batches:${effectiveInstituteId}:${status || 'ALL'}:${courseId || 'ALL'}:${termId || 'ALL'}`;
+    const cached = getServerRouteCache<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     let whereClause = `WHERE b."instituteId" = $1`;
     const queryParams: any[] = [effectiveInstituteId];

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, invalidateServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 

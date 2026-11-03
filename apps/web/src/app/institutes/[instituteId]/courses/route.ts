@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, getServerRouteCache, setServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +25,11 @@ export async function GET(
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
     const offset = (page - 1) * limit;
+    const cacheKey = `courses:${effectiveInstituteId}:${page}:${limit}:${status}:${categoryId}:${search}`;
+    const cached = getServerRouteCache<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     let whereClause = `WHERE c."instituteId" = $1`;
     const queryParams: any[] = [effectiveInstituteId];
@@ -45,39 +50,40 @@ export async function GET(
       whereClause += ` AND (c.title ILIKE $${pIdx} OR c.description ILIKE $${pIdx} OR c.slug ILIKE $${pIdx})`;
     }
 
-    const countRows = await queryDb(
-      `SELECT COUNT(c.id)::int as total FROM "Course" c ${whereClause}`,
-      queryParams
-    );
+    const [countRows, rows] = await Promise.all([
+      queryDb(
+        `SELECT COUNT(c.id)::int as total FROM "Course" c ${whereClause}`,
+        queryParams
+      ),
+      queryDb(
+        `SELECT
+           c.id,
+           c."instituteId",
+           c."categoryId",
+           c.title,
+           c.slug,
+           c.description,
+           c.level,
+           c.price,
+           c.pricing,
+           c.status,
+           c."coverImage",
+           c."createdAt",
+           cat.name as "categoryName",
+           cat.slug as "categorySlug",
+           (SELECT COUNT(*)::int FROM "Enrolment" e WHERE e."courseId" = c.id AND e.status = 'ACTIVE') as "enrolmentsCount",
+           (SELECT COUNT(*)::int FROM "Batch" b WHERE b."courseId" = c.id AND b.status = 'ACTIVE') as "batchesCount",
+           (SELECT COUNT(*)::int FROM "CourseInstructor" ci WHERE ci."courseId" = c.id) as "instructorsCount"
+         FROM "Course" c
+         LEFT JOIN "CourseCategory" cat ON cat.id = c."categoryId"
+         ${whereClause}
+         ORDER BY c."createdAt" DESC
+         LIMIT ${queryParams.length + 1} OFFSET ${queryParams.length + 2}`,
+        [...queryParams, limit, offset]
+      ),
+    ]);
     const total = countRows[0]?.total || 0;
     const totalPages = Math.max(1, Math.ceil(total / limit));
-
-    const rows = await queryDb(
-      `SELECT
-         c.id,
-         c."instituteId",
-         c."categoryId",
-         c.title,
-         c.slug,
-         c.description,
-         c.level,
-         c.price,
-         c.pricing,
-         c.status,
-         c."coverImage",
-         c."createdAt",
-         cat.name as "categoryName",
-         cat.slug as "categorySlug",
-         (SELECT COUNT(*)::int FROM "Enrolment" e WHERE e."courseId" = c.id AND e.status = 'ACTIVE') as "enrolmentsCount",
-         (SELECT COUNT(*)::int FROM "Batch" b WHERE b."courseId" = c.id AND b.status = 'ACTIVE') as "batchesCount",
-         (SELECT COUNT(*)::int FROM "CourseInstructor" ci WHERE ci."courseId" = c.id) as "instructorsCount"
-       FROM "Course" c
-       LEFT JOIN "CourseCategory" cat ON cat.id = c."categoryId"
-       ${whereClause}
-       ORDER BY c."createdAt" DESC
-       LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
-      [...queryParams, limit, offset]
-    );
 
     const data = rows.map((r) => ({
       id: r.id,

@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, getServerRouteCache, setServerRouteCache, invalidateServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +24,12 @@ export async function GET(
     const specialization = (searchParams.get('specialization') || 'ALL').trim();
     const offset = (page - 1) * limit;
 
+    const cacheKey = `teachers:${effectiveInstituteId}:${page}:${limit}:${status}:${specialization}:${search}`;
+    const cached = getServerRouteCache<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
     let whereClause = `WHERE tp."instituteId" = $1`;
     const queryParams: any[] = [effectiveInstituteId];
 
@@ -43,40 +49,41 @@ export async function GET(
       whereClause += ` AND (u."fullName" ILIKE $${pIdx} OR tp."employeeCode" ILIKE $${pIdx} OR u."phoneE164" ILIKE $${pIdx} OR u.email ILIKE $${pIdx} OR tp.specialization ILIKE $${pIdx})`;
     }
 
-    const countRows = await queryDb(
-      `SELECT COUNT(tp.id)::int as total
-       FROM "TeacherProfile" tp
-       JOIN "Membership" m ON m.id = tp."membershipId"
-       JOIN "User" u ON u.id = m."userId"
-       ${whereClause}`,
-      queryParams
-    );
+    const [countRows, dataRows] = await Promise.all([
+      queryDb(
+        `SELECT COUNT(tp.id)::int as total
+         FROM "TeacherProfile" tp
+         JOIN "Membership" m ON m.id = tp."membershipId"
+         JOIN "User" u ON u.id = m."userId"
+         ${whereClause}`,
+        queryParams
+      ),
+      queryDb(
+        `SELECT
+           tp.id,
+           tp."employeeCode",
+           u."fullName",
+           u."phoneE164",
+           u.email,
+           tp.specialization,
+           tp.qualifications as "highestDegree",
+           tp."experienceYears",
+           tp.status,
+           tp."joiningDate",
+           tp."createdAt",
+           (SELECT COUNT(*)::int FROM "CourseInstructor" ci WHERE ci."teacherProfileId" = tp.id) as "assignedCoursesCount",
+           (SELECT COUNT(*)::int FROM "BatchTeacher" bt WHERE bt."teacherProfileId" = tp.id) as "assignedBatchesCount"
+         FROM "TeacherProfile" tp
+         JOIN "Membership" m ON m.id = tp."membershipId"
+         JOIN "User" u ON u.id = m."userId"
+         ${whereClause}
+         ORDER BY tp."createdAt" DESC
+         LIMIT ${queryParams.length + 1} OFFSET ${queryParams.length + 2}`,
+        [...queryParams, limit, offset]
+      ),
+    ]);
     const total = countRows[0]?.total || 0;
     const totalPages = Math.max(1, Math.ceil(total / limit));
-
-    const dataRows = await queryDb(
-      `SELECT
-         tp.id,
-         tp."employeeCode",
-         u."fullName",
-         u."phoneE164",
-         u.email,
-         tp.specialization,
-         tp.qualifications as "highestDegree",
-         tp."experienceYears",
-         tp.status,
-         tp."joiningDate",
-         tp."createdAt",
-         (SELECT COUNT(*)::int FROM "CourseInstructor" ci WHERE ci."teacherProfileId" = tp.id) as "assignedCoursesCount",
-         (SELECT COUNT(*)::int FROM "BatchTeacher" bt WHERE bt."teacherProfileId" = tp.id) as "assignedBatchesCount"
-       FROM "TeacherProfile" tp
-       JOIN "Membership" m ON m.id = tp."membershipId"
-       JOIN "User" u ON u.id = m."userId"
-       ${whereClause}
-       ORDER BY tp."createdAt" DESC
-       LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
-      [...queryParams, limit, offset]
-    );
 
     const data = dataRows.map((r) => ({
       id: r.id,
@@ -94,15 +101,19 @@ export async function GET(
       createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
     }));
 
-    return NextResponse.json({
+    const responsePayload = {
       data,
       meta: {
         total,
         page,
         limit,
         totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
       },
-    });
+    };
+    setServerRouteCache(cacheKey, responsePayload, 25000);
+    return NextResponse.json(responsePayload);
   } catch (error: any) {
     console.error('Error in /institutes/[instituteId]/teachers GET:', error);
     return NextResponse.json(

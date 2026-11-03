@@ -110,24 +110,21 @@ export function PortalShell({
             Switch Portal (Demo)
           </p>
           <div className="grid grid-cols-2 gap-1.5 text-xs font-medium">
-            <Link
-              href="/student"
+            <Link href="/student" prefetch={true}
               className={`px-2 py-1 rounded text-center transition ${
                 portalRole === 'STUDENT' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-slate-300'
               }`}
             >
               Student
             </Link>
-            <Link
-              href="/teacher"
+            <Link href="/teacher" prefetch={true}
               className={`px-2 py-1 rounded text-center transition ${
                 portalRole === 'TEACHER' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-slate-300'
               }`}
             >
               Teacher
             </Link>
-            <Link
-              href="/admin"
+            <Link href="/admin" prefetch={true}
               className={`px-2 py-1 rounded text-center transition ${
                 portalRole === 'ADMIN' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-slate-300'
               }`}
@@ -150,9 +147,7 @@ export function PortalShell({
           {navItems.map((item) => {
             const isActive = pathname === item.href;
             return (
-              <Link
-                key={item.href}
-                href={item.href}
+              <Link key={item.href} href={item.href} prefetch={true}
                 onClick={() => setMobileMenuOpen(false)}
                 className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-all duration-150 ${
                   isActive ? itemActive : `${itemHover}`

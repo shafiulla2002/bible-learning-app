@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb } from '@/lib/server-db';
+import { queryDb, getServerRouteCache, setServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +9,10 @@ export async function GET(
 ) {
   try {
     const { instituteId } = await params;
+    const cacheKey = `notif:unread:${instituteId}`;
+    const cached = getServerRouteCache<any>(cacheKey);
+    if (cached) return NextResponse.json(cached);
+
     const rows = await queryDb(
       `SELECT COUNT(*)::int AS "unreadCount"
        FROM "Notification"
@@ -17,7 +21,7 @@ export async function GET(
     );
 
     const unreadCount = rows[0]?.unreadCount || 0;
-    return NextResponse.json({
+    const payload = {
       unreadCount,
       byCategory: {
         STUDENT: 0,
@@ -27,7 +31,9 @@ export async function GET(
         ACADEMIC: 0,
         ADMIN: 0,
       },
-    });
+    };
+    setServerRouteCache(cacheKey, payload, 20000);
+    return NextResponse.json(payload);
   } catch (error: any) {
     console.error('[GET /notifications/unread-count] Error:', error);
     return NextResponse.json({ unreadCount: 0, byCategory: {} });

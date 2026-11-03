@@ -27,55 +27,14 @@ const API_BASE_URL = resolveApiBaseUrl();
 export interface ApiFetchOptions extends RequestInit {
   token?: string;
   instituteId?: string;
+  bypassCache?: boolean;
+  ttlMs?: number;
 }
 
-export async function apiFetch<T>(
-  endpoint: string,
-  options: ApiFetchOptions = {},
-): Promise<T> {
-  const { token, instituteId, headers: customHeaders, ...rest } = options;
+// In-Flight Promise Deduplication (Phase 2 & 5)
+const inFlightRequests = new Map<string, Promise<any>>();
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(customHeaders as Record<string, string>),
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  } else if (typeof window !== 'undefined') {
-    const storedToken = localStorage.getItem('access_token');
-    if (storedToken) {
-      headers['Authorization'] = `Bearer ${storedToken}`;
-    }
-  }
-
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const url = `${API_BASE_URL}${cleanEndpoint}`;
-
-  const response = await fetch(url, {
-    ...rest,
-    headers,
-  });
-
-  if (!response.ok) {
-    let errorMessage = `HTTP ${response.status} ${response.statusText}`;
-    try {
-      const errJson = await response.json();
-      errorMessage = errJson.message || errorMessage;
-    } catch {}
-    throw new Error(errorMessage);
-  }
-
-  // Handle 204 No Content
-  if (response.status === 204) {
-    return {} as T;
-  }
-
-  return response.json();
-}
-
-
-// Fast In-Memory Request Cache with TTL & Scope Isolation (Phase 7)
+// Fast In-Memory Request Cache with TTL & Scope Isolation (Phase 5 & 7)
 const memoryCache = new Map<string, { data: any; expiry: number }>();
 
 export function getCached<T>(key: string): T | null {
@@ -98,8 +57,126 @@ export function clearCache(prefix?: string): void {
     return;
   }
   for (const k of memoryCache.keys()) {
-    if (k.startsWith(prefix)) memoryCache.delete(k);
+    if (k.startsWith(prefix) || k.includes(prefix)) {
+      memoryCache.delete(k);
+    }
   }
+}
+
+function autoInvalidateOnMutation(endpoint: string) {
+  const ep = endpoint.toLowerCase();
+  if (ep.includes('/students')) {
+    clearCache('students');
+    clearCache('dashboard');
+  } else if (ep.includes('/courses')) {
+    clearCache('courses');
+    clearCache('dashboard');
+  } else if (ep.includes('/batches')) {
+    clearCache('batches');
+    clearCache('dashboard');
+  } else if (ep.includes('/attendance')) {
+    clearCache('attendance');
+    clearCache('dashboard');
+  } else if (ep.includes('/finance') || ep.includes('/invoices') || ep.includes('/payments')) {
+    clearCache('finance');
+    clearCache('dashboard');
+  } else if (ep.includes('/teachers')) {
+    clearCache('teachers');
+    clearCache('dashboard');
+  } else if (ep.includes('/settings')) {
+    clearCache('settings');
+  } else if (ep.includes('/notifications')) {
+    clearCache('notifications');
+  } else {
+    clearCache('/institutes');
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('bible-lms:cache-invalidated', { detail: { endpoint } }));
+  }
+}
+
+export async function apiFetch<T>(
+  endpoint: string,
+  options: ApiFetchOptions = {},
+): Promise<T> {
+  const { token, instituteId, bypassCache, ttlMs = 25000, headers: customHeaders, ...rest } = options;
+  const method = (rest.method || 'GET').toUpperCase();
+
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = `${API_BASE_URL}${cleanEndpoint}`;
+
+  // 1. GET requests: Check in-memory cache and in-flight deduplication
+  if (method === 'GET' && !bypassCache) {
+    const cached = getCached<T>(url);
+    if (cached !== null) {
+      return cached;
+    }
+
+    if (inFlightRequests.has(url)) {
+      return inFlightRequests.get(url) as Promise<T>;
+    }
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(customHeaders as Record<string, string>),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  } else if (typeof window !== 'undefined') {
+    const storedToken = localStorage.getItem('access_token');
+    if (storedToken) {
+      headers['Authorization'] = `Bearer ${storedToken}`;
+    }
+  }
+
+  const executionPromise = (async () => {
+    try {
+      const response = await fetch(url, {
+        ...rest,
+        headers,
+      });
+
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status} ${response.statusText}`;
+        try {
+          const errJson = await response.json();
+          errorMessage = errJson.message || errorMessage;
+        } catch {}
+        throw new Error(errorMessage);
+      }
+
+      if (response.status === 204) {
+        return {} as T;
+      }
+
+      const result = await response.json();
+
+      // Cache successful GET responses
+      if (method === 'GET' && !bypassCache) {
+        setCached(url, result, ttlMs);
+      }
+
+      // Auto-invalidate related caches on mutation
+      if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+        autoInvalidateOnMutation(cleanEndpoint);
+      }
+
+      return result as T;
+    } finally {
+      if (method === 'GET') {
+        inFlightRequests.delete(url);
+      }
+    }
+  })();
+
+  if (method === 'GET' && !bypassCache) {
+    inFlightRequests.set(url, executionPromise);
+  }
+
+  return executionPromise;
 }
 
 function buildCleanQueryString(params?: Record<string, any>): string {

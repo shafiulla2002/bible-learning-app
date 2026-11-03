@@ -91,22 +91,23 @@ export default function AdminFinancePage() {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const [overviewRes, studentsRes] = await Promise.all([
-        financeApi.getOverview(instituteId),
-        studentApi.getStudents(instituteId, { limit: 100 }),
-      ]);
+      const overviewRes = await financeApi.getOverview(instituteId);
       setData(overviewRes);
-      const studentList = studentsRes.data || [];
-      setStudents(studentList);
-      if (studentList.length > 0 && !invForm.studentProfileId) {
-        setInvForm((f) => ({ ...f, studentProfileId: studentList[0].id }));
-      }
-      if (overviewRes.structures.length > 0 && !invForm.feeStructureId) {
+      if (overviewRes?.structures?.length > 0 && !invForm.feeStructureId) {
         setInvForm((f) => ({ ...f, feeStructureId: overviewRes.structures[0].id }));
       }
+      setLoading(false);
+
+      // Asynchronously load student list for invoice modal in background
+      studentApi.getStudents(instituteId, { limit: 100 }).then((studentsRes) => {
+        const studentList = studentsRes?.data || [];
+        setStudents(studentList);
+        if (studentList.length > 0 && !invForm.studentProfileId) {
+          setInvForm((f) => ({ ...f, studentProfileId: studentList[0].id }));
+        }
+      }).catch(() => {});
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to load financial records from PostgreSQL.');
-    } finally {
       setLoading(false);
     }
   }, [instituteId]);

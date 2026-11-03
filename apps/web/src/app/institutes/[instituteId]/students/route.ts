@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, getServerRouteCache, setServerRouteCache, invalidateServerRouteCache } from '@/lib/server-db';
 import bcrypt from 'bcryptjs';
 
 export const dynamic = 'force-dynamic';
@@ -26,6 +26,12 @@ export async function GET(
     const status = (searchParams.get('status') || 'ALL').toUpperCase();
     const courseId = searchParams.get('courseId') || '';
     const offset = (page - 1) * limit;
+
+    const cacheKey = `students:${effectiveInstituteId}:${page}:${limit}:${status}:${courseId}:${search}`;
+    const cached = getServerRouteCache<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     let whereClause = `WHERE sp."instituteId" = $1`;
     const queryParams: any[] = [effectiveInstituteId];
@@ -129,7 +135,7 @@ export async function GET(
       totalEnrolments: r.totalEnrolments || 0,
     }));
 
-    return NextResponse.json({
+    const responsePayload = {
       data,
       meta: {
         total,
@@ -138,9 +144,16 @@ export async function GET(
         totalPages,
         hasNextPage: page < totalPages,
         hasPrevPage: page > 1,
-        stats: liveStats,
       },
-    });
+      liveStats: {
+        totalVerifiedInDb: liveStats.total || total,
+        activeLearners: liveStats.activeCount || 0,
+        underReview: liveStats.reviewCount || 0,
+        inactiveAccounts: liveStats.inactiveCount || 0,
+      },
+    };
+    setServerRouteCache(cacheKey, responsePayload, 20000);
+    return NextResponse.json(responsePayload);
   } catch (error: any) {
     console.error('Error in /institutes/[instituteId]/students GET:', error);
     return NextResponse.json(

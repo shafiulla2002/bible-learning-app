@@ -125,3 +125,41 @@ export async function resolveServerAdminContext(forceRefresh = false): Promise<S
 
   return contextData;
 }
+
+
+// Server-Side Route Response Cache (Phase 5 & 7)
+declare global {
+  // eslint-disable-next-line no-var
+  var _routeResponseCache: Map<string, { data: any; expiresAt: number }> | undefined;
+}
+
+export function getServerRouteCache<T>(key: string): T | null {
+  if (!globalThis._routeResponseCache) return null;
+  const entry = globalThis._routeResponseCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    globalThis._routeResponseCache.delete(key);
+    return null;
+  }
+  return entry.data as T;
+}
+
+export function setServerRouteCache<T>(key: string, data: T, ttlMs = 20000): void {
+  if (!globalThis._routeResponseCache) {
+    globalThis._routeResponseCache = new Map();
+  }
+  globalThis._routeResponseCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
+export function invalidateServerRouteCache(prefix?: string): void {
+  if (!globalThis._routeResponseCache) return;
+  if (!prefix) {
+    globalThis._routeResponseCache.clear();
+    return;
+  }
+  for (const k of globalThis._routeResponseCache.keys()) {
+    if (k.startsWith(prefix) || k.includes(prefix)) {
+      globalThis._routeResponseCache.delete(k);
+    }
+  }
+}
