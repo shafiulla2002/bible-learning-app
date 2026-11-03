@@ -65,6 +65,7 @@ export async function GET(
            u."fullName",
            u."phoneE164",
            u.email,
+           u."avatarUrl",
            tp.specialization,
            tp.qualifications as "highestDegree",
            tp."experienceYears",
@@ -91,6 +92,7 @@ export async function GET(
       fullName: r.fullName,
       phoneE164: r.phoneE164,
       email: r.email,
+      photoUrl: r.avatarUrl || null,
       specialization: r.specialization,
       highestDegree: r.highestDegree,
       experienceYears: r.experienceYears,
@@ -148,7 +150,10 @@ export async function POST(
       status = 'ACTIVE',
       bio,
       address,
+      photoUrl,
+      avatarUrl,
     } = body;
+    const finalAvatar = photoUrl || avatarUrl || null;
 
     if (!fullName || !phoneE164) {
       return NextResponse.json(
@@ -186,15 +191,15 @@ export async function POST(
     if (existingUser.length > 0) {
       userId = existingUser[0].id;
       await queryDb(
-        `UPDATE "User" SET "fullName" = $1, email = COALESCE($2, email), "updatedAt" = NOW() WHERE id = $3`,
-        [fullName, email || null, userId]
+        `UPDATE "User" SET "fullName" = $1, email = COALESCE($2, email), "avatarUrl" = COALESCE($3, "avatarUrl"), "updatedAt" = NOW() WHERE id = $4`,
+        [fullName, email || null, finalAvatar, userId]
       );
     } else {
       const insertedUser = await queryDb(
-        `INSERT INTO "User" (id, "phoneE164", "fullName", email, status, "updatedAt")
-         VALUES (gen_random_uuid(), $1, $2, $3, 'ACTIVE', NOW())
+        `INSERT INTO "User" (id, "phoneE164", "fullName", email, "avatarUrl", status, "updatedAt")
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'ACTIVE', NOW())
          RETURNING id`,
-        [phoneE164, fullName, email || null]
+        [phoneE164, fullName, email || null, finalAvatar]
       );
       userId = insertedUser[0].id;
     }
@@ -303,6 +308,7 @@ export async function POST(
         fullName,
         phoneE164,
         email: email || null,
+        photoUrl: finalAvatar,
         specialization: tp.specialization,
         highestDegree: tp.qualifications,
         experienceYears: tp.experienceYears,

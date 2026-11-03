@@ -19,7 +19,7 @@ export async function GET(
       `SELECT
          tp.id, tp."employeeCode", tp.qualifications as "highestDegree", tp.specialization,
          tp."experienceYears", tp."joiningDate", tp.address, tp.bio, tp.status, tp."createdAt",
-         u."fullName", u."phoneE164", u.email
+         u."fullName", u."phoneE164", u.email, u."avatarUrl"
        FROM "TeacherProfile" tp
        JOIN "Membership" m ON m.id = tp."membershipId"
        JOIN "User" u ON u.id = m."userId"
@@ -98,6 +98,7 @@ export async function GET(
       fullName: t.fullName,
       phoneE164: t.phoneE164,
       email: t.email,
+      photoUrl: t.avatarUrl || null,
       specialization: t.specialization,
       highestDegree: t.highestDegree,
       experienceYears: t.experienceYears,
@@ -165,7 +166,11 @@ export async function PATCH(
       experienceYears,
       bio,
       address,
+      photoUrl,
+      avatarUrl,
+      status,
     } = body;
+    const finalAvatar = photoUrl || avatarUrl || null;
 
     const tpRows = await queryDb(
       `SELECT tp.id, m."userId"
@@ -181,15 +186,16 @@ export async function PATCH(
 
     const { userId } = tpRows[0];
 
-    if (fullName || phoneE164 || email !== undefined) {
+    if (fullName || phoneE164 || email !== undefined || finalAvatar) {
       await queryDb(
         `UPDATE "User"
          SET "fullName" = COALESCE($1, "fullName"),
              "phoneE164" = COALESCE($2, "phoneE164"),
              email = COALESCE($3, email),
+             "avatarUrl" = COALESCE($4, "avatarUrl"),
              "updatedAt" = NOW()
-         WHERE id = $4`,
-        [fullName || null, phoneE164 || null, email || null, userId]
+         WHERE id = $5`,
+        [fullName || null, phoneE164 || null, email || null, finalAvatar, userId]
       );
     }
 
@@ -199,14 +205,16 @@ export async function PATCH(
            qualifications = COALESCE($2, qualifications),
            "experienceYears" = COALESCE($3, "experienceYears"),
            bio = COALESCE($4, bio),
-           address = CASE WHEN $5::text IS NOT NULL THEN $5::jsonb ELSE address END,
+           status = COALESCE($5, status),
+           address = CASE WHEN $6::text IS NOT NULL THEN $6::jsonb ELSE address END,
            "updatedAt" = NOW()
-       WHERE id = $6 AND "instituteId" = $7`,
+       WHERE id = $7 AND "instituteId" = $8`,
       [
         specialization || null,
         highestDegree || null,
         experienceYears !== undefined ? Number(experienceYears) : null,
         bio || null,
+        status || null,
         address ? JSON.stringify(address) : null,
         id,
         effectiveInstituteId,
