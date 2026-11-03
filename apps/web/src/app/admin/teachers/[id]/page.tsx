@@ -815,31 +815,33 @@ export default function TeacherDetailPage({
               </Card>
 
               {/* Quick Action Card */}
-              <div className="rounded-3xl bg-gradient-to-br from-blue-600 to-indigo-700 p-6 text-white space-y-4 shadow-lg shadow-blue-500/20">
-                <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center">
-                  <Sparkles size={20} className="text-white" />
+              <div className="rounded-3xl bg-white border border-slate-200/90 p-6 space-y-4 shadow-xs">
+                <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Sparkles size={20} />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold">Assign Curriculum Roles</h4>
-                  <p className="text-xs text-blue-100 mt-1">
+                  <h4 className="text-sm font-bold text-slate-900">Assign Curriculum Roles</h4>
+                  <p className="text-xs text-slate-500 mt-1">
                     Link this instructor to courses or live batch cohorts to enable live timetable lectures.
                   </p>
                 </div>
-                <div className="flex flex-col gap-2 pt-1">
-                  <Button
+                <div className="flex flex-col gap-2.5 pt-1">
+                  <button
+                    type="button"
                     onClick={openAssignCourse}
-                    size="sm"
-                    className="w-full bg-white text-blue-700 hover:bg-blue-50 font-bold rounded-xl text-xs"
+                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold rounded-xl text-xs shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
-                    + Assign Course
-                  </Button>
-                  <Button
+                    <Plus size={14} className="text-white" />
+                    <span>+ Assign Course</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={openAssignBatch}
-                    size="sm"
-                    className="w-full bg-blue-500/40 hover:bg-blue-500/60 text-white font-bold rounded-xl text-xs border border-white/20"
+                    className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-800 font-bold rounded-xl text-xs border border-slate-200 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   >
-                    + Assign Batch Cohort
-                  </Button>
+                    <Plus size={14} className="text-slate-600" />
+                    <span>+ Assign Batch Cohort</span>
+                  </button>
                 </div>
               </div>
             </div>
