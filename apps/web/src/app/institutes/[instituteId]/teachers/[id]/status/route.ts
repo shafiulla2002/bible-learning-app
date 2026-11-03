@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, invalidateServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +29,8 @@ export async function PATCH(
       [status, id, effectiveInstituteId]
     );
 
+    invalidateServerRouteCache('teachers');
+    invalidateServerRouteCache('dashboard');
     return NextResponse.json({ id, status, message: `Status updated to ${status}` });
   } catch (error: any) {
     console.error('Error updating teacher status:', error);

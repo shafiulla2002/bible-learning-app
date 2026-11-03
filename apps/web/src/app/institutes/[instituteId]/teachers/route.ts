@@ -258,6 +258,9 @@ export async function POST(
       console.warn('Failed to insert notification for teacher registration:', notifErr);
     }
 
+    invalidateServerRouteCache('teachers');
+    invalidateServerRouteCache('dashboard');
+
     return NextResponse.json(
       {
         id: tp.id,
