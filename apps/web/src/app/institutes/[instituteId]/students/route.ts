@@ -87,7 +87,7 @@ export async function GET(
          LEFT JOIN "Batch" b ON b.id = latest_enr."batchId"
          ${whereClause}
          ORDER BY sp."createdAt" DESC
-         LIMIT ${queryParams.length + 1} OFFSET ${queryParams.length + 2}`,
+         LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
         [...queryParams, limit, offset]
       ),
       queryDb(
