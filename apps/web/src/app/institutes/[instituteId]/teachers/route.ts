@@ -78,7 +78,7 @@ export async function GET(
          JOIN "User" u ON u.id = m."userId"
          ${whereClause}
          ORDER BY tp."createdAt" DESC
-         LIMIT ${queryParams.length + 1} OFFSET ${queryParams.length + 2}`,
+         LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
         [...queryParams, limit, offset]
       ),
     ]);
