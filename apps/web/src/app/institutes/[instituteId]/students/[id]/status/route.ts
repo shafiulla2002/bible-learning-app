@@ -32,8 +32,8 @@ export async function PATCH(
 
     // Record in Admission audit
     await queryDb(
-      `INSERT INTO "Admission" (id, "instituteId", "studentProfileId", status, statement, "createdAt")
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
+      `INSERT INTO "Admission" (id, "instituteId", "studentProfileId", status, statement, "createdAt", "updatedAt")
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())`,
       [effectiveInstituteId, id, status, notes || `Status changed to ${status}`]
     );
 

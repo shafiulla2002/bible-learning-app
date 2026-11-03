@@ -256,8 +256,8 @@ export async function POST(
 
     // 4. Admission Record
     await queryDb(
-      `INSERT INTO "Admission" (id, "instituteId", "studentProfileId", status, statement)
-       VALUES (gen_random_uuid(), $1, $2, $3, 'Direct registration')`,
+      `INSERT INTO "Admission" (id, "instituteId", "studentProfileId", status, statement, "createdAt", "updatedAt")
+       VALUES (gen_random_uuid(), $1, $2, $3, 'Direct registration', NOW(), NOW())`,
       [effectiveInstituteId, studentProfile.id, status]
     );
 

@@ -40,6 +40,8 @@ import {
   GraduationCap,
   ShieldCheck,
   CreditCard,
+  Trash2,
+  Camera,
 } from 'lucide-react';
 
 const adminNav = [
@@ -87,7 +89,9 @@ export default function StudentsDirectoryPage() {
   // Add Student Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [newStudent, setNewStudent] = useState({
+    avatarUrl: '',
     fullName: '',
     phoneNumber: '+91 ',
     email: '',
@@ -207,6 +211,7 @@ export default function StudentsDirectoryPage() {
       const created = await studentApi.createStudent(instituteId, {
         fullName: newStudent.fullName,
         phoneNumber: newStudent.phoneNumber,
+        avatarUrl: newStudent.avatarUrl || undefined,
         email: newStudent.email || undefined,
         gender: newStudent.gender,
         church: newStudent.church || undefined,
@@ -220,7 +225,9 @@ export default function StudentsDirectoryPage() {
 
       showToast(`Student ${created.fullName} registered successfully with admission ID ${created.admissionNo}!`);
       setIsAddModalOpen(false);
+      setPhotoPreview(null);
       setNewStudent({
+        avatarUrl: '',
         fullName: '',
         phoneNumber: '+91 ',
         email: '',
@@ -238,6 +245,20 @@ export default function StudentsDirectoryPage() {
       showToast(`Registration failed: ${err?.message || 'Server error'}`);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Handle Delete Student
+  const handleDeleteStudent = async (studentId: string, studentName: string) => {
+    if (!confirm(`Are you sure you want to permanently delete student "${studentName}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      await studentApi.deleteStudent(instituteId, studentId);
+      showToast(`Student "${studentName}" has been permanently deleted.`);
+      fetchStudents();
+    } catch (err: any) {
+      showToast(`Failed to delete student: ${err?.message || 'Server error'}`);
     }
   };
 
@@ -533,13 +554,21 @@ export default function StudentsDirectoryPage() {
                       {/* Name & Contact */}
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center text-xs shadow-sm">
-                            {(s.fullName || 'Student')
-                              .split(' ')
-                              .map((n: string) => n[0])
-                              .slice(0, 2)
-                              .join('')}
-                          </div>
+                          {s.avatarUrl ? (
+                            <img
+                              src={s.avatarUrl}
+                              alt={s.fullName}
+                              className="w-9 h-9 rounded-full object-cover border border-slate-200 shadow-sm shrink-0"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0">
+                              {(s.fullName || 'Student')
+                                .split(' ')
+                                .map((n: string) => n[0])
+                                .slice(0, 2)
+                                .join('')}
+                            </div>
+                          )}
                           <div>
                             <div className="font-bold text-slate-900 group-hover:text-blue-600 transition">
                               <Link href={`/admin/students/${s.id}`}>{s.fullName}</Link>
@@ -627,6 +656,17 @@ export default function StudentsDirectoryPage() {
                             </Button>
                           )}
 
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeleteStudent(s.id, s.fullName)}
+                            className="h-8 px-2 text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 border-slate-200"
+                            title="Delete Student"
+                          >
+                            <Trash2 size={13} className="mr-1 text-rose-500" />
+                            Delete
+                          </Button>
+
                           {s.status === 'INACTIVE' && (
                             <Button
                               size="sm"
@@ -696,6 +736,72 @@ export default function StudentsDirectoryPage() {
               </div>
 
               <form onSubmit={handleAddStudentSubmit} className="space-y-5">
+                {/* Student Photo Upload */}
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 mb-4">
+                  <label className="block text-xs font-bold text-slate-800 mb-2">
+                    Student Profile Photograph
+                  </label>
+                  <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <div className="w-16 h-16 rounded-full overflow-hidden bg-white border-2 border-slate-200 flex items-center justify-center shrink-0 shadow-sm">
+                      {photoPreview || newStudent.avatarUrl ? (
+                        <img
+                          src={photoPreview || newStudent.avatarUrl}
+                          alt="Student preview"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-slate-400 font-bold text-base">
+                          {newStudent.fullName
+                            ? newStudent.fullName
+                                .split(' ')
+                                .map((n) => n[0])
+                                .join('')
+                                .slice(0, 2)
+                                .toUpperCase()
+                            : 'STU'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 w-full space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-xs">
+                          <Upload size={13} />
+                          <span>Upload Photo</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  const result = reader.result as string;
+                                  setPhotoPreview(result);
+                                  setNewStudent((prev) => ({ ...prev, avatarUrl: result }));
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </label>
+                        <span className="text-xs text-slate-400">or enter image URL:</span>
+                      </div>
+                      <input
+                        type="url"
+                        placeholder="https://images.unsplash.com/... or paste image URL"
+                        value={newStudent.avatarUrl.startsWith('data:') ? '' : newStudent.avatarUrl}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewStudent((prev) => ({ ...prev, avatarUrl: val }));
+                          setPhotoPreview(null);
+                        }}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 {/* Personal Info */}
                 <div>
                   <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">

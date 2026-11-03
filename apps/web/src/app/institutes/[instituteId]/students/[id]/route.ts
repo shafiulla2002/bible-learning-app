@@ -204,3 +204,52 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ instituteId: string; id: string }> }
+) {
+  try {
+    const { instituteId, id } = await params;
+    const ctx = await resolveServerAdminContext();
+    const effectiveInstituteId =
+      instituteId && instituteId !== 'null' && instituteId !== 'undefined'
+        ? instituteId
+        : ctx.instituteId;
+
+    const existing = await queryDb(
+      `SELECT sp.id, sp."membershipId", m."userId"
+       FROM "StudentProfile" sp
+       JOIN "Membership" m ON m.id = sp."membershipId"
+       WHERE sp.id = $1 AND sp."instituteId" = $2`,
+      [id, effectiveInstituteId]
+    );
+
+    if (existing.length === 0) {
+      return NextResponse.json({ message: 'Student profile not found' }, { status: 404 });
+    }
+
+    const { membershipId } = existing[0];
+
+    // Safely delete dependent records
+    await queryDb(`DELETE FROM "Admission" WHERE "studentProfileId" = $1`, [id]);
+    await queryDb(`DELETE FROM "Enrolment" WHERE "studentProfileId" = $1`, [id]);
+    await queryDb(`DELETE FROM "Attendance" WHERE "studentProfileId" = $1`, [id]);
+    await queryDb(`DELETE FROM "StudentFeeAllocation" WHERE "studentProfileId" = $1`, [id]);
+    await queryDb(`DELETE FROM "BatchTransferLog" WHERE "studentProfileId" = $1`, [id]);
+    await queryDb(`DELETE FROM "StudentProfile" WHERE id = $1 AND "instituteId" = $2`, [id, effectiveInstituteId]);
+
+    // Clean up membership
+    if (membershipId) {
+      await queryDb(`DELETE FROM "Membership" WHERE id = $1 AND "instituteId" = $2`, [membershipId, effectiveInstituteId]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Student permanently deleted from database', id });
+  } catch (error: any) {
+    console.error('Error in student DELETE route:', error);
+    return NextResponse.json(
+      { message: error?.message || 'Failed to delete student record' },
+      { status: 500 }
+    );
+  }
+}

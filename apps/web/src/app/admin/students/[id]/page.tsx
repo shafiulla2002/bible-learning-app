@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { PortalShell } from '@/components/layout/portal-shell';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -37,6 +37,7 @@ import {
   DollarSign,
   ArrowUpRight,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 
 const adminNav = [
@@ -51,6 +52,8 @@ const adminNav = [
 
 export default function StudentDetailPage() {
   const params = useParams();
+  const router = useRouter();
+  const [isDeleting, setIsDeleting] = useState(false);
   const studentId = params.id as string;
 
   const [instituteId, setInstituteId] = useState<string>(() => {
@@ -133,6 +136,21 @@ export default function StudentDetailPage() {
     fetchStudentData();
     fetchFinanceHistory();
   }, [fetchStudentData, fetchFinanceHistory]);
+
+  const handleDelete = async () => {
+    if (!student || !instituteId || !studentId) return;
+    if (!confirm(`Are you sure you want to permanently delete student "${student.fullName}"? This action cannot be undone.`)) {
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await studentApi.deleteStudent(instituteId, studentId);
+      router.push('/admin/students');
+    } catch (err: any) {
+      alert(`Failed to delete student: ${err?.message || 'Server error'}`);
+      setIsDeleting(false);
+    }
+  };
 
   const handleStatusChange = async (newStatus: string) => {
     if (!instituteId || !studentId) return;

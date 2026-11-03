@@ -241,6 +241,14 @@ export const studentApi = {
       body: JSON.stringify({ rows, execute }),
     }),
 
+  deleteStudent: (instituteId: string, studentId: string) =>
+    apiFetch<{ success: boolean; message: string; id: string }>(
+      `/institutes/${instituteId}/students/${studentId}`,
+      {
+        method: 'DELETE',
+      },
+    ),
+
   getFinanceHistory: (instituteId: string, studentId: string) =>
     apiFetch<any>(`/institutes/${instituteId}/students/${studentId}/finance`),
 };
