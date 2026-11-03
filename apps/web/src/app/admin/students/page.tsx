@@ -56,6 +56,44 @@ const adminNav = [
   { label: 'Finance & Payments', href: '/admin/finance', icon: <CreditCard size={18} /> },
 ];
 
+
+function compressImageToThumbnail(file: File, maxDim = 256, quality = 0.82): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width;
+        let h = img.height;
+        if (w > h) {
+          if (w > maxDim) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          }
+        } else {
+          if (h > maxDim) {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } else {
+          resolve(e.target?.result as string);
+        }
+      };
+      img.onerror = () => resolve(e.target?.result as string);
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function StudentsDirectoryPage() {
   const [instituteId, setInstituteId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -798,16 +836,12 @@ export default function StudentsDirectoryPage() {
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const reader = new FileReader();
-                                reader.onload = () => {
-                                  const result = reader.result as string;
-                                  setPhotoPreview(result);
-                                  setNewStudent((prev) => ({ ...prev, avatarUrl: result }));
-                                };
-                                reader.readAsDataURL(file);
+                                const compressed = await compressImageToThumbnail(file);
+                                setPhotoPreview(compressed);
+                                setNewStudent((prev) => ({ ...prev, avatarUrl: compressed }));
                               }
                             }}
                           />
