@@ -1,24 +1,32 @@
 import { Pool } from 'pg';
 
-let pool: Pool | null = null;
+declare global {
+  // eslint-disable-next-line no-var
+  var _pgPool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var _cachedAdminContext: { data: ServerInstituteContext; expiresAt: number } | undefined;
+}
 
 export function getDbPool(): Pool {
-  if (!pool) {
+  if (!globalThis._pgPool) {
     const rawUrl =
       process.env.DATABASE_URL ||
       'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev';
 
-    // Strip sslmode from query string so pg uses our explicit ssl options without self-signed cert verification failure
+    // Strip sslmode from query string so pg uses our explicit ssl options without cert verification failure
     const cleanUrl = rawUrl.replace(/\?sslmode=[^&]+&?/, '?').replace(/\?$/, '');
 
-    pool = new Pool({
+    globalThis._pgPool = new Pool({
       connectionString: cleanUrl,
       ssl: { rejectUnauthorized: false },
       max: 10,
       idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
   }
-  return pool;
+  return globalThis._pgPool;
 }
 
 export async function queryDb<T = any>(text: string, params?: any[]): Promise<T[]> {
@@ -47,7 +55,13 @@ export interface ServerInstituteContext {
   };
 }
 
-export async function resolveServerAdminContext(): Promise<ServerInstituteContext> {
+export async function resolveServerAdminContext(forceRefresh = false): Promise<ServerInstituteContext> {
+  // Fast in-memory cache with 5-minute TTL to eliminate redundant queries across routes
+  const now = Date.now();
+  if (!forceRefresh && globalThis._cachedAdminContext && now < globalThis._cachedAdminContext.expiresAt) {
+    return globalThis._cachedAdminContext.data;
+  }
+
   // Query primary active institute (prefer grace-bible if exists)
   const institutes = await queryDb(
     `SELECT i.id, i.slug, i.name, i.timezone, i.currency, i."logoUrl",
@@ -84,7 +98,7 @@ export async function resolveServerAdminContext(): Promise<ServerInstituteContex
     role: 'INSTITUTE_ADMIN',
   };
 
-  return {
+  const contextData: ServerInstituteContext = {
     instituteId: inst.id,
     instituteSlug: inst.slug,
     name: inst.name,
@@ -103,4 +117,11 @@ export async function resolveServerAdminContext(): Promise<ServerInstituteContex
       role: admin.role,
     },
   };
+
+  globalThis._cachedAdminContext = {
+    data: contextData,
+    expiresAt: now + 300000, // 5 minutes TTL
+  };
+
+  return contextData;
 }

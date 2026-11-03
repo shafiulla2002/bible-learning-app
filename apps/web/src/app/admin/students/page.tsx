@@ -15,6 +15,8 @@ import {
   CourseDto,
   BatchDto,
   resolveVerifiedAdminContext,
+  getCached,
+  setCached,
 } from '@/lib/api';
 import {
   Users,
@@ -65,6 +67,7 @@ export default function StudentsDirectoryPage() {
 
   // Live Database State (Strict Zero-Mock: starts empty)
   const [students, setStudents] = useState<StudentProfileSummaryDto[]>([]);
+  const [liveStats, setLiveStats] = useState<{ total: number; activeCount: number; reviewCount: number; inactiveCount: number } | null>(null);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -168,6 +171,18 @@ export default function StudentsDirectoryPage() {
     setErrorMessage(null);
 
     try {
+      const cacheKey = `students:${instituteId}:${currentPage}:${pageSize}:${debouncedSearch}:${statusFilter}:${courseFilter}`;
+      const cached = getCached<any>(cacheKey);
+      if (cached && Array.isArray(cached.data)) {
+        setStudents(cached.data);
+        setTotalCount(cached.meta?.total ?? cached.data.length);
+        setTotalPages(cached.meta?.totalPages ?? 1);
+        if (cached.meta?.stats) {
+          setLiveStats(cached.meta.stats);
+        }
+        setIsLoading(false);
+      }
+
       const res = await studentApi.getStudents(instituteId, {
         page: currentPage,
         limit: pageSize,
@@ -180,6 +195,10 @@ export default function StudentsDirectoryPage() {
         setStudents(res.data);
         setTotalCount(res.meta?.total ?? res.data.length);
         setTotalPages(res.meta?.totalPages ?? 1);
+        if ((res.meta as any)?.stats) {
+          setLiveStats((res.meta as any).stats);
+        }
+        setCached(cacheKey, res, 30000);
       } else {
         setStudents([]);
         setTotalCount(0);
@@ -332,14 +351,22 @@ export default function StudentsDirectoryPage() {
     }
   };
 
-  // Compute live breakdown stats
+  // Compute live breakdown stats with database aggregates
   const stats = useMemo(() => {
+    if (liveStats) {
+      return {
+        total: liveStats.total,
+        active: liveStats.activeCount,
+        review: liveStats.reviewCount,
+        inactive: liveStats.inactiveCount,
+      };
+    }
     const total = totalCount;
     const active = students.filter((s) => s.status === 'ACTIVE').length;
     const review = students.filter((s) => s.status === 'UNDER_REVIEW').length;
     const inactive = students.filter((s) => s.status === 'INACTIVE' || s.status === 'REJECTED').length;
     return { total, active, review, inactive };
-  }, [students, totalCount]);
+  }, [liveStats, students, totalCount]);
 
   return (
     <PortalShell
@@ -407,7 +434,7 @@ export default function StudentsDirectoryPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             title="Total Students"
-            value={stats.total}
+            value={isLoading && !liveStats && students.length === 0 ? '—' : stats.total}
             icon={<Users size={20} />}
             trend={`${stats.active} Active Learners`}
             trendPositive={true}
@@ -415,7 +442,7 @@ export default function StudentsDirectoryPage() {
           />
           <StatCard
             title="Active Learners"
-            value={stats.active}
+            value={isLoading && !liveStats && students.length === 0 ? '—' : stats.active}
             icon={<CheckCircle2 size={20} />}
             trend="Attending classes"
             trendPositive={true}
@@ -423,7 +450,7 @@ export default function StudentsDirectoryPage() {
           />
           <StatCard
             title="Under Review"
-            value={stats.review}
+            value={isLoading && !liveStats && students.length === 0 ? '—' : stats.review}
             icon={<Clock size={20} />}
             trend={stats.review > 0 ? 'Requires Action' : 'All clear'}
             trendPositive={stats.review === 0}
@@ -431,7 +458,7 @@ export default function StudentsDirectoryPage() {
           />
           <StatCard
             title="Inactive Accounts"
-            value={stats.inactive}
+            value={isLoading && !liveStats && students.length === 0 ? '—' : stats.inactive}
             icon={<XCircle size={20} />}
             trend="On leave / deferred"
             trendPositive={false}

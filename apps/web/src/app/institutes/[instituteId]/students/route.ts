@@ -10,11 +10,14 @@ export async function GET(
 ) {
   try {
     const { instituteId } = await params;
-    const ctx = await resolveServerAdminContext();
-    const effectiveInstituteId =
+    let effectiveInstituteId =
       instituteId && instituteId !== 'null' && instituteId !== 'undefined'
         ? instituteId
-        : ctx.instituteId;
+        : '';
+    if (!effectiveInstituteId) {
+      const ctx = await resolveServerAdminContext();
+      effectiveInstituteId = ctx.instituteId;
+    }
 
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
@@ -43,53 +46,70 @@ export async function GET(
       whereClause += ` AND (u."fullName" ILIKE $${pIdx} OR sp."admissionNo" ILIKE $${pIdx} OR u."phoneE164" ILIKE $${pIdx} OR u.email ILIKE $${pIdx} OR sp.church ILIKE $${pIdx})`;
     }
 
-    // Total Count
-    const countRows = await queryDb(
-      `SELECT COUNT(sp.id)::int as "total"
-       FROM "StudentProfile" sp
-       JOIN "Membership" m ON m.id = sp."membershipId"
-       JOIN "User" u ON u.id = m."userId"
-       ${whereClause}`,
-      queryParams
-    );
+    // Parallelize Total Count, Rows, and Live Aggregate Stats in Promise.all
+    const [countRows, dataRows, statsRows] = await Promise.all([
+      queryDb(
+        `SELECT COUNT(sp.id)::int as "total"
+         FROM "StudentProfile" sp
+         JOIN "Membership" m ON m.id = sp."membershipId"
+         JOIN "User" u ON u.id = m."userId"
+         ${whereClause}`,
+        queryParams
+      ),
+      queryDb(
+        `SELECT
+           sp.id,
+           u.id as "userId",
+           u."avatarUrl",
+           sp."admissionNo",
+           u."fullName",
+           u."phoneE164" as "phoneNumber",
+           u.email,
+           sp."preferredLanguage",
+           sp.gender,
+           sp.church,
+           sp.status,
+           sp."createdAt" as "admissionDate",
+           c.title as "enrolledCourseName",
+           b.name as "enrolledBatchName",
+           (SELECT COUNT(*)::int FROM "Enrolment" e2 WHERE e2."studentProfileId" = sp.id) as "totalEnrolments"
+         FROM "StudentProfile" sp
+         JOIN "Membership" m ON m.id = sp."membershipId"
+         JOIN "User" u ON u.id = m."userId"
+         LEFT JOIN LATERAL (
+           SELECT e."courseId", e."batchId"
+           FROM "Enrolment" e
+           WHERE e."studentProfileId" = sp.id
+           ORDER BY e."createdAt" DESC
+           LIMIT 1
+         ) latest_enr ON true
+         LEFT JOIN "Course" c ON c.id = latest_enr."courseId"
+         LEFT JOIN "Batch" b ON b.id = latest_enr."batchId"
+         ${whereClause}
+         ORDER BY sp."createdAt" DESC
+         LIMIT ${queryParams.length + 1} OFFSET ${queryParams.length + 2}`,
+        [...queryParams, limit, offset]
+      ),
+      queryDb(
+        `SELECT
+           COUNT(*)::int as total,
+           COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeCount",
+           COUNT(CASE WHEN status = 'UNDER_REVIEW' THEN 1 END)::int as "reviewCount",
+           COUNT(CASE WHEN status IN ('INACTIVE', 'REJECTED') THEN 1 END)::int as "inactiveCount"
+         FROM "StudentProfile"
+         WHERE "instituteId" = $1`,
+        [effectiveInstituteId]
+      ),
+    ]);
+
     const total = countRows[0]?.total || 0;
     const totalPages = Math.max(1, Math.ceil(total / limit));
-
-    // Rows
-    const dataRows = await queryDb(
-      `SELECT
-         sp.id,
-         u.id as "userId",
-         u."avatarUrl",
-         sp."admissionNo",
-         u."fullName",
-         u."phoneE164" as "phoneNumber",
-         u.email,
-         sp."preferredLanguage",
-         sp.gender,
-         sp.church,
-         sp.status,
-         sp."createdAt" as "admissionDate",
-         c.title as "enrolledCourseName",
-         b.name as "enrolledBatchName",
-         (SELECT COUNT(*)::int FROM "Enrolment" e2 WHERE e2."studentProfileId" = sp.id) as "totalEnrolments"
-       FROM "StudentProfile" sp
-       JOIN "Membership" m ON m.id = sp."membershipId"
-       JOIN "User" u ON u.id = m."userId"
-       LEFT JOIN LATERAL (
-         SELECT e."courseId", e."batchId"
-         FROM "Enrolment" e
-         WHERE e."studentProfileId" = sp.id
-         ORDER BY e."createdAt" DESC
-         LIMIT 1
-       ) latest_enr ON true
-       LEFT JOIN "Course" c ON c.id = latest_enr."courseId"
-       LEFT JOIN "Batch" b ON b.id = latest_enr."batchId"
-       ${whereClause}
-       ORDER BY sp."createdAt" DESC
-       LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
-      [...queryParams, limit, offset]
-    );
+    const liveStats = statsRows[0] || {
+      total,
+      activeCount: 0,
+      reviewCount: 0,
+      inactiveCount: 0,
+    };
 
     const data = dataRows.map((r) => ({
       id: r.id,
@@ -118,6 +138,7 @@ export async function GET(
         totalPages,
         hasNextPage: page < totalPages,
         hasPrevPage: page > 1,
+        stats: liveStats,
       },
     });
   } catch (error: any) {

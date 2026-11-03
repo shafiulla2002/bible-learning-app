@@ -9,11 +9,14 @@ export async function GET(
 ) {
   try {
     const { instituteId } = await params;
-    const ctx = await resolveServerAdminContext();
-    const effectiveInstituteId =
+    let effectiveInstituteId =
       instituteId && instituteId !== 'null' && instituteId !== 'undefined'
         ? instituteId
-        : ctx.instituteId;
+        : '';
+    if (!effectiveInstituteId) {
+      const ctx = await resolveServerAdminContext();
+      effectiveInstituteId = ctx.instituteId;
+    }
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
