@@ -1259,13 +1259,21 @@ export default function TeachersDirectoryPage() {
             <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150 space-y-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-md">
-                    {quickViewTeacher.fullName
-                      .split(' ')
-                      .map((n) => n[0])
-                      .slice(0, 2)
-                      .join('')}
-                  </div>
+                  {quickViewTeacher.photoUrl ? (
+                    <img
+                      src={quickViewTeacher.photoUrl}
+                      alt={quickViewTeacher.fullName}
+                      className="w-12 h-12 rounded-2xl object-cover border border-slate-200 shadow-md"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-md">
+                      {quickViewTeacher.fullName
+                        .split(' ')
+                        .map((n) => n[0])
+                        .slice(0, 2)
+                        .join('')}
+                    </div>
+                  )}
                   <div>
                     <h3 className="text-base font-bold text-slate-900">{quickViewTeacher.fullName}</h3>
                     <p className="text-xs text-blue-600 font-semibold">{quickViewTeacher.specialization}</p>

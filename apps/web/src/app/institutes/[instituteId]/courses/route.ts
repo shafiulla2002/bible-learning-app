@@ -78,7 +78,7 @@ export async function GET(
          LEFT JOIN "CourseCategory" cat ON cat.id = c."categoryId"
          ${whereClause}
          ORDER BY c."createdAt" DESC
-         LIMIT ${queryParams.length + 1} OFFSET ${queryParams.length + 2}`,
+         LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
         [...queryParams, limit, offset]
       ),
     ]);

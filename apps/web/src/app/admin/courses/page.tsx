@@ -38,6 +38,49 @@ import {
   resolveVerifiedAdminContext,
 } from '@/lib/api';
 
+
+const COURSE_THEMES = [
+  {
+    headerBg: 'bg-[#1b6ee4]',
+    circleBg: 'bg-[#1253af]',
+    textSub: 'text-blue-100',
+  },
+  {
+    headerBg: 'bg-[#278648]',
+    circleBg: 'bg-[#1b6635]',
+    textSub: 'text-emerald-100',
+  },
+  {
+    headerBg: 'bg-[#dd7019]',
+    circleBg: 'bg-[#b6530b]',
+    textSub: 'text-amber-100',
+  },
+  {
+    headerBg: 'bg-[#7c3aed]',
+    circleBg: 'bg-[#5b21b6]',
+    textSub: 'text-purple-100',
+  },
+  {
+    headerBg: 'bg-[#0891b2]',
+    circleBg: 'bg-[#0e7490]',
+    textSub: 'text-cyan-100',
+  },
+];
+
+function formatLevel(level?: string) {
+  if (!level) return 'Beginner';
+  switch (level.toUpperCase()) {
+    case 'BEGINNER':
+      return 'Beginner';
+    case 'INTERMEDIATE':
+      return 'Intermediate';
+    case 'ADVANCED':
+      return 'Advanced';
+    default:
+      return level.charAt(0).toUpperCase() + level.slice(1).toLowerCase();
+  }
+}
+
 const adminNav = [
   { label: 'Overview', href: '/admin', icon: <LayoutDashboard size={18} /> },
   { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} /> },
@@ -408,128 +451,133 @@ export default function AdminCoursesPage() {
             </p>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredCourses.map((c) => (
-              <div
-                key={c.id}
-                className="bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
-              >
-                {/* Course Header Banner */}
-                <div>
-                  <div className="h-28 bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-800 p-4 flex flex-col justify-between text-white relative overflow-hidden">
-                    <div className="flex items-center justify-between relative z-10">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-md">
-                        {c.category?.name || 'Biblical Studies'}
-                      </span>
-                      <span
-                        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                          c.status === 'PUBLISHED'
-                            ? 'bg-emerald-500/90 text-white'
-                            : c.status === 'DRAFT'
-                            ? 'bg-amber-500/90 text-white'
-                            : 'bg-slate-500/90 text-white'
-                        }`}
-                      >
-                        {c.status}
-                      </span>
-                    </div>
-                    <div className="relative z-10">
-                      <span className="text-[11px] font-medium text-blue-100 flex items-center gap-1">
-                        <GraduationCap size={13} />
-                        {c.level} · {c.language}
-                      </span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredCourses.map((c, idx) => {
+              const theme = COURSE_THEMES[idx % COURSE_THEMES.length];
+              const initial = (c.title?.trim()[0] || 'C').toUpperCase();
+
+              return (
+                <div
+                  key={c.id}
+                  className="bg-white rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-lg transition-all duration-200 overflow-hidden flex flex-col justify-between group"
+                >
+                  {/* Top Header Banner with Stripes Pattern */}
+                  <div
+                    className={`relative p-5 pb-6 ${theme.headerBg} text-white overflow-visible`}
+                    style={{
+                      backgroundImage:
+                        'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08) 12px, transparent 12px, transparent 24px)',
+                    }}
+                  >
+                    <h3 className="font-bold text-white text-base sm:text-lg tracking-tight leading-snug line-clamp-1 pr-14">
+                      <Link href={`/admin/courses/${c.id}`} className="hover:underline">
+                        {c.title}
+                      </Link>
+                    </h3>
+                    <p className={`text-xs ${theme.textSub} font-medium mt-1`}>
+                      {c.category?.name || 'General Theology'} · {formatLevel(c.level)}
+                    </p>
+
+                    {/* Overlapping Circular Avatar / Initial Badge */}
+                    <div
+                      className={`absolute right-5 -bottom-6 w-13 h-13 rounded-full border-[3px] border-white shadow-md flex items-center justify-center text-white font-bold text-xl select-none z-10 ${theme.circleBg}`}
+                    >
+                      {initial}
                     </div>
                   </div>
 
-                  {/* Body Content */}
-                  <div className="p-5 space-y-3">
+                  {/* Card Body */}
+                  <div className="p-5 pt-7 flex-1 flex flex-col justify-between space-y-4">
                     <div>
-                      <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition text-sm leading-snug">
-                        <Link href={`/admin/courses/${c.id}`}>{c.title}</Link>
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-1.5 line-clamp-2 leading-relaxed">
+                      <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed min-h-[34px]">
                         {c.description || 'Comprehensive biblical theology curriculum and theological instruction.'}
                       </p>
-                    </div>
 
-                    {/* Quick Stats Grid */}
-                    <div className="grid grid-cols-3 gap-2 py-3 border-y border-slate-100 text-center">
-                      <div className="px-1">
-                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
-                          Modules
-                        </span>
-                        <span className="text-xs font-bold text-slate-800 mt-0.5 block">
-                          {c.modulesCount || 0}
-                        </span>
-                      </div>
-                      <div className="px-1 border-x border-slate-100">
-                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
-                          Lessons
-                        </span>
-                        <span className="text-xs font-bold text-slate-800 mt-0.5 block">
-                          {c.lessonsCount || 0}
-                        </span>
-                      </div>
-                      <div className="px-1">
-                        <span className="text-[10px] font-semibold text-slate-400 block uppercase">
-                          Students
-                        </span>
-                        <span className="text-xs font-bold text-blue-600 mt-0.5 block">
-                          {c.enrolledCount || 0}
-                        </span>
+                      {/* Quick Stats Grid: Modules, Lessons, Students */}
+                      <div className="flex items-center gap-6 pt-4 pb-1">
+                        <div>
+                          <span className="text-base sm:text-lg font-bold text-slate-900 block leading-tight">
+                            {c.modulesCount || 0}
+                          </span>
+                          <span className="text-xs text-slate-400 block mt-0.5">Modules</span>
+                        </div>
+                        <div>
+                          <span className="text-base sm:text-lg font-bold text-slate-900 block leading-tight">
+                            {c.lessonsCount || 0}
+                          </span>
+                          <span className="text-xs text-slate-400 block mt-0.5">Lessons</span>
+                        </div>
+                        <div>
+                          <span className="text-base sm:text-lg font-bold text-slate-900 block leading-tight">
+                            {c.enrolledCount || 0}
+                          </span>
+                          <span className="text-xs text-slate-400 block mt-0.5">Students</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Pricing */}
-                    <div className="flex items-center justify-between text-xs pt-1">
-                      <div className="text-slate-500">Tuition Fee:</div>
-                      <div className="font-bold text-slate-900">
-                        {c.pricing === 'FREE' || c.price === 0
-                          ? 'Free'
-                          : `₹${(c.price || 0).toLocaleString('en-IN')}`}
+                    {/* Card Footer: Status Pill & Price on left, Archive & Studio on right */}
+                    <div className="pt-4 border-t border-slate-100 flex items-end justify-between">
+                      <div className="space-y-1">
+                        <div>
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                              c.status === 'PUBLISHED'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'
+                                : c.status === 'DRAFT'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200/80'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            {c.status === 'PUBLISHED' ? 'Published' : c.status === 'DRAFT' ? 'Draft' : 'Archived'}
+                          </span>
+                        </div>
+                        <div className="font-bold text-xs sm:text-sm text-slate-900">
+                          {c.pricing === 'FREE' || c.price === 0
+                            ? 'Free'
+                            : `₹${(c.price || 0).toLocaleString('en-IN')}`}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 text-xs font-semibold">
+                        {c.status === 'PUBLISHED' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStatus(c.id, 'ARCHIVED')}
+                            className="text-slate-500 hover:text-slate-800 transition cursor-pointer"
+                          >
+                            Archive
+                          </button>
+                        ) : c.status === 'DRAFT' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStatus(c.id, 'PUBLISHED')}
+                            className="text-emerald-600 hover:text-emerald-700 transition cursor-pointer"
+                          >
+                            Publish
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStatus(c.id, 'PUBLISHED')}
+                            className="text-blue-600 hover:text-blue-700 transition cursor-pointer"
+                          >
+                            Restore
+                          </button>
+                        )}
+
+                        <Link
+                          href={`/admin/courses/${c.id}`}
+                          className="text-blue-600 hover:text-blue-800 font-bold hover:underline transition"
+                        >
+                          Studio
+                        </Link>
                       </div>
                     </div>
                   </div>
                 </div>
-
-                {/* Footer Actions */}
-                <div className="p-4 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1">
-                    {c.status === 'DRAFT' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleToggleStatus(c.id, 'PUBLISHED')}
-                        className="text-[11px] text-emerald-600 hover:text-emerald-700 h-7 px-2"
-                      >
-                        Publish
-                      </Button>
-                    )}
-                    {c.status === 'PUBLISHED' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleToggleStatus(c.id, 'ARCHIVED')}
-                        className="text-[11px] text-slate-400 hover:text-slate-600 h-7 px-2"
-                      >
-                        Archive
-                      </Button>
-                    )}
-                  </div>
-
-                  <Link href={`/admin/courses/${c.id}`}>
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      className="text-xs gap-1 h-8 px-3 shadow-none bg-blue-600 hover:bg-blue-700"
-                    >
-                      Curriculum Studio
-                      <ChevronRight size={13} />
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
