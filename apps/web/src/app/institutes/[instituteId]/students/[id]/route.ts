@@ -194,6 +194,10 @@ export async function PATCH(
       );
     }
 
+    // Invalidate caches
+    invalidateServerRouteCache('students');
+    invalidateServerRouteCache('dashboard');
+
     // Return updated details
     return GET(request, { params });
   } catch (error: any) {
@@ -248,6 +252,9 @@ export async function DELETE(
       `UPDATE "Admission" SET status = 'WITHDRAWN', "updatedAt" = NOW() WHERE "studentProfileId" = $1 AND "instituteId" = $2`,
       [id, effectiveInstituteId]
     );
+
+    invalidateServerRouteCache('students');
+    invalidateServerRouteCache('dashboard');
 
     return NextResponse.json({
       success: true,

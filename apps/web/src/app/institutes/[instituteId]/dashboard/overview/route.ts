@@ -23,6 +23,13 @@ export async function GET(
       effectiveInstituteId = ctx.instituteId;
     }
 
+    // Server-side cache lookup (institute and preset scoped)
+    const cacheKey = `dashboard:overview:${effectiveInstituteId}:${presetParam}`;
+    const cached = getServerRouteCache<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
     // Determine enrolment trend query based on preset
     let dateFilterLabel = 'Last 30 Days (Database Live)';
     let trendSql = '';
@@ -31,26 +38,38 @@ export async function GET(
       trendSql = `SELECT
            TO_CHAR(d.day, 'YYYY-MM-DD') as month,
            TO_CHAR(d.day, 'Dy DD') as label,
-           COALESCE(COUNT(e.id), 0)::int as count,
-           COALESCE(COUNT(DISTINCT sp.id), 0)::int as registrations,
-           COALESCE(COUNT(CASE WHEN sp.status = 'INACTIVE' THEN 1 END), 0)::int as "leftCount"
+           COALESCE(e.count, 0)::int as count,
+           COALESCE(sp.registrations, 0)::int as registrations,
+           COALESCE(sp."leftCount", 0)::int as "leftCount"
          FROM GENERATE_SERIES(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, '1 day'::interval) d(day)
-         LEFT JOIN "StudentProfile" sp ON sp."instituteId" = $1 AND sp."createdAt"::date = d.day::date
-         LEFT JOIN "Enrolment" e ON e."instituteId" = $1 AND e."createdAt"::date = d.day::date
-         GROUP BY d.day
+         LEFT JOIN (
+           SELECT "createdAt"::date as day, COUNT(id) as count
+           FROM "Enrolment" WHERE "instituteId" = $1 GROUP BY "createdAt"::date
+         ) e ON e.day = d.day::date
+         LEFT JOIN (
+           SELECT "createdAt"::date as day, COUNT(id) as registrations,
+                  COUNT(CASE WHEN status = 'INACTIVE' THEN 1 END) as "leftCount"
+           FROM "StudentProfile" WHERE "instituteId" = $1 GROUP BY "createdAt"::date
+         ) sp ON sp.day = d.day::date
          ORDER BY d.day ASC`;
     } else if (presetParam === 'THIS_MONTH') {
       dateFilterLabel = 'This Month (Database Live)';
       trendSql = `SELECT
            TO_CHAR(d.day, 'YYYY-MM-DD') as month,
            TO_CHAR(d.day, 'DD Mon') as label,
-           COALESCE(COUNT(e.id), 0)::int as count,
-           COALESCE(COUNT(DISTINCT sp.id), 0)::int as registrations,
-           COALESCE(COUNT(CASE WHEN sp.status = 'INACTIVE' THEN 1 END), 0)::int as "leftCount"
+           COALESCE(e.count, 0)::int as count,
+           COALESCE(sp.registrations, 0)::int as registrations,
+           COALESCE(sp."leftCount", 0)::int as "leftCount"
          FROM GENERATE_SERIES(DATE_TRUNC('month', CURRENT_DATE), CURRENT_DATE, '1 day'::interval) d(day)
-         LEFT JOIN "StudentProfile" sp ON sp."instituteId" = $1 AND sp."createdAt"::date = d.day::date
-         LEFT JOIN "Enrolment" e ON e."instituteId" = $1 AND e."createdAt"::date = d.day::date
-         GROUP BY d.day
+         LEFT JOIN (
+           SELECT "createdAt"::date as day, COUNT(id) as count
+           FROM "Enrolment" WHERE "instituteId" = $1 GROUP BY "createdAt"::date
+         ) e ON e.day = d.day::date
+         LEFT JOIN (
+           SELECT "createdAt"::date as day, COUNT(id) as registrations,
+                  COUNT(CASE WHEN status = 'INACTIVE' THEN 1 END) as "leftCount"
+           FROM "StudentProfile" WHERE "instituteId" = $1 GROUP BY "createdAt"::date
+         ) sp ON sp.day = d.day::date
          ORDER BY d.day ASC`;
     } else {
       dateFilterLabel = presetParam === 'ALL' ? 'All Time (Database Live)' : 'Last 30 Days (Database Live)';
@@ -68,18 +87,10 @@ export async function GET(
          LIMIT 6`;
     }
 
-    // Execute ALL independent DB queries in parallel
+    // Consolidated database query bundle in parallel
     const [
       instRows,
-      studentStats,
-      admissionStats,
-      teacherStats,
-      courseStats,
-      batchStats,
-      paymentStats,
-      invoiceStats,
-      attendanceStats,
-      sessionStats,
+      kpiRows,
       courseDistRows,
       enrolmentTrendRows,
       financialTrendRows,
@@ -94,87 +105,31 @@ export async function GET(
          WHERE i.id = $1`,
         [effectiveInstituteId]
       ),
-      // 2. Students
+      // 2. High-Performance Consolidated KPI Summary (Single round-trip scalar subquery bundle)
       queryDb(
         `SELECT
-           COUNT(*)::int as "totalStudents",
-           COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeStudents"
-         FROM "StudentProfile"
-         WHERE "instituteId" = $1`,
+           (SELECT COUNT(*)::int FROM "StudentProfile" WHERE "instituteId" = $1) as "totalStudents",
+           (SELECT COUNT(*)::int FROM "StudentProfile" WHERE "instituteId" = $1 AND status = 'ACTIVE') as "activeStudents",
+           (SELECT COUNT(*)::int FROM "Admission" WHERE "instituteId" = $1 AND status IN ('APPLIED', 'UNDER_REVIEW')) as "pendingAdmissions",
+           (SELECT COUNT(*)::int FROM "TeacherProfile" WHERE "instituteId" = $1) as "totalTeachers",
+           (SELECT COUNT(*)::int FROM "TeacherProfile" WHERE "instituteId" = $1 AND status = 'ACTIVE') as "activeTeachers",
+           (SELECT COUNT(*)::int FROM "TeacherProfile" WHERE "instituteId" = $1 AND status = 'ON_LEAVE') as "onLeaveTeachers",
+           (SELECT COUNT(*)::int FROM "Course" WHERE "instituteId" = $1) as "totalCourses",
+           (SELECT COUNT(*)::int FROM "Course" WHERE "instituteId" = $1 AND status = 'PUBLISHED') as "publishedCourses",
+           (SELECT COUNT(*)::int FROM "Course" WHERE "instituteId" = $1 AND status = 'DRAFT') as "draftCourses",
+           (SELECT COUNT(*)::int FROM "Batch" WHERE "instituteId" = $1) as "totalBatches",
+           (SELECT COUNT(*)::int FROM "Batch" WHERE "instituteId" = $1 AND status = 'ACTIVE') as "activeBatches",
+           (SELECT COALESCE(SUM("netAmount"), 0)::bigint FROM "FeePayment" WHERE "instituteId" = $1 AND status = 'COMPLETED') as "totalCollected",
+           (SELECT COALESCE(SUM("balanceAmount"), 0)::bigint FROM "Invoice" WHERE "instituteId" = $1) as "totalPending",
+           (SELECT COALESCE(SUM(CASE WHEN "dueDate" < CURRENT_DATE AND status != 'PAID' THEN "balanceAmount" ELSE 0 END), 0)::bigint FROM "Invoice" WHERE "instituteId" = $1) as "overdueAmount",
+           (SELECT COUNT(*)::int FROM "Invoice" WHERE "instituteId" = $1 AND status IN ('ISSUED', 'PARTIALLY_PAID')) as "pendingInvoicesCount",
+           (SELECT COUNT(*)::int FROM "Attendance" WHERE "instituteId" = $1) as "totalAttendanceRecords",
+           (SELECT COUNT(*)::int FROM "Attendance" WHERE "instituteId" = $1 AND status = 'PRESENT') as "presentAttendanceCount",
+           (SELECT COUNT(*)::int FROM "LiveSession" WHERE "instituteId" = $1 AND "startsAt" >= NOW()) as "upcomingSessionsCount",
+           (SELECT COUNT(*)::int FROM "LiveSession" WHERE "instituteId" = $1 AND "startsAt"::date = CURRENT_DATE) as "sessionsTodayCount"`,
         [effectiveInstituteId]
       ),
-      // 3. Pending Admissions
-      queryDb(
-        `SELECT COUNT(*)::int as "pendingAdmissions"
-         FROM "Admission"
-         WHERE "instituteId" = $1 AND status IN ('APPLIED', 'UNDER_REVIEW')`,
-        [effectiveInstituteId]
-      ),
-      // 4. Teachers
-      queryDb(
-        `SELECT
-           COUNT(*)::int as "totalTeachers",
-           COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeTeachers",
-           COUNT(CASE WHEN status = 'ON_LEAVE' THEN 1 END)::int as "onLeaveTeachers"
-         FROM "TeacherProfile"
-         WHERE "instituteId" = $1`,
-        [effectiveInstituteId]
-      ),
-      // 5. Courses
-      queryDb(
-        `SELECT
-           COUNT(*)::int as "totalCourses",
-           COUNT(CASE WHEN status = 'PUBLISHED' THEN 1 END)::int as "publishedCourses",
-           COUNT(CASE WHEN status = 'DRAFT' THEN 1 END)::int as "draftCourses"
-         FROM "Course"
-         WHERE "instituteId" = $1`,
-        [effectiveInstituteId]
-      ),
-      // 6. Batches
-      queryDb(
-        `SELECT
-           COUNT(*)::int as "totalBatches",
-           COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END)::int as "activeBatches"
-         FROM "Batch"
-         WHERE "instituteId" = $1`,
-        [effectiveInstituteId]
-      ),
-      // 7. Finance (Payments)
-      queryDb(
-        `SELECT COALESCE(SUM("netAmount"), 0)::bigint as "totalCollected"
-         FROM "FeePayment"
-         WHERE "instituteId" = $1 AND status = 'COMPLETED'`,
-        [effectiveInstituteId]
-      ),
-      // 8. Finance (Invoices)
-      queryDb(
-        `SELECT
-           COALESCE(SUM("balanceAmount"), 0)::bigint as "totalPending",
-           COALESCE(SUM(CASE WHEN "dueDate" < CURRENT_DATE AND status != 'PAID' THEN "balanceAmount" ELSE 0 END), 0)::bigint as "overdueAmount",
-           COUNT(CASE WHEN status IN ('ISSUED', 'PARTIALLY_PAID') THEN 1 END)::int as "pendingInvoicesCount"
-         FROM "Invoice"
-         WHERE "instituteId" = $1`,
-        [effectiveInstituteId]
-      ),
-      // 9. Attendance
-      queryDb(
-        `SELECT
-           COUNT(*)::int as "totalRecords",
-           COUNT(CASE WHEN status = 'PRESENT' THEN 1 END)::int as "presentCount"
-         FROM "Attendance"
-         WHERE "instituteId" = $1`,
-        [effectiveInstituteId]
-      ),
-      // 10. Sessions
-      queryDb(
-        `SELECT
-           COUNT(CASE WHEN "startsAt" >= NOW() THEN 1 END)::int as "upcomingCount",
-           COUNT(CASE WHEN "startsAt"::date = CURRENT_DATE THEN 1 END)::int as "todayCount"
-         FROM "LiveSession"
-         WHERE "instituteId" = $1`,
-        [effectiveInstituteId]
-      ),
-      // 11. Course Distribution
+      // 3. Course Distribution (Top courses)
       queryDb(
         `SELECT
            c.id as "courseId",
@@ -185,12 +140,13 @@ export async function GET(
          LEFT JOIN "Enrolment" e ON e."courseId" = c.id AND e.status = 'ACTIVE'
          WHERE c."instituteId" = $1
          GROUP BY c.id, c.title, c.status
-         ORDER BY "studentCount" DESC, c.title ASC`,
+         ORDER BY "studentCount" DESC, c.title ASC
+         LIMIT 10`,
         [effectiveInstituteId]
       ),
-      // 12. Enrolment Trend
+      // 4. Enrolment Trend
       queryDb(trendSql, [effectiveInstituteId]),
-      // 13. Financial Trend
+      // 5. Financial Trend (Last 6 months)
       queryDb(
         `SELECT
            TO_CHAR("paymentDate", 'YYYY-MM') as month,
@@ -204,7 +160,7 @@ export async function GET(
          LIMIT 6`,
         [effectiveInstituteId]
       ),
-      // 14. Recent Payments
+      // 6. Recent Payments (Optimized without cartesian enrolment duplicate join)
       queryDb(
         `SELECT
            p.id,
@@ -219,21 +175,19 @@ export async function GET(
            inv."invoiceNumber",
            sp."admissionNo",
            u."fullName" as "studentName",
-           c.title as "courseName"
+           COALESCE(inv.title, 'Tuition & Academic Fees') as "courseName"
          FROM "FeePayment" p
          LEFT JOIN "FeeReceipt" r ON r."paymentId" = p.id
          LEFT JOIN "Invoice" inv ON inv.id = p."invoiceId"
          LEFT JOIN "StudentProfile" sp ON sp.id = inv."studentProfileId"
          LEFT JOIN "Membership" m ON m.id = sp."membershipId"
          LEFT JOIN "User" u ON u.id = m."userId"
-         LEFT JOIN "Enrolment" e ON e."studentProfileId" = sp.id
-         LEFT JOIN "Course" c ON c.id = e."courseId"
          WHERE p."instituteId" = $1 AND p.status = 'COMPLETED'
          ORDER BY p."paymentDate" DESC
          LIMIT 10`,
         [effectiveInstituteId]
       ),
-      // 15. Context if not already fetched
+      // 7. Context if not already fetched
       ctx ? Promise.resolve(ctx) : resolveServerAdminContext(),
     ]);
 
@@ -254,30 +208,31 @@ export async function GET(
     };
     const branding = inst.branding || {};
 
-    const totalStudents = studentStats[0]?.totalStudents || 0;
-    const activeStudents = studentStats[0]?.activeStudents || 0;
-    const pendingAdmissionsCount = admissionStats[0]?.pendingAdmissions || 0;
-    const totalTeachers = teacherStats[0]?.totalTeachers || 0;
-    const activeTeachers = teacherStats[0]?.activeTeachers || 0;
-    const onLeaveTeachers = teacherStats[0]?.onLeaveTeachers || 0;
-    const totalCourses = courseStats[0]?.totalCourses || 0;
-    const publishedCourses = courseStats[0]?.publishedCourses || 0;
-    const draftCourses = courseStats[0]?.draftCourses || 0;
-    const totalBatches = batchStats[0]?.totalBatches || 0;
-    const activeBatches = batchStats[0]?.activeBatches || 0;
+    const kpi = kpiRows[0] || {};
+    const totalStudents = kpi.totalStudents || 0;
+    const activeStudents = kpi.activeStudents || 0;
+    const pendingAdmissionsCount = kpi.pendingAdmissions || 0;
+    const totalTeachers = kpi.totalTeachers || 0;
+    const activeTeachers = kpi.activeTeachers || 0;
+    const onLeaveTeachers = kpi.onLeaveTeachers || 0;
+    const totalCourses = kpi.totalCourses || 0;
+    const publishedCourses = kpi.publishedCourses || 0;
+    const draftCourses = kpi.draftCourses || 0;
+    const totalBatches = kpi.totalBatches || 0;
+    const activeBatches = kpi.activeBatches || 0;
 
-    const totalFeeCollected = Number(paymentStats[0]?.totalCollected || 0);
-    const totalFeePending = Number(invoiceStats[0]?.totalPending || 0);
-    const overdueFeeAmount = Number(invoiceStats[0]?.overdueAmount || 0);
-    const pendingInvoicesCount = invoiceStats[0]?.pendingInvoicesCount || 0;
+    const totalFeeCollected = Number(kpi.totalCollected || 0);
+    const totalFeePending = Number(kpi.totalPending || 0);
+    const overdueFeeAmount = Number(kpi.overdueAmount || 0);
+    const pendingInvoicesCount = kpi.pendingInvoicesCount || 0;
 
-    const totalAttRecords = attendanceStats[0]?.totalRecords || 0;
-    const presentAttCount = attendanceStats[0]?.presentCount || 0;
+    const totalAttRecords = kpi.totalAttendanceRecords || 0;
+    const presentAttCount = kpi.presentAttendanceCount || 0;
     const attendancePercentage =
       totalAttRecords > 0 ? Math.round((presentAttCount / totalAttRecords) * 100) : null;
 
-    const upcomingSessionsCount = sessionStats[0]?.upcomingCount || 0;
-    const sessionsTodayCount = sessionStats[0]?.todayCount || 0;
+    const upcomingSessionsCount = kpi.upcomingSessionsCount || 0;
+    const sessionsTodayCount = kpi.sessionsTodayCount || 0;
 
     const enrolmentTrend =
       enrolmentTrendRows.length > 0
@@ -326,7 +281,7 @@ export async function GET(
       paymentDate: p.paymentDate ? new Date(p.paymentDate).toISOString() : new Date().toISOString(),
     }));
 
-    return NextResponse.json({
+    const payload = {
       institute: {
         id: inst.id,
         name: inst.name,
@@ -405,7 +360,12 @@ export async function GET(
       recentAdmissions: [],
       upcomingSessions: [],
       recentPayments,
-    });
+    };
+
+    // Cache safe summary (20s TTL)
+    setServerRouteCache(cacheKey, payload, 20000);
+
+    return NextResponse.json(payload);
   } catch (error: any) {
     console.error('Error in /institutes/[instituteId]/dashboard/overview route:', error);
     return NextResponse.json(

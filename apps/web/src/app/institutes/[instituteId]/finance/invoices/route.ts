@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, invalidateServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +76,9 @@ export async function POST(
       )`,
       [effectiveInstituteId, invoice.id, fs.id, fs.name, fs.amount]
     );
+
+    invalidateServerRouteCache('finance');
+    invalidateServerRouteCache('dashboard');
 
     return NextResponse.json(invoice, { status: 201 });
   } catch (error: any) {

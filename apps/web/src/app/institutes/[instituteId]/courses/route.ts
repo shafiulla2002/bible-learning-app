@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryDb, resolveServerAdminContext, getServerRouteCache, setServerRouteCache } from '@/lib/server-db';
+import { queryDb, resolveServerAdminContext, getServerRouteCache, setServerRouteCache, invalidateServerRouteCache } from '@/lib/server-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -187,6 +187,10 @@ export async function POST(
     );
 
     const c = newCourseRows[0];
+    // Invalidate caches
+    invalidateServerRouteCache('courses');
+    invalidateServerRouteCache('dashboard');
+
     return NextResponse.json(
       {
         id: c.id,

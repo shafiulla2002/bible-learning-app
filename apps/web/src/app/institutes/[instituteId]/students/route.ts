@@ -324,6 +324,10 @@ export async function POST(
       console.warn('Failed to insert notification for student registration:', notifErr);
     }
 
+    // Invalidate caches
+    invalidateServerRouteCache('students');
+    invalidateServerRouteCache('dashboard');
+
     return NextResponse.json({
       id: studentProfile.id,
       userId,

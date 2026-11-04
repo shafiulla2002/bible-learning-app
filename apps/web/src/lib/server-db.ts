@@ -19,11 +19,9 @@ export function getDbPool(): Pool {
     globalThis._pgPool = new Pool({
       connectionString: cleanUrl,
       ssl: { rejectUnauthorized: false },
-      max: 10,
-      idleTimeoutMillis: 30000,
+      max: 2,
+      idleTimeoutMillis: 3000,
       connectionTimeoutMillis: 5000,
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 10000,
     });
   }
   return globalThis._pgPool;
