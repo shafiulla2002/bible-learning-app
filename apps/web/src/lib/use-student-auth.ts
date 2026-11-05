@@ -107,3 +107,4 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     logout,
   };
 }
+

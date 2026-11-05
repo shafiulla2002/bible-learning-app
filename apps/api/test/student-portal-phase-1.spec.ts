@@ -241,3 +241,4 @@ describe('Student Portal Phase 1: Authentication & Multi-Tenant Isolation', () =
     expect(data.profile.studentProfileId).not.toBe('spoofed-arbitrary-profile-id-999');
   });
 });
+
