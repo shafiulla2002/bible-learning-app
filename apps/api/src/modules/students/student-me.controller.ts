@@ -112,5 +112,105 @@ export class StudentMeController {
   async getStudentAttendanceSummary(@CurrentUser() user: any) {
     return this.studentsService.getStudentAttendanceSummary(user);
   }
+
+  // ----------------------------------------------------
+  // Phase 5: Assignments & Online Examinations
+  // ----------------------------------------------------
+
+  @Get('assignments')
+  @HttpCode(HttpStatus.OK)
+  async getStudentAssignments(
+    @CurrentUser() user: any,
+    @Query() query: { status?: string; courseId?: string; q?: string }
+  ) {
+    return this.studentsService.getStudentAssignments(user, query);
+  }
+
+  @Get('assignments/:assignmentId')
+  @HttpCode(HttpStatus.OK)
+  async getStudentAssignmentDetail(
+    @CurrentUser() user: any,
+    @Param('assignmentId') assignmentId: string
+  ) {
+    return this.studentsService.getStudentAssignmentDetail(user, assignmentId);
+  }
+
+  @Post('assignments/:assignmentId/submit')
+  @HttpCode(HttpStatus.OK)
+  async submitStudentAssignment(
+    @CurrentUser() user: any,
+    @Param('assignmentId') assignmentId: string,
+    @Body() body: { answerText?: string; fileUrl?: string }
+  ) {
+    return this.studentsService.submitStudentAssignment(user, assignmentId, body);
+  }
+
+  @Get('exams')
+  @HttpCode(HttpStatus.OK)
+  async getStudentExams(
+    @CurrentUser() user: any,
+    @Query() query: { status?: string; courseId?: string; q?: string }
+  ) {
+    return this.studentsService.getStudentExams(user, query);
+  }
+
+  @Get('exams/:examId')
+  @HttpCode(HttpStatus.OK)
+  async getStudentExamDetail(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string
+  ) {
+    return this.studentsService.getStudentExamDetail(user, examId);
+  }
+
+  @Post('exams/:examId/start')
+  @HttpCode(HttpStatus.OK)
+  async startStudentExamAttempt(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string
+  ) {
+    return this.studentsService.startStudentExamAttempt(user, examId);
+  }
+
+  @Get('exams/:examId/attempts/:attemptId')
+  @HttpCode(HttpStatus.OK)
+  async getStudentExamAttempt(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Param('attemptId') attemptId: string
+  ) {
+    return this.studentsService.getStudentExamAttempt(user, examId, attemptId);
+  }
+
+  @Post('exams/:examId/attempts/:attemptId/answers')
+  @HttpCode(HttpStatus.OK)
+  async saveStudentExamAnswers(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Param('attemptId') attemptId: string,
+    @Body() body: { answers: Record<string, string> }
+  ) {
+    return this.studentsService.saveStudentExamAnswers(user, examId, attemptId, body);
+  }
+
+  @Post('exams/:examId/attempts/:attemptId/submit')
+  @HttpCode(HttpStatus.OK)
+  async submitStudentExamAttempt(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Param('attemptId') attemptId: string,
+    @Body() body?: { answers?: Record<string, string> }
+  ) {
+    return this.studentsService.submitStudentExamAttempt(user, examId, attemptId, body);
+  }
+
+  @Get('exams/:examId/results')
+  @HttpCode(HttpStatus.OK)
+  async getStudentExamResults(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string
+  ) {
+    return this.studentsService.getStudentExamResults(user, examId);
+  }
 }
 
