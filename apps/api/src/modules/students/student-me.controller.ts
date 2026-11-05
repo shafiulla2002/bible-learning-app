@@ -79,5 +79,38 @@ export class StudentMeController {
   ) {
     return this.studentsService.submitLessonQuiz(user, courseId, lessonId, body);
   }
+
+  @Get('live-sessions')
+  @HttpCode(HttpStatus.OK)
+  async getStudentLiveSessions(
+    @CurrentUser() user: any,
+    @Query() query: { status?: string; batchId?: string; q?: string; date?: string }
+  ) {
+    return this.studentsService.getStudentLiveSessions(user, query);
+  }
+
+  @Get('live-sessions/:sessionId')
+  @HttpCode(HttpStatus.OK)
+  async getStudentLiveSessionDetail(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string
+  ) {
+    return this.studentsService.getStudentLiveSessionDetail(user, sessionId);
+  }
+
+  @Get('attendance')
+  @HttpCode(HttpStatus.OK)
+  async getStudentAttendance(
+    @CurrentUser() user: any,
+    @Query() query: { batchId?: string; courseId?: string; status?: string; month?: string; startDate?: string; endDate?: string }
+  ) {
+    return this.studentsService.getStudentAttendance(user, query);
+  }
+
+  @Get('attendance/summary')
+  @HttpCode(HttpStatus.OK)
+  async getStudentAttendanceSummary(@CurrentUser() user: any) {
+    return this.studentsService.getStudentAttendanceSummary(user);
+  }
 }
 

@@ -1891,4 +1891,607 @@ export class StudentsService {
       courseProgressPct: progressResult?.courseProgressPct,
     };
   }
+
+  /**
+   * Phase 4: Student Live Classes & Cohort Sessions
+   */
+  async getStudentLiveSessions(
+    user: any,
+    query?: {
+      status?: string;
+      batchId?: string;
+      q?: string;
+      date?: string;
+    }
+  ) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may access live sessions.');
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: user.sub,
+        role: Role.STUDENT,
+        status: 'ACTIVE',
+        instituteId: user.instituteId || undefined,
+      },
+      include: {
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: {
+                instituteId: user.instituteId || undefined,
+                status: { in: ['ACTIVE', 'COMPLETED'] },
+                batchId: { not: null },
+              },
+              include: {
+                batch: {
+                  include: {
+                    course: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    const enrolledBatchIds = (membership.studentProfile.enrolments || [])
+      .map((e) => e.batchId)
+      .filter(Boolean) as string[];
+
+    if (enrolledBatchIds.length === 0) {
+      return {
+        sessions: [],
+        summary: { total: 0, upcoming: 0, liveNow: 0, completed: 0, recorded: 0, cancelled: 0 },
+        batches: [],
+      };
+    }
+
+    const whereClause: any = {
+      instituteId: membership.instituteId,
+      batchId: { in: enrolledBatchIds },
+    };
+
+    if (query?.batchId) {
+      if (!enrolledBatchIds.includes(query.batchId)) {
+        throw new ForbiddenException('Access denied: You are not enrolled in the requested batch.');
+      }
+      whereClause.batchId = query.batchId;
+    }
+
+    if (query?.date) {
+      const startOfDay = new Date(`${query.date}T00:00:00.000Z`);
+      const endOfDay = new Date(`${query.date}T23:59:59.999Z`);
+      whereClause.startsAt = {
+        gte: startOfDay,
+        lte: endOfDay,
+      };
+    }
+
+    const sessions = await this.prisma.liveSession.findMany({
+      where: whereClause,
+      include: {
+        batch: {
+          include: {
+            course: true,
+          },
+        },
+        teacherProfile: {
+          include: {
+            membership: {
+              include: {
+                user: {
+                  select: { fullName: true, avatarUrl: true },
+                },
+              },
+            },
+          },
+        },
+        attendances: {
+          where: {
+            studentProfileId: membership.studentProfile.id,
+          },
+          select: { status: true, remarks: true },
+        },
+      },
+      orderBy: { startsAt: 'asc' },
+    });
+
+    const now = new Date();
+    const reminderWindowMs = 15 * 60 * 1000; // 15 mins
+
+    let upcomingCount = 0;
+    let liveNowCount = 0;
+    let completedCount = 0;
+    let recordedCount = 0;
+    let cancelledCount = 0;
+
+    let mapped = sessions.map((s) => {
+      let dynamicStatus: 'LIVE_NOW' | 'STARTING_SOON' | 'UPCOMING' | 'COMPLETED' | 'CANCELLED';
+      if (s.status === 'CANCELLED') {
+        dynamicStatus = 'CANCELLED';
+        cancelledCount++;
+      } else if (now >= s.startsAt && now <= s.endsAt) {
+        dynamicStatus = 'LIVE_NOW';
+        liveNowCount++;
+      } else if (now < s.startsAt && s.startsAt.getTime() - now.getTime() <= reminderWindowMs) {
+        dynamicStatus = 'STARTING_SOON';
+        upcomingCount++;
+      } else if (now < s.startsAt) {
+        dynamicStatus = 'UPCOMING';
+        upcomingCount++;
+      } else {
+        dynamicStatus = 'COMPLETED';
+        completedCount++;
+      }
+
+      const hasRecording = !!s.recordingUrl && dynamicStatus === 'COMPLETED';
+      if (hasRecording) recordedCount++;
+
+      const canJoin =
+        (dynamicStatus === 'LIVE_NOW' || dynamicStatus === 'STARTING_SOON') &&
+        !!s.joinUrl &&
+        s.status !== 'CANCELLED';
+
+      let platform = 'OTHER';
+      if (s.joinUrl?.includes('meet.google.com')) platform = 'GOOGLE_MEET';
+      else if (s.joinUrl?.includes('zoom.us')) platform = 'ZOOM';
+      else if (s.joinUrl?.includes('teams.microsoft.com')) platform = 'MICROSOFT_TEAMS';
+
+      const myAttendance = s.attendances?.[0] || null;
+
+      return {
+        id: s.id,
+        title: s.title,
+        description: s.description,
+        courseId: s.batch.courseId,
+        courseTitle: s.batch.course.title,
+        batchId: s.batchId,
+        batchName: s.batch.name,
+        teacherName: s.teacherProfile?.membership?.user?.fullName || 'Faculty Instructor',
+        teacherPhoto: s.teacherProfile?.photoUrl || null,
+        room: s.room,
+        startsAt: s.startsAt.toISOString(),
+        endsAt: s.endsAt.toISOString(),
+        status: dynamicStatus,
+        rawStatus: s.status,
+        platform,
+        canJoin,
+        joinUrl: canJoin ? s.joinUrl : null,
+        hasRecording,
+        recordingUrl: hasRecording ? s.recordingUrl : null,
+        attendanceStatus: myAttendance?.status || null,
+      };
+    });
+
+    // Filter by query status
+    if (query?.status && query.status !== 'ALL') {
+      if (query.status === 'UPCOMING') {
+        mapped = mapped.filter((s) => s.status === 'UPCOMING' || s.status === 'STARTING_SOON');
+      } else if (query.status === 'LIVE_NOW') {
+        mapped = mapped.filter((s) => s.status === 'LIVE_NOW');
+      } else if (query.status === 'COMPLETED') {
+        mapped = mapped.filter((s) => s.status === 'COMPLETED');
+      } else if (query.status === 'RECORDED') {
+        mapped = mapped.filter((s) => s.hasRecording);
+      } else if (query.status === 'CANCELLED') {
+        mapped = mapped.filter((s) => s.status === 'CANCELLED');
+      }
+    }
+
+    // Filter by search query
+    if (query?.q) {
+      const qLower = query.q.toLowerCase();
+      mapped = mapped.filter(
+        (s) =>
+          s.title.toLowerCase().includes(qLower) ||
+          s.courseTitle.toLowerCase().includes(qLower) ||
+          s.teacherName.toLowerCase().includes(qLower) ||
+          s.batchName.toLowerCase().includes(qLower)
+      );
+    }
+
+    const batches = (membership.studentProfile.enrolments || [])
+      .filter((e) => e.batch)
+      .map((e) => ({
+        id: e.batch!.id,
+        name: e.batch!.name,
+        courseTitle: e.batch!.course.title,
+      }));
+
+    return {
+      sessions: mapped,
+      summary: {
+        total: sessions.length,
+        upcoming: upcomingCount,
+        liveNow: liveNowCount,
+        completed: completedCount,
+        recorded: recordedCount,
+        cancelled: cancelledCount,
+      },
+      batches,
+    };
+  }
+
+  /**
+   * Phase 4: Single Live Session Detail
+   */
+  async getStudentLiveSessionDetail(user: any, sessionId: string) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may access live sessions.');
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: user.sub,
+        role: Role.STUDENT,
+        status: 'ACTIVE',
+        instituteId: user.instituteId || undefined,
+      },
+      include: {
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: {
+                instituteId: user.instituteId || undefined,
+                status: { in: ['ACTIVE', 'COMPLETED'] },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    const enrolledBatchIds = (membership.studentProfile.enrolments || [])
+      .map((e) => e.batchId)
+      .filter(Boolean) as string[];
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: {
+        id: sessionId,
+        instituteId: membership.instituteId,
+      },
+      include: {
+        batch: {
+          include: {
+            course: true,
+          },
+        },
+        teacherProfile: {
+          include: {
+            membership: {
+              include: {
+                user: {
+                  select: { fullName: true, avatarUrl: true },
+                },
+              },
+            },
+          },
+        },
+        attendances: {
+          where: {
+            studentProfileId: membership.studentProfile.id,
+          },
+          select: { status: true, remarks: true },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found in your institute.');
+    }
+
+    if (!enrolledBatchIds.includes(session.batchId)) {
+      throw new ForbiddenException('Access denied: You are not enrolled in the batch for this session.');
+    }
+
+    const now = new Date();
+    const reminderWindowMs = 15 * 60 * 1000;
+
+    let dynamicStatus: 'LIVE_NOW' | 'STARTING_SOON' | 'UPCOMING' | 'COMPLETED' | 'CANCELLED';
+    if (session.status === 'CANCELLED') {
+      dynamicStatus = 'CANCELLED';
+    } else if (now >= session.startsAt && now <= session.endsAt) {
+      dynamicStatus = 'LIVE_NOW';
+    } else if (now < session.startsAt && session.startsAt.getTime() - now.getTime() <= reminderWindowMs) {
+      dynamicStatus = 'STARTING_SOON';
+    } else if (now < session.startsAt) {
+      dynamicStatus = 'UPCOMING';
+    } else {
+      dynamicStatus = 'COMPLETED';
+    }
+
+    const hasRecording = !!session.recordingUrl && dynamicStatus === 'COMPLETED';
+    const canJoin =
+      (dynamicStatus === 'LIVE_NOW' || dynamicStatus === 'STARTING_SOON') &&
+      !!session.joinUrl &&
+      session.status !== 'CANCELLED';
+
+    let platform = 'OTHER';
+    if (session.joinUrl?.includes('meet.google.com')) platform = 'GOOGLE_MEET';
+    else if (session.joinUrl?.includes('zoom.us')) platform = 'ZOOM';
+    else if (session.joinUrl?.includes('teams.microsoft.com')) platform = 'MICROSOFT_TEAMS';
+
+    const myAttendance = session.attendances?.[0] || null;
+
+    return {
+      session: {
+        id: session.id,
+        title: session.title,
+        description: session.description,
+        courseId: session.batch.courseId,
+        courseTitle: session.batch.course.title,
+        batchId: session.batchId,
+        batchName: session.batch.name,
+        teacherName: session.teacherProfile?.membership?.user?.fullName || 'Faculty Instructor',
+        teacherPhoto: session.teacherProfile?.photoUrl || null,
+        room: session.room,
+        startsAt: session.startsAt.toISOString(),
+        endsAt: session.endsAt.toISOString(),
+        status: dynamicStatus,
+        rawStatus: session.status,
+        platform,
+        canJoin,
+        joinUrl: canJoin ? session.joinUrl : null,
+        hasRecording,
+        recordingUrl: hasRecording ? session.recordingUrl : null,
+        attendanceStatus: myAttendance?.status || null,
+        attendanceRemarks: myAttendance?.remarks || null,
+      },
+    };
+  }
+
+  /**
+   * Phase 4: Student Attendance History & Summary
+   */
+  async getStudentAttendance(
+    user: any,
+    query?: {
+      batchId?: string;
+      courseId?: string;
+      status?: string;
+      month?: string;
+      startDate?: string;
+      endDate?: string;
+    }
+  ) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may access attendance records.');
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: user.sub,
+        role: Role.STUDENT,
+        status: 'ACTIVE',
+        instituteId: user.instituteId || undefined,
+      },
+      include: {
+        user: true,
+        studentProfile: {
+          include: {
+            enrolments: {
+              include: {
+                batch: true,
+                course: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    const studentProfile = membership.studentProfile;
+    const instituteId = membership.instituteId;
+
+    const whereClause: any = {
+      instituteId,
+      studentProfileId: studentProfile.id,
+    };
+
+    if (query?.batchId) whereClause.batchId = query.batchId;
+    if (query?.status) whereClause.status = query.status as any;
+    if (query?.startDate || query?.endDate) {
+      whereClause.date = {};
+      if (query.startDate) whereClause.date.gte = new Date(query.startDate);
+      if (query.endDate) whereClause.date.lte = new Date(query.endDate);
+    } else if (query?.month) {
+      // YYYY-MM
+      const startOfMonth = new Date(`${query.month}-01T00:00:00.000Z`);
+      const [year, monthNum] = query.month.split('-').map(Number);
+      const nextMonth = monthNum === 12 ? 1 : monthNum + 1;
+      const nextYear = monthNum === 12 ? year + 1 : year;
+      const endOfMonth = new Date(`${nextYear}-${String(nextMonth).padStart(2, '0')}-01T00:00:00.000Z`);
+      whereClause.date = {
+        gte: startOfMonth,
+        lt: endOfMonth,
+      };
+    }
+
+    const records = await this.prisma.attendance.findMany({
+      where: whereClause,
+      include: {
+        batch: {
+          include: {
+            course: true,
+          },
+        },
+        liveSession: {
+          include: {
+            teacherProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { date: 'desc' },
+    });
+
+    // If courseId filter is provided, filter records by course
+    const filteredRecords = query?.courseId
+      ? records.filter((r) => r.batch?.courseId === query.courseId)
+      : records;
+
+    let presentCount = 0;
+    let lateCount = 0;
+    let absentCount = 0;
+    let excusedCount = 0;
+
+    for (const r of filteredRecords) {
+      if (r.status === 'PRESENT') presentCount++;
+      else if (r.status === 'LATE') lateCount++;
+      else if (r.status === 'ABSENT') absentCount++;
+      else if (r.status === 'EXCUSED') excusedCount++;
+    }
+
+    const totalSessions = presentCount + lateCount + absentCount + excusedCount;
+    const applicableTotal = totalSessions - excusedCount;
+    const attendancePercentage =
+      applicableTotal > 0 ? Math.round(((presentCount + lateCount) / applicableTotal) * 100) : null;
+    const thresholdPercentage = 75;
+    const isWarning = attendancePercentage !== null && attendancePercentage < thresholdPercentage;
+
+    // Monthly breakdown
+    const monthlyMap = new Map<string, { present: number; late: number; absent: number; excused: number }>();
+    for (const r of filteredRecords) {
+      const monthKey = r.date.toISOString().slice(0, 7);
+      if (!monthlyMap.has(monthKey)) {
+        monthlyMap.set(monthKey, { present: 0, late: 0, absent: 0, excused: 0 });
+      }
+      const entry = monthlyMap.get(monthKey)!;
+      if (r.status === 'PRESENT') entry.present++;
+      else if (r.status === 'LATE') entry.late++;
+      else if (r.status === 'ABSENT') entry.absent++;
+      else if (r.status === 'EXCUSED') entry.excused++;
+    }
+
+    const monthlySummary = Array.from(monthlyMap.entries())
+      .map(([month, counts]) => {
+        const mApplicable = counts.present + counts.late + counts.absent;
+        const percentage = mApplicable > 0 ? Math.round(((counts.present + counts.late) / mApplicable) * 100) : null;
+        return {
+          month,
+          present: counts.present,
+          late: counts.late,
+          absent: counts.absent,
+          excused: counts.excused,
+          percentage,
+        };
+      })
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    // Course summary breakdown
+    const courseMap = new Map<string, { courseId: string; courseTitle: string; present: number; late: number; absent: number; excused: number }>();
+    for (const r of filteredRecords) {
+      const cid = r.batch?.courseId || 'general';
+      const ctitle = r.batch?.course?.title || 'General Lectures';
+      if (!courseMap.has(cid)) {
+        courseMap.set(cid, { courseId: cid, courseTitle: ctitle, present: 0, late: 0, absent: 0, excused: 0 });
+      }
+      const centry = courseMap.get(cid)!;
+      if (r.status === 'PRESENT') centry.present++;
+      else if (r.status === 'LATE') centry.late++;
+      else if (r.status === 'ABSENT') centry.absent++;
+      else if (r.status === 'EXCUSED') centry.excused++;
+    }
+
+    const courseSummary = Array.from(courseMap.values()).map((c) => {
+      const cTotal = c.present + c.late + c.absent;
+      return {
+        ...c,
+        total: cTotal + c.excused,
+        percentage: cTotal > 0 ? Math.round(((c.present + c.late) / cTotal) * 100) : null,
+      };
+    });
+
+    const mappedRecords = filteredRecords.map((r) => {
+      const instructorName =
+        r.liveSession?.teacherProfile?.membership?.user?.fullName || 'Faculty Instructor';
+      return {
+        id: r.id,
+        date: r.date.toISOString().slice(0, 10),
+        courseId: r.batch?.courseId || null,
+        courseTitle: r.batch?.course?.title || 'General Curriculum',
+        batchId: r.batchId,
+        batchName: r.batch?.name || 'Class Batch',
+        sessionTitle: r.liveSession?.title || (r.mode === 'LIVE_SESSION' ? 'Live Session' : 'Cohort Lecture'),
+        instructorName,
+        mode: r.mode,
+        status: r.status,
+        remarks: r.remarks || null,
+      };
+    });
+
+    // Enrolled courses and batches for dropdown filters
+    const filterOptions = {
+      batches: studentProfile.enrolments
+        .filter((e) => e.batch)
+        .map((e) => ({ id: e.batch!.id, name: e.batch!.name, courseTitle: e.course.title })),
+      courses: Array.from(
+        new Map(studentProfile.enrolments.map((e) => [e.course.id, { id: e.course.id, title: e.course.title }])).values()
+      ),
+    };
+
+    return {
+      student: {
+        id: studentProfile.id,
+        admissionNo: studentProfile.admissionNo,
+        fullName: membership.user.fullName,
+      },
+      summary: {
+        totalSessions,
+        presentCount,
+        lateCount,
+        absentCount,
+        excusedCount,
+        attendancePercentage,
+        thresholdPercentage,
+        isWarning,
+      },
+      monthlySummary,
+      courseSummary,
+      records: mappedRecords,
+      filterOptions,
+    };
+  }
+
+  /**
+   * Phase 4: Student Attendance Quick Summary
+   */
+  async getStudentAttendanceSummary(user: any) {
+    const full = await this.getStudentAttendance(user);
+    return {
+      student: full.student,
+      summary: full.summary,
+    };
+  }
 }
