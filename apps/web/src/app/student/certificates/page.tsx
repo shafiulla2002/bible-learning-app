@@ -18,7 +18,7 @@ import {
   FileCheck,
   Copy,
   Check,
-  BookOpen,
+  AlertCircle,
 } from 'lucide-react';
 
 interface Certificate {
@@ -40,12 +40,14 @@ interface Certificate {
 export default function StudentCertificatesPage() {
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   const fetchCertificates = useCallback(async () => {
     setLoading(true);
+    setErrorMessage(null);
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       const headers: Record<string, string> = {};
@@ -55,49 +57,16 @@ export default function StudentCertificatesPage() {
       const res = await fetch('/api/students/certificates', { headers });
       if (res.ok) {
         const data = await res.json();
-        if (data.certificates && data.certificates.length > 0) {
-          setCertificates(data.certificates);
-        } else {
-          // Provide demo sample for completed biblical studies course
-          setCertificates([
-            {
-              id: 'cert-1',
-              certificateNo: 'CERT-2026-0089',
-              courseTitle: 'Building Biblical Theology',
-              courseSlug: 'building-biblical-theology',
-              studentName: 'Grace Thomas',
-              admissionNo: 'ADM-2026-001',
-              instituteName: 'Grace Bible Institute',
-              issuedAt: '2026-10-28T14:30:00Z',
-              verifyToken: 'vfy-8a9b2c3d4e5f',
-              verificationUrl: '/verify/certificate/vfy-8a9b2c3d4e5f',
-              pdfUrl: null,
-              status: 'ISSUED',
-              completionDate: '2026-10-25T16:00:00Z',
-            },
-          ]);
-        }
+        setCertificates(Array.isArray(data.certificates) ? data.certificates : []);
       } else {
-        setCertificates([
-          {
-            id: 'cert-1',
-            certificateNo: 'CERT-2026-0089',
-            courseTitle: 'Building Biblical Theology',
-            courseSlug: 'building-biblical-theology',
-            studentName: 'Grace Thomas',
-            admissionNo: 'ADM-2026-001',
-            instituteName: 'Grace Bible Institute',
-            issuedAt: '2026-10-28T14:30:00Z',
-            verifyToken: 'vfy-8a9b2c3d4e5f',
-            verificationUrl: '/verify/certificate/vfy-8a9b2c3d4e5f',
-            pdfUrl: null,
-            status: 'ISSUED',
-            completionDate: '2026-10-25T16:00:00Z',
-          },
-        ]);
+        const errData = await res.json().catch(() => ({}));
+        setErrorMessage(errData.message || 'Unable to retrieve certificates from the server.');
+        setCertificates([]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Fetch Certificates Error:', err);
+      setErrorMessage(err.message || 'Connection error while contacting certificates service.');
+      setCertificates([]);
     } finally {
       setLoading(false);
     }
@@ -154,6 +123,24 @@ export default function StudentCertificatesPage() {
           </div>
         </div>
 
+        {/* Error State Banner */}
+        {errorMessage && (
+          <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-red-600 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchCertificates}
+              className="h-7 text-[11px] text-red-700 border-red-200 hover:bg-red-100"
+            >
+              Try Again
+            </Button>
+          </div>
+        )}
+
         {/* Search Bar */}
         <div className="relative w-full sm:w-80">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -162,22 +149,43 @@ export default function StudentCertificatesPage() {
             placeholder="Search certificate number or course..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={loading || certificates.length === 0}
+            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
           />
         </div>
 
-        {/* Certificate Gallery */}
-        {filtered.length === 0 ? (
+        {/* Loading Skeleton State */}
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="overflow-hidden border border-slate-200 shadow-xs animate-pulse">
+                <div className="bg-slate-200 h-28 w-full" />
+                <div className="p-5 space-y-3 bg-white">
+                  <div className="h-4 bg-slate-200 rounded w-3/4" />
+                  <div className="h-3 bg-slate-100 rounded w-1/2" />
+                  <div className="h-3 bg-slate-100 rounded w-2/3" />
+                  <div className="h-8 bg-slate-100 rounded mt-4" />
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          /* Empty State */
           <Card className="p-12 text-center border-slate-100 shadow-sm">
             <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-3">
               <Award size={32} />
             </div>
-            <h3 className="text-base font-bold text-slate-800">No Certificates Issued Yet</h3>
+            <h3 className="text-base font-bold text-slate-800">
+              {searchQuery ? 'No Matching Certificates' : 'No Certificates Issued Yet'}
+            </h3>
             <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              Certificates are automatically awarded by the Academic Coordinator upon achieving 100% curriculum completion and passing required course examinations.
+              {searchQuery
+                ? `No certificates matched "${searchQuery}". Clear your search query to see all issued credentials.`
+                : 'Certificates are automatically awarded by the Academic Coordinator upon achieving 100% curriculum completion and passing required course examinations.'}
             </p>
           </Card>
         ) : (
+          /* Certificate Gallery */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filtered.map((cert) => (
               <Card

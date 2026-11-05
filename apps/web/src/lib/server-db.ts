@@ -9,9 +9,12 @@ declare global {
 
 export function getDbPool(): Pool {
   if (!globalThis._pgPool) {
-    const rawUrl =
-      process.env.DATABASE_URL ||
-      'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev';
+    const rawUrl = process.env.DATABASE_URL;
+    if (!rawUrl) {
+      throw new Error(
+        'Database Configuration Error: DATABASE_URL environment variable is missing. Ensure DATABASE_URL is set in environment secrets.'
+      );
+    }
 
     // Strip sslmode from query string so pg uses our explicit ssl options without cert verification failure
     const cleanUrl = rawUrl.replace(/\?sslmode=[^&]+&?/, '?').replace(/\?$/, '');
