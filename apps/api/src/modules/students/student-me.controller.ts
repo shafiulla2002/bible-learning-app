@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Param,
   Body,
   Query,
@@ -212,5 +213,116 @@ export class StudentMeController {
   ) {
     return this.studentsService.getStudentExamResults(user, examId);
   }
+
+  // =========================================================================
+  // PHASE 6: PAYMENTS, CERTIFICATES & STUDENT PROFILE
+  // =========================================================================
+
+  @Get('payments')
+  @HttpCode(HttpStatus.OK)
+  async getStudentPaymentsOverview(@CurrentUser() user: any) {
+    return this.studentsService.getStudentPaymentsOverview(user);
+  }
+
+  @Get('invoices')
+  @HttpCode(HttpStatus.OK)
+  async getStudentInvoices(
+    @CurrentUser() user: any,
+    @Query('status') status?: string
+  ) {
+    return this.studentsService.getStudentInvoices(user, { status });
+  }
+
+  @Get('invoices/:invoiceId')
+  @HttpCode(HttpStatus.OK)
+  async getStudentInvoiceDetail(
+    @CurrentUser() user: any,
+    @Param('invoiceId') invoiceId: string
+  ) {
+    return this.studentsService.getStudentInvoiceDetail(user, invoiceId);
+  }
+
+  @Post('invoices/:invoiceId/pay')
+  @HttpCode(HttpStatus.OK)
+  async createPaymentOrder(
+    @CurrentUser() user: any,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body?: { amountPaise?: number }
+  ) {
+    return this.studentsService.createPaymentOrder(user, invoiceId, body);
+  }
+
+  @Post('invoices/:invoiceId/verify-payment')
+  @HttpCode(HttpStatus.OK)
+  async verifyAndProcessPayment(
+    @CurrentUser() user: any,
+    @Param('invoiceId') invoiceId: string,
+    @Body() body: { amountPaise: number; paymentMode?: string; referenceNumber?: string; idempotencyKey?: string }
+  ) {
+    return this.studentsService.verifyAndProcessPayment(user, invoiceId, body);
+  }
+
+  @Get('payments/history')
+  @HttpCode(HttpStatus.OK)
+  async getStudentPaymentHistory(
+    @CurrentUser() user: any,
+    @Query('status') status?: string
+  ) {
+    return this.studentsService.getStudentPaymentHistory(user, { status });
+  }
+
+  @Get('certificates')
+  @HttpCode(HttpStatus.OK)
+  async getStudentCertificates(@CurrentUser() user: any) {
+    return this.studentsService.getStudentCertificates(user);
+  }
+
+  @Get('certificates/:certificateId')
+  @HttpCode(HttpStatus.OK)
+  async getStudentCertificateDetail(
+    @CurrentUser() user: any,
+    @Param('certificateId') certificateId: string
+  ) {
+    return this.studentsService.getStudentCertificateDetail(user, certificateId);
+  }
+
+  @Get('profile')
+  @HttpCode(HttpStatus.OK)
+  async getStudentProfile(@CurrentUser() user: any) {
+    return this.studentsService.getStudentProfile(user);
+  }
+
+  @Patch('profile')
+  @HttpCode(HttpStatus.OK)
+  async updateStudentProfile(
+    @CurrentUser() user: any,
+    @Body()
+    body: {
+      phone?: string;
+      avatarUrl?: string;
+      address?: any;
+      church?: string;
+      guardian?: any;
+      preferredLanguage?: string;
+    }
+  ) {
+    return this.studentsService.updateStudentProfile(user, body);
+  }
+
+  @Get('settings')
+  @HttpCode(HttpStatus.OK)
+  async getStudentSettings(@CurrentUser() user: any) {
+    return this.studentsService.getStudentSettings(user);
+  }
+
+  @Patch('settings')
+  @HttpCode(HttpStatus.OK)
+  async updateStudentSettings(
+    @CurrentUser() user: any,
+    @Body() body: { preferredLanguage?: string; notifications?: any }
+  ) {
+    return this.studentsService.updateStudentSettings(user, body);
+  }
 }
+
 

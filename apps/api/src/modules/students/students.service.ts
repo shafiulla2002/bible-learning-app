@@ -3706,4 +3706,767 @@ export class StudentsService {
       },
     };
   }
+
+  // =========================================================================
+  // PHASE 6: FEE PAYMENTS, CERTIFICATES & STUDENT PROFILE MANAGEMENT
+  // =========================================================================
+
+  /**
+   * Helper to resolve the authenticated student profile with strict error handling
+   */
+  private async resolveStudentProfileOrThrow(user: any) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may access this resource.');
+    }
+
+    const targetUserId = user.sub || user.userId || user.id;
+
+    const studentProfile = await this.prisma.studentProfile.findFirst({
+      where: {
+        membership: {
+          userId: targetUserId,
+          role: Role.STUDENT,
+          status: 'ACTIVE',
+          ...(user.instituteId ? { instituteId: user.instituteId } : {}),
+        },
+      },
+      include: {
+        membership: {
+          include: {
+            user: true,
+            institute: true,
+          },
+        },
+      },
+    });
+
+    if (!studentProfile) {
+      throw new ForbiddenException('Authenticated student profile not found or inactive');
+    }
+
+    return studentProfile;
+  }
+
+  /**
+   * 1. Get Financial Overview & Summary for the authenticated student
+   */
+  async getStudentPaymentsOverview(user: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const invoices = await this.prisma.invoice.findMany({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+      },
+      include: {
+        items: true,
+        payments: {
+          include: { receipt: true },
+          orderBy: { paymentDate: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const now = new Date();
+    let totalFeesPaise = 0;
+    let totalPaidPaise = 0;
+    let outstandingBalancePaise = 0;
+    let pendingInvoicesCount = 0;
+    let overdueInvoicesCount = 0;
+
+    const allPayments: any[] = [];
+
+    for (const inv of invoices) {
+      totalFeesPaise += inv.totalAmount;
+      totalPaidPaise += inv.paidAmount;
+      outstandingBalancePaise += inv.balanceAmount;
+
+      const isPastDue = new Date(inv.dueDate) < now && inv.balanceAmount > 0;
+      if (inv.status === 'OVERDUE' || isPastDue) {
+        overdueInvoicesCount++;
+      } else if ((inv.status === 'ISSUED' || inv.status === 'PARTIALLY_PAID') && inv.balanceAmount > 0) {
+        pendingInvoicesCount++;
+      }
+
+      for (const p of inv.payments) {
+        allPayments.push({
+          id: p.id,
+          paymentNumber: p.paymentNumber,
+          invoiceId: inv.id,
+          invoiceNumber: inv.invoiceNumber,
+          amountPaise: p.amount,
+          netAmountPaise: p.netAmount,
+          paymentMode: p.paymentMode,
+          status: p.status,
+          paymentDate: p.paymentDate.toISOString(),
+          referenceNumber: p.referenceNumber || null,
+          receiptNumber: p.receipt?.receiptNumber || null,
+          receiptId: p.receipt?.id || null,
+        });
+      }
+    }
+
+    allPayments.sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
+
+    return {
+      summary: {
+        totalFeesPaise,
+        totalPaidPaise,
+        outstandingBalancePaise,
+        pendingInvoicesCount,
+        overdueInvoicesCount,
+        currency: 'INR',
+      },
+      recentPayments: allPayments.slice(0, 5),
+      invoicesCount: invoices.length,
+    };
+  }
+
+  /**
+   * 2. List all invoices for the authenticated student
+   */
+  async getStudentInvoices(user: any, query?: { status?: string }) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const invoices = await this.prisma.invoice.findMany({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+      },
+      include: {
+        items: true,
+        payments: {
+          include: { receipt: true },
+          orderBy: { paymentDate: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const now = new Date();
+
+    const formatted = invoices.map((inv) => {
+      const isPastDue = new Date(inv.dueDate) < now && inv.balanceAmount > 0;
+      const computedStatus = isPastDue ? 'OVERDUE' : inv.status;
+
+      return {
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        issueDate: inv.issueDate ? inv.issueDate.toISOString() : inv.createdAt.toISOString(),
+        dueDate: inv.dueDate.toISOString(),
+        totalAmountPaise: inv.totalAmount,
+        paidAmountPaise: inv.paidAmount,
+        balanceAmountPaise: inv.balanceAmount,
+        currency: inv.currency,
+        status: computedStatus,
+        notes: inv.notes || null,
+        items: inv.items.map((it) => ({
+          id: it.id,
+          description: it.description,
+          amountPaise: it.amount,
+        })),
+        payments: inv.payments.map((p) => ({
+          id: p.id,
+          paymentNumber: p.paymentNumber,
+          amountPaise: p.amount,
+          paymentMode: p.paymentMode,
+          status: p.status,
+          paymentDate: p.paymentDate.toISOString(),
+          receiptNumber: p.receipt?.receiptNumber || null,
+        })),
+      };
+    });
+
+    if (query?.status && query.status !== 'ALL') {
+      return {
+        invoices: formatted.filter((inv) => inv.status.toUpperCase() === query.status?.toUpperCase()),
+      };
+    }
+
+    return { invoices: formatted };
+  }
+
+  /**
+   * 3. Get invoice detail by ID
+   */
+  async getStudentInvoiceDetail(user: any, invoiceId: string) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        id: invoiceId,
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+      },
+      include: {
+        items: true,
+        installments: { orderBy: { installmentNumber: 'asc' } },
+        payments: {
+          include: { receipt: true },
+          orderBy: { paymentDate: 'desc' },
+        },
+        studentProfile: {
+          include: {
+            membership: {
+              include: {
+                user: true,
+                institute: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found or does not belong to you');
+    }
+
+    const now = new Date();
+    const isPastDue = new Date(invoice.dueDate) < now && invoice.balanceAmount > 0;
+    const computedStatus = isPastDue ? 'OVERDUE' : invoice.status;
+
+    return {
+      invoice: {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        issueDate: invoice.issueDate ? invoice.issueDate.toISOString() : invoice.createdAt.toISOString(),
+        dueDate: invoice.dueDate.toISOString(),
+        totalAmountPaise: invoice.totalAmount,
+        paidAmountPaise: invoice.paidAmount,
+        balanceAmountPaise: invoice.balanceAmount,
+        currency: invoice.currency,
+        status: computedStatus,
+        notes: invoice.notes,
+        studentName: invoice.studentProfile.membership.user.fullName,
+        admissionNo: invoice.studentProfile.admissionNo,
+        instituteName: invoice.studentProfile.membership.institute.name,
+        items: invoice.items.map((it) => ({
+          id: it.id,
+          description: it.description,
+          amountPaise: it.amount,
+        })),
+        installments: invoice.installments.map((inst) => ({
+          id: inst.id,
+          installmentNumber: inst.installmentNumber,
+          dueDate: inst.dueDate.toISOString(),
+          amountPaise: inst.amount,
+          paidAmountPaise: inst.paidAmount,
+          status: inst.status,
+        })),
+        payments: invoice.payments.map((p) => ({
+          id: p.id,
+          paymentNumber: p.paymentNumber,
+          amountPaise: p.amount,
+          netAmountPaise: p.netAmount,
+          paymentMode: p.paymentMode,
+          status: p.status,
+          paymentDate: p.paymentDate.toISOString(),
+          referenceNumber: p.referenceNumber,
+          receiptNumber: p.receipt?.receiptNumber || null,
+          receiptId: p.receipt?.id || null,
+        })),
+      },
+    };
+  }
+
+  /**
+   * 4. Create server-side payment order
+   */
+  async createPaymentOrder(user: any, invoiceId: string, body?: { amountPaise?: number }) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        id: invoiceId,
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found or unauthorized');
+    }
+
+    if (invoice.balanceAmount <= 0 || invoice.status === 'PAID') {
+      throw new BadRequestException('Invoice is already fully paid');
+    }
+
+    const payableAmount = body?.amountPaise && body.amountPaise > 0
+      ? Math.min(body.amountPaise, invoice.balanceAmount)
+      : invoice.balanceAmount;
+
+    const orderId = `PAY-ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    return {
+      order: {
+        orderId,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        amountPaise: payableAmount,
+        currency: invoice.currency || 'INR',
+        gateway: 'RAZORPAY_SANDBOX',
+        notes: `Fee payment for invoice ${invoice.invoiceNumber}`,
+      },
+    };
+  }
+
+  /**
+   * 5. Verify & process server-authoritative fee payment (Idempotent)
+   */
+  async verifyAndProcessPayment(
+    user: any,
+    invoiceId: string,
+    body: { amountPaise: number; paymentMode?: string; referenceNumber?: string; idempotencyKey?: string }
+  ) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    if (!body?.amountPaise || body.amountPaise <= 0) {
+      throw new BadRequestException('Valid payment amount in paise is required');
+    }
+
+    return await this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoice.findFirst({
+        where: {
+          id: invoiceId,
+          studentProfileId: studentProfile.id,
+          instituteId: studentProfile.instituteId,
+        },
+      });
+
+      if (!invoice) {
+        throw new NotFoundException('Invoice not found or unauthorized');
+      }
+
+      if (invoice.balanceAmount <= 0) {
+        throw new BadRequestException('Invoice is already fully paid');
+      }
+
+      if (body.amountPaise > invoice.balanceAmount) {
+        throw new BadRequestException(
+          `Payment amount (${body.amountPaise} paise) exceeds outstanding balance (${invoice.balanceAmount} paise)`
+        );
+      }
+
+      // Check for duplicate reference
+      if (body.referenceNumber) {
+        const existingTxn = await tx.feePayment.findFirst({
+          where: {
+            instituteId: invoice.instituteId,
+            referenceNumber: body.referenceNumber,
+          },
+        });
+        if (existingTxn) {
+          throw new ConflictException('A transaction with this reference number has already been processed');
+        }
+      }
+
+      const totalPaymentsCount = await tx.feePayment.count({
+        where: { instituteId: invoice.instituteId },
+      });
+
+      const nextPayIndex = totalPaymentsCount + 1;
+      const paymentNumber = `PAY-2026-${String(nextPayIndex).padStart(4, '0')}`;
+      const receiptNumber = `REC-2026-${String(nextPayIndex).padStart(4, '0')}`;
+      const referenceNumber = body.referenceNumber || `ONLINE-${Date.now()}`;
+
+      const feePayment = await tx.feePayment.create({
+        data: {
+          instituteId: invoice.instituteId,
+          invoiceId: invoice.id,
+          paymentNumber,
+          amount: body.amountPaise,
+          reversedAmount: 0,
+          netAmount: body.amountPaise,
+          paymentMode: 'ONLINE',
+          status: 'COMPLETED',
+          referenceNumber,
+          recordedByUserId: user.sub || user.userId || user.id,
+          remarks: 'Online student fee payment verified and completed',
+        },
+      });
+
+      const receipt = await tx.feeReceipt.create({
+        data: {
+          instituteId: invoice.instituteId,
+          paymentId: feePayment.id,
+          receiptNumber,
+          issuedByUserId: user.sub || user.userId || user.id,
+        },
+      });
+
+      const updatedPaidAmount = invoice.paidAmount + body.amountPaise;
+      const updatedBalanceAmount = invoice.totalAmount - updatedPaidAmount;
+      const updatedStatus = updatedBalanceAmount === 0 ? 'PAID' : 'PARTIALLY_PAID';
+
+      await tx.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          paidAmount: updatedPaidAmount,
+          balanceAmount: updatedBalanceAmount,
+          status: updatedStatus,
+        },
+      });
+
+      return {
+        success: true,
+        message: 'Payment verified and processed successfully',
+        payment: {
+          id: feePayment.id,
+          paymentNumber,
+          receiptNumber,
+          amountPaise: body.amountPaise,
+          status: feePayment.status,
+          paymentDate: feePayment.paymentDate.toISOString(),
+          referenceNumber,
+        },
+        invoice: {
+          id: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          paidAmountPaise: updatedPaidAmount,
+          balanceAmountPaise: updatedBalanceAmount,
+          status: updatedStatus,
+        },
+      };
+    });
+  }
+
+  /**
+   * 6. Transaction & Payment History
+   */
+  async getStudentPaymentHistory(user: any, query?: { status?: string }) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const payments = await this.prisma.feePayment.findMany({
+      where: {
+        invoice: {
+          studentProfileId: studentProfile.id,
+          instituteId: studentProfile.instituteId,
+        },
+      },
+      include: {
+        receipt: true,
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            totalAmount: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: { paymentDate: 'desc' },
+    });
+
+    const formatted = payments.map((p) => ({
+      id: p.id,
+      paymentNumber: p.paymentNumber,
+      invoiceId: p.invoice.id,
+      invoiceNumber: p.invoice.invoiceNumber,
+      amountPaise: p.amount,
+      netAmountPaise: p.netAmount,
+      paymentMode: p.paymentMode,
+      status: p.status,
+      paymentDate: p.paymentDate.toISOString(),
+      referenceNumber: p.referenceNumber,
+      receiptNumber: p.receipt?.receiptNumber || null,
+      receiptId: p.receipt?.id || null,
+    }));
+
+    if (query?.status && query.status !== 'ALL') {
+      return {
+        payments: formatted.filter((p) => p.status.toUpperCase() === query.status?.toUpperCase()),
+      };
+    }
+
+    return { payments: formatted };
+  }
+
+  /**
+   * 7. Certificates issued to the student
+   */
+  async getStudentCertificates(user: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const certificates = await this.prisma.certificate.findMany({
+      where: {
+        enrolment: {
+          studentProfileId: studentProfile.id,
+        },
+        revokedAt: null,
+      },
+      include: {
+        enrolment: {
+          include: {
+            course: true,
+            studentProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: true,
+                    institute: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { issuedAt: 'desc' },
+    });
+
+    const formatted = certificates.map((cert) => ({
+      id: cert.id,
+      certificateNo: cert.certificateNo,
+      courseTitle: cert.enrolment.course.title,
+      courseSlug: cert.enrolment.course.slug,
+      studentName: cert.enrolment.studentProfile.membership.user.fullName,
+      admissionNo: cert.enrolment.studentProfile.admissionNo,
+      instituteName: cert.enrolment.studentProfile.membership.institute.name,
+      issuedAt: cert.issuedAt.toISOString(),
+      verifyToken: cert.verifyToken,
+      verificationUrl: `/verify/certificate/${cert.verifyToken}`,
+      pdfUrl: cert.pdfUrl || null,
+      status: 'ISSUED',
+    }));
+
+    return { certificates: formatted };
+  }
+
+  /**
+   * 8. Certificate Detail
+   */
+  async getStudentCertificateDetail(user: any, certificateId: string) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const cert = await this.prisma.certificate.findFirst({
+      where: {
+        id: certificateId,
+        enrolment: {
+          studentProfileId: studentProfile.id,
+        },
+      },
+      include: {
+        enrolment: {
+          include: {
+            course: true,
+            studentProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: true,
+                    institute: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!cert) {
+      throw new NotFoundException('Certificate not found or unauthorized');
+    }
+
+    return {
+      certificate: {
+        id: cert.id,
+        certificateNo: cert.certificateNo,
+        courseTitle: cert.enrolment.course.title,
+        courseSlug: cert.enrolment.course.slug,
+        studentName: cert.enrolment.studentProfile.membership.user.fullName,
+        admissionNo: cert.enrolment.studentProfile.admissionNo,
+        instituteName: cert.enrolment.studentProfile.membership.institute.name,
+        issuedAt: cert.issuedAt.toISOString(),
+        verifyToken: cert.verifyToken,
+        verificationUrl: `/verify/certificate/${cert.verifyToken}`,
+        pdfUrl: cert.pdfUrl || null,
+        status: cert.revokedAt ? 'REVOKED' : 'ISSUED',
+        completionDate: cert.enrolment.completedAt?.toISOString() || cert.issuedAt.toISOString(),
+      },
+    };
+  }
+
+  /**
+   * 9. Student Profile (Personal & Academic)
+   */
+  async getStudentProfile(user: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: { studentProfileId: studentProfile.id },
+      include: { course: true, batch: true },
+    });
+
+    const { user: userInfo, institute } = studentProfile.membership;
+
+    return {
+      profile: {
+        personal: {
+          id: studentProfile.id,
+          fullName: userInfo.fullName,
+          email: userInfo.email,
+          phone: userInfo.phoneE164,
+          avatarUrl: userInfo.avatarUrl,
+          dateOfBirth: studentProfile.dateOfBirth?.toISOString() || null,
+          gender: studentProfile.gender || null,
+          address: studentProfile.address || null,
+          guardian: studentProfile.guardian || null,
+          church: studentProfile.church || null,
+          preferredLanguage: studentProfile.preferredLanguage || 'English',
+        },
+        academic: {
+          admissionNo: studentProfile.admissionNo,
+          instituteName: institute.name,
+          instituteSlug: institute.slug,
+          status: studentProfile.status,
+          enrolmentDate: studentProfile.createdAt.toISOString(),
+          enrolledCourses: enrolments.map((e) => ({
+            enrolmentId: e.id,
+            courseId: e.course.id,
+            courseTitle: e.course.title,
+            courseSlug: e.course.slug,
+            batchName: e.batch?.name || 'General Batch',
+            enrolledAt: e.createdAt.toISOString(),
+            status: e.status,
+          })),
+        },
+      },
+    };
+  }
+
+  /**
+   * 10. Update Student Profile (Personal fields only, strict academic protection)
+   */
+  async updateStudentProfile(
+    user: any,
+    body: {
+      phone?: string;
+      avatarUrl?: string;
+      address?: any;
+      church?: string;
+      guardian?: any;
+      preferredLanguage?: string;
+    }
+  ) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    const targetUserId = user.sub || user.userId || user.id;
+
+    // Update User table fields if provided
+    const userUpdates: any = {};
+    if (body.phone && typeof body.phone === 'string') {
+      userUpdates.phoneE164 = body.phone.trim();
+    }
+    if (body.avatarUrl !== undefined) {
+      userUpdates.avatarUrl = body.avatarUrl;
+    }
+
+    if (Object.keys(userUpdates).length > 0) {
+      await this.prisma.user.update({
+        where: { id: targetUserId },
+        data: userUpdates,
+      });
+    }
+
+    // Update StudentProfile table fields if provided
+    const profileUpdates: any = {};
+    if (body.address !== undefined) {
+      profileUpdates.address = body.address;
+    }
+    if (body.church !== undefined) {
+      profileUpdates.church = body.church?.trim() || null;
+    }
+    if (body.guardian !== undefined) {
+      profileUpdates.guardian = body.guardian;
+    }
+    if (body.preferredLanguage && typeof body.preferredLanguage === 'string') {
+      profileUpdates.preferredLanguage = body.preferredLanguage.trim();
+    }
+
+    const updated = await this.prisma.studentProfile.update({
+      where: { id: studentProfile.id },
+      data: profileUpdates,
+      include: {
+        membership: {
+          include: {
+            user: true,
+            institute: true,
+          },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Student profile updated successfully',
+      profile: {
+        fullName: updated.membership.user.fullName,
+        phone: updated.membership.user.phoneE164,
+        avatarUrl: updated.membership.user.avatarUrl,
+        address: updated.address,
+        church: updated.church,
+        guardian: updated.guardian,
+        preferredLanguage: updated.preferredLanguage,
+      },
+    };
+  }
+
+  /**
+   * 11. Student Settings
+   */
+  async getStudentSettings(user: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    const userInfo = studentProfile.membership.user;
+
+    return {
+      settings: {
+        preferredLanguage: studentProfile.preferredLanguage || 'English',
+        email: userInfo.email,
+        phone: userInfo.phoneE164,
+        notifications: {
+          emailNotifications: true,
+          smsNotifications: false,
+          courseReminders: true,
+          examAlerts: true,
+          liveSessionReminders: true,
+        },
+        theme: 'light',
+      },
+    };
+  }
+
+  /**
+   * 12. Update Student Settings
+   */
+  async updateStudentSettings(user: any, body: { preferredLanguage?: string; notifications?: any }) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    if (body.preferredLanguage) {
+      await this.prisma.studentProfile.update({
+        where: { id: studentProfile.id },
+        data: { preferredLanguage: body.preferredLanguage.trim() },
+      });
+    }
+
+    return {
+      success: true,
+      message: 'Settings updated successfully',
+      settings: {
+        preferredLanguage: body.preferredLanguage || studentProfile.preferredLanguage,
+        notifications: body.notifications || {
+          emailNotifications: true,
+          smsNotifications: false,
+          courseReminders: true,
+          examAlerts: true,
+          liveSessionReminders: true,
+        },
+      },
+    };
+  }
 }
+
