@@ -13,6 +13,7 @@ import {
 import { StudentsService } from './students.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import {
   CreateStudentAdmissionSchema,
   CreateStudentAdmissionInput,
@@ -47,6 +48,11 @@ export class StudentsController {
   ) {
     const validated = StudentFilterQuerySchema.parse(query);
     return this.studentsService.findAll(instituteId, validated);
+  }
+
+  @Get('me')
+  async getStudentMe(@CurrentUser() user: any) {
+    return this.studentsService.getStudentMe(user);
   }
 
   @Get(':id')

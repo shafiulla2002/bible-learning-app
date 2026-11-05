@@ -20,7 +20,7 @@ import {
   AlertTriangle,
   Info,
 } from 'lucide-react';
-import { PortalShell } from '@/components/layout/portal-shell';
+import { StudentShell } from '@/components/layout/student-shell';
 import { StatCard } from '@/components/ui/stat-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -194,13 +194,7 @@ export default function StudentAttendancePage() {
   const pct = data.summary.attendancePercentage;
 
   return (
-    <PortalShell
-      portalTitle="Learner Portal"
-      portalRole="STUDENT"
-      navItems={studentNav}
-      userName={data.student.fullName}
-      userRoleLabel="Enrolled Student"
-    >
+    <StudentShell pageTitle="Attendance & Participation">
       <div className="space-y-8 pb-12">
         {/* Banner with Progress Metric */}
         <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 text-white p-6 md:p-8 relative overflow-hidden shadow-xl shadow-indigo-950/20">
@@ -379,6 +373,6 @@ export default function StudentAttendancePage() {
           </Card>
         </div>
       </div>
-    </PortalShell>
+    </StudentShell>
   );
 }

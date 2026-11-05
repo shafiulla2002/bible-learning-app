@@ -4,6 +4,8 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -678,5 +680,101 @@ export class StudentsService {
         batch: true,
       },
     });
+  }
+
+  /**
+   * Resolve authenticated student profile and institute context for Student Portal
+   */
+  async getStudentMe(user: any) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException(
+        `Access denied: Current role '${user.role}' is not authorized to access Student Portal. Only active STUDENT accounts may access this endpoint.`
+      );
+    }
+
+    const membershipWhere: any = {
+      userId: user.sub,
+      role: Role.STUDENT,
+      status: 'ACTIVE',
+    };
+
+    if (user.instituteId) {
+      membershipWhere.instituteId = user.instituteId;
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: membershipWhere,
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phoneE164: true,
+            avatarUrl: true,
+          },
+        },
+        institute: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logoUrl: true,
+          },
+        },
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: {
+                status: 'ACTIVE',
+              },
+              select: {
+                id: true,
+                courseId: true,
+                batchId: true,
+                progressPct: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException(
+        'No active student profile found for this account in the requested institute.'
+      );
+    }
+
+    const studentProfile = membership.studentProfile;
+    const activeEnrolments = studentProfile.enrolments || [];
+
+    return {
+      student: {
+        id: membership.user.id,
+        fullName: membership.user.fullName,
+        email: membership.user.email,
+        phone: membership.user.phoneE164,
+        avatarUrl: membership.user.avatarUrl,
+      },
+      profile: {
+        studentProfileId: studentProfile.id,
+        admissionNo: studentProfile.admissionNo,
+        church: studentProfile.church,
+        preferredLanguage: studentProfile.preferredLanguage,
+        status: studentProfile.status,
+      },
+      institute: {
+        id: membership.institute?.id || membership.instituteId,
+        name: membership.institute?.name || 'Bible Institute',
+        code: membership.institute?.slug?.toUpperCase() || 'BI',
+        logoUrl: membership.institute?.logoUrl || null,
+      },
+      activeEnrolmentCount: activeEnrolments.length,
+    };
   }
 }

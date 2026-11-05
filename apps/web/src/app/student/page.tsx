@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { PortalShell } from '@/components/layout/portal-shell';
+import { StudentShell } from '@/components/layout/student-shell';
+import { useStudentAuth } from '@/lib/use-student-auth';
 import { StatCard } from '@/components/ui/stat-card';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -32,24 +33,22 @@ const studentNav = [
 ];
 
 export default function StudentDashboardPage() {
+  const { student, profile, institute, isLoading } = useStudentAuth();
+  const firstName = student?.fullName ? student.fullName.split(' ')[0] : 'Grace';
+  const instName = institute?.name || 'Bible Institute LMS';
+
   return (
-    <PortalShell
-      portalTitle="Learner Portal"
-      portalRole="STUDENT"
-      navItems={studentNav}
-      userName="Grace Thomas"
-      userRoleLabel="Enrolled Student"
-    >
+    <StudentShell pageTitle="Student Dashboard">
       <div className="space-y-8">
         {/* Top Banner (Learnify Style) */}
         <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-900 text-white p-6 md:p-8 relative overflow-hidden shadow-xl shadow-blue-900/10">
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="max-w-xl">
               <span className="inline-block px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-semibold mb-3 border border-blue-400/20">
-                Bible Institute LMS · Fall Term
+                {instName} · Fall Term
               </span>
               <h2 className="text-2xl md:text-3xl font-bold tracking-tight">
-                Welcome back, Grace 👋
+                Welcome back, {firstName} 👋
               </h2>
               <p className="text-slate-300 text-sm mt-2 leading-relaxed">
                 You've completed <strong className="text-white">72%</strong> of your weekly learning goal.
@@ -258,6 +257,6 @@ export default function StudentDashboardPage() {
           </Card>
         </div>
       </div>
-    </PortalShell>
+    </StudentShell>
   );
 }
