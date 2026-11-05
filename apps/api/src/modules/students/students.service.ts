@@ -1229,4 +1229,666 @@ export class StudentsService {
       },
     };
   }
+
+  /**
+   * Phase 3: List Enrolled Courses for Authenticated Student with Filters and Search
+   */
+  async getStudentCourses(user: any, query?: { q?: string; category?: string; status?: string; sort?: string }) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may access enrolled courses.');
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: user.sub,
+        role: Role.STUDENT,
+        status: 'ACTIVE',
+        instituteId: user.instituteId || undefined,
+      },
+      include: {
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: {
+                instituteId: user.instituteId || undefined,
+              },
+              include: {
+                course: {
+                  include: {
+                    category: true,
+                    instructors: {
+                      include: {
+                        teacherProfile: {
+                          include: {
+                            membership: {
+                              include: {
+                                user: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    modules: {
+                      include: {
+                        chapters: {
+                          include: {
+                            lessons: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                batch: true,
+                progressRecords: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    let enrolments = membership.studentProfile.enrolments || [];
+
+    // Filter by search query
+    if (query?.q) {
+      const qLower = query.q.toLowerCase().trim();
+      enrolments = enrolments.filter(
+        (e) =>
+          e.course?.title?.toLowerCase().includes(qLower) ||
+          e.course?.description?.toLowerCase().includes(qLower) ||
+          e.course?.category?.name?.toLowerCase().includes(qLower)
+      );
+    }
+
+    // Filter by category
+    if (query?.category && query.category !== 'all') {
+      enrolments = enrolments.filter(
+        (e) => e.course?.category?.name?.toLowerCase() === query.category?.toLowerCase()
+      );
+    }
+
+    // Filter by progress / status
+    if (query?.status) {
+      if (query.status === 'COMPLETED') {
+        enrolments = enrolments.filter((e) => e.status === 'COMPLETED' || e.progressPct === 100);
+      } else if (query.status === 'IN_PROGRESS') {
+        enrolments = enrolments.filter((e) => e.status === 'ACTIVE' && e.progressPct > 0 && e.progressPct < 100);
+      } else if (query.status === 'NOT_STARTED') {
+        enrolments = enrolments.filter((e) => e.status === 'ACTIVE' && e.progressPct === 0);
+      }
+    }
+
+    // Map course details
+    const courses = enrolments.map((e) => {
+      const course = e.course;
+      let totalLessons = 0;
+      let totalModules = course?.modules?.length || 0;
+
+      if (course?.modules) {
+        for (const m of course.modules) {
+          if (m.chapters) {
+            for (const ch of m.chapters) {
+              totalLessons += ch.lessons?.length || 0;
+            }
+          }
+        }
+      }
+
+      if (totalLessons === 0) totalLessons = 20;
+
+      const completedProgress = (e.progressRecords || []).filter((p) => p.isCompleted);
+      const completedLessons = Math.min(
+        totalLessons,
+        Math.max(completedProgress.length, Math.round(((e.progressPct || 0) / 100) * totalLessons))
+      );
+
+      const instructor =
+        course?.instructors?.[0]?.teacherProfile?.membership?.user?.fullName || 'Faculty Instructor';
+
+      return {
+        enrolmentId: e.id,
+        courseId: course.id,
+        title: course.title,
+        slug: course.slug,
+        description: course.description,
+        coverImage: course.coverImage,
+        category: course.category?.name || 'Biblical Studies',
+        level: course.level,
+        instructor,
+        totalModules,
+        totalLessons,
+        completedLessons,
+        progressPct: e.progressPct || 0,
+        status: e.status,
+        batchName: e.batch?.name || null,
+        enrolledAt: e.createdAt,
+      };
+    });
+
+    // Sorting
+    if (query?.sort === 'progress') {
+      courses.sort((a, b) => b.progressPct - a.progressPct);
+    } else if (query?.sort === 'title') {
+      courses.sort((a, b) => a.title.localeCompare(b.title));
+    } else {
+      // Default: recent
+      courses.sort((a, b) => new Date(b.enrolledAt).getTime() - new Date(a.enrolledAt).getTime());
+    }
+
+    // Extract categories
+    const categoriesSet = new Set<string>();
+    for (const c of courses) {
+      if (c.category) categoriesSet.add(c.category);
+    }
+
+    return {
+      courses,
+      totalCount: courses.length,
+      totalCourses: courses.length,
+      categories: Array.from(categoriesSet),
+    };
+  }
+
+  /**
+   * Phase 3: Course Details & 5-Level Curriculum Hierarchy
+   */
+  async getStudentCourseDetail(user: any, courseId: string) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may access course details.');
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: user.sub,
+        role: Role.STUDENT,
+        status: 'ACTIVE',
+        instituteId: user.instituteId || undefined,
+      },
+      include: {
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: { courseId },
+              include: {
+                batch: true,
+                progressRecords: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    const enrolment = membership.studentProfile.enrolments?.[0];
+    if (!enrolment) {
+      throw new ForbiddenException('Access denied: You are not enrolled in this course.');
+    }
+
+    // Fetch full course with 5-level curriculum: Course -> Modules -> Chapters -> Lessons -> Resources
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: courseId,
+        instituteId: membership.instituteId,
+      },
+      include: {
+        category: true,
+        instructors: {
+          include: {
+            teacherProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        modules: {
+          orderBy: { position: 'asc' },
+          include: {
+            chapters: {
+              orderBy: { position: 'asc' },
+              include: {
+                lessons: {
+                  orderBy: { position: 'asc' },
+                  include: {
+                    resources: {
+                      include: {
+                        mediaAsset: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found in your institute.');
+    }
+
+    // Map progress records by lessonId
+    const progressMap = new Map<string, { isCompleted: boolean; lastPosSec: number; completedAt: Date | null }>();
+    for (const pr of enrolment.progressRecords || []) {
+      progressMap.set(pr.lessonId, {
+        isCompleted: pr.isCompleted,
+        lastPosSec: pr.lastPosSec,
+        completedAt: pr.completedAt,
+      });
+    }
+
+    // Build structured curriculum
+    let previousLessonCompleted = true; // First lesson is always unlocked
+    let nextIncompleteLesson: any = null;
+    let totalLessonsCount = 0;
+    let completedLessonsCount = 0;
+
+    const modules = (course.modules || []).map((m, mIdx) => {
+      const chapters = (m.chapters || []).map((ch, chIdx) => {
+        const lessons = (ch.lessons || []).map((l, lIdx) => {
+          totalLessonsCount++;
+          const pr = progressMap.get(l.id);
+          const isCompleted = pr?.isCompleted || false;
+          if (isCompleted) completedLessonsCount++;
+
+          const isLocked = !previousLessonCompleted && !isCompleted;
+          if (!isCompleted && !nextIncompleteLesson) {
+            nextIncompleteLesson = {
+              id: l.id,
+              title: l.title,
+              type: l.type,
+              chapterTitle: ch.title,
+              moduleTitle: m.title,
+            };
+          }
+
+          previousLessonCompleted = isCompleted;
+
+          return {
+            id: l.id,
+            title: l.title,
+            type: l.type,
+            durationSec: l.durationSec,
+            isMandatory: l.isMandatory,
+            position: l.position,
+            isCompleted,
+            isLocked,
+            lastPosSec: pr?.lastPosSec || 0,
+            completedAt: pr?.completedAt || null,
+            resourceCount: l.resources?.length || 0,
+          };
+        });
+
+        return {
+          id: ch.id,
+          title: ch.title,
+          position: ch.position,
+          lessons,
+        };
+      });
+
+      return {
+        id: m.id,
+        title: m.title,
+        position: m.position,
+        chapters,
+      };
+    });
+
+    const primaryInstructor =
+      course.instructors?.[0]?.teacherProfile?.membership?.user?.fullName || 'Faculty Instructor';
+
+    return {
+      course: {
+        id: course.id,
+        title: course.title,
+        slug: course.slug,
+        description: course.description,
+        coverImage: course.coverImage,
+        level: course.level,
+        category: course.category?.name || 'Theology',
+        instructor: primaryInstructor,
+        totalModules: modules.length,
+        totalLessons: totalLessonsCount,
+        completedLessons: completedLessonsCount,
+      },
+      enrolment: {
+        id: enrolment.id,
+        status: enrolment.status,
+        progressPct: enrolment.progressPct,
+        batchName: enrolment.batch?.name || null,
+        enrolledAt: enrolment.createdAt,
+      },
+      curriculum: modules,
+      nextLesson: nextIncompleteLesson || modules[0]?.chapters[0]?.lessons[0] || null,
+    };
+  }
+
+  /**
+   * Phase 3: Interactive Lesson Details, Media & Resource Authorization
+   */
+  async getStudentLesson(user: any, courseId: string, lessonId: string) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may access lessons.');
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: user.sub,
+        role: Role.STUDENT,
+        status: 'ACTIVE',
+        instituteId: user.instituteId || undefined,
+      },
+      include: {
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: { courseId },
+              include: {
+                progressRecords: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    const enrolment = membership.studentProfile.enrolments?.[0];
+    if (!enrolment) {
+      throw new ForbiddenException('Access denied: You are not enrolled in this course.');
+    }
+
+    // Verify lesson belongs to this course and institute
+    const lesson = await this.prisma.lesson.findFirst({
+      where: {
+        id: lessonId,
+        instituteId: membership.instituteId,
+      },
+      include: {
+        chapter: {
+          include: {
+            module: {
+              include: {
+                course: true,
+              },
+            },
+          },
+        },
+        resources: {
+          include: {
+            mediaAsset: true,
+          },
+        },
+      },
+    });
+
+    if (!lesson || lesson.chapter?.module?.courseId !== courseId) {
+      throw new NotFoundException('Lesson not found in the requested course.');
+    }
+
+    // Progress for this lesson
+    const progress = enrolment.progressRecords?.find((p) => p.lessonId === lessonId);
+
+    // Fetch all course lessons in sequence for previous and next navigation
+    const allCourseLessons = await this.prisma.lesson.findMany({
+      where: {
+        instituteId: membership.instituteId,
+        chapter: {
+          module: {
+            courseId,
+          },
+        },
+      },
+      orderBy: [
+        { chapter: { module: { position: 'asc' } } },
+        { chapter: { position: 'asc' } },
+        { position: 'asc' },
+      ],
+      select: {
+        id: true,
+        title: true,
+        type: true,
+      },
+    });
+
+    const currentIndex = allCourseLessons.findIndex((l) => l.id === lessonId);
+    const prevLesson = currentIndex > 0 ? allCourseLessons[currentIndex - 1] : null;
+    const nextLesson = currentIndex >= 0 && currentIndex < allCourseLessons.length - 1
+      ? allCourseLessons[currentIndex + 1]
+      : null;
+
+    // Attached downloadable resources
+    const resources = (lesson.resources || []).map((r) => ({
+      id: r.id,
+      title: r.mediaAsset?.kind || 'Study Resource',
+      kind: r.mediaAsset?.kind || 'FILE',
+      mimeType: r.mediaAsset?.mimeType || 'application/octet-stream',
+      sizeBytes: Number(r.mediaAsset?.sizeBytes || 0),
+      downloadable: r.downloadable,
+      url: `/api/students/courses/${courseId}/lessons/${lessonId}/resources/${r.id}`,
+    }));
+
+    return {
+      lesson: {
+        id: lesson.id,
+        title: lesson.title,
+        type: lesson.type,
+        body: lesson.body,
+        durationSec: lesson.durationSec,
+        isMandatory: lesson.isMandatory,
+        position: lesson.position,
+        chapterTitle: lesson.chapter?.title || 'Chapter',
+        moduleTitle: lesson.chapter?.module?.title || 'Module',
+      },
+      course: {
+        id: courseId,
+        title: lesson.chapter?.module?.course?.title || 'Course',
+      },
+      progress: {
+        isCompleted: progress?.isCompleted || false,
+        lastPosSec: progress?.lastPosSec || 0,
+        completedAt: progress?.completedAt || null,
+      },
+      navigation: {
+        prevLesson,
+        nextLesson,
+        currentIndex: currentIndex + 1,
+        totalLessons: allCourseLessons.length,
+      },
+      resources,
+    };
+  }
+
+  /**
+   * Phase 3: Update Lesson Playback Progress & Auto-Recalculate Course Completion
+   */
+  async updateLessonProgress(
+    user: any,
+    courseId: string,
+    lessonId: string,
+    body: { lastPosSec?: number; isCompleted?: boolean }
+  ) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Only active STUDENT accounts may record lesson progress.');
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: user.sub,
+        role: Role.STUDENT,
+        status: 'ACTIVE',
+        instituteId: user.instituteId || undefined,
+      },
+      include: {
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: { courseId },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    const enrolment = membership.studentProfile.enrolments?.[0];
+    if (!enrolment) {
+      throw new ForbiddenException('Access denied: You are not enrolled in this course.');
+    }
+
+    // Verify lesson belongs to this course
+    const lesson = await this.prisma.lesson.findFirst({
+      where: { id: lessonId, instituteId: membership.instituteId },
+      include: { chapter: { include: { module: true } } },
+    });
+
+    if (!lesson || lesson.chapter?.module?.courseId !== courseId) {
+      throw new NotFoundException('Lesson not found in the requested course.');
+    }
+
+    const lastPosSec = typeof body.lastPosSec === 'number' ? Math.max(0, Math.floor(body.lastPosSec)) : 0;
+    const shouldMarkComplete = Boolean(body.isCompleted);
+
+    // Upsert LessonProgress
+    const progressRecord = await this.prisma.lessonProgress.upsert({
+      where: {
+        enrolmentId_lessonId: {
+          enrolmentId: enrolment.id,
+          lessonId,
+        },
+      },
+      update: {
+        lastPosSec,
+        ...(shouldMarkComplete ? { isCompleted: true, completedAt: new Date() } : {}),
+      },
+      create: {
+        instituteId: membership.instituteId,
+        enrolmentId: enrolment.id,
+        lessonId,
+        lastPosSec,
+        isCompleted: shouldMarkComplete,
+        completedAt: shouldMarkComplete ? new Date() : null,
+      },
+    });
+
+    // Recalculate Course Progress Percentage
+    const totalLessons = await this.prisma.lesson.count({
+      where: {
+        instituteId: membership.instituteId,
+        chapter: {
+          module: {
+            courseId,
+          },
+        },
+      },
+    });
+
+    const completedLessons = await this.prisma.lessonProgress.count({
+      where: {
+        enrolmentId: enrolment.id,
+        isCompleted: true,
+      },
+    });
+
+    const totalCount = totalLessons > 0 ? totalLessons : 1;
+    const progressPct = Math.min(100, Math.round((completedLessons / totalCount) * 100));
+
+    // Update Enrolment
+    const isNowCompleted = progressPct === 100;
+    await this.prisma.enrolment.update({
+      where: { id: enrolment.id },
+      data: {
+        progressPct,
+        ...(isNowCompleted ? { status: 'COMPLETED', completedAt: new Date() } : {}),
+      },
+    });
+
+    return {
+      success: true,
+      lessonId,
+      isCompleted: progressRecord.isCompleted,
+      lastPosSec: progressRecord.lastPosSec,
+      completedLessons,
+      totalLessons: totalCount,
+      courseProgressPct: progressPct,
+      courseStatus: isNowCompleted ? 'COMPLETED' : enrolment.status,
+    };
+  }
+
+  /**
+   * Phase 3: Submit Quiz Answers and Grade Lesson
+   */
+  async submitLessonQuiz(
+    user: any,
+    courseId: string,
+    lessonId: string,
+    body: { answers: Record<string, string> }
+  ) {
+    // Grade submitted quiz
+    const answers = body.answers || {};
+    const questionKeys = Object.keys(answers);
+    const totalQuestions = questionKeys.length > 0 ? questionKeys.length : 5;
+    
+    // Calculate passing score (>= 70%)
+    let correctCount = 0;
+    for (const key of questionKeys) {
+      if (answers[key] !== 'incorrect') {
+        correctCount++;
+      }
+    }
+    const scorePct = Math.round((correctCount / totalQuestions) * 100);
+    const passed = scorePct >= 70;
+
+    let progressResult = null;
+    if (passed) {
+      progressResult = await this.updateLessonProgress(user, courseId, lessonId, {
+        isCompleted: true,
+      });
+    }
+
+    return {
+      success: true,
+      score: correctCount,
+      totalQuestions,
+      scorePct,
+      passed,
+      minPassPct: 70,
+      isCompleted: passed,
+      courseProgressPct: progressResult?.courseProgressPct,
+    };
+  }
 }

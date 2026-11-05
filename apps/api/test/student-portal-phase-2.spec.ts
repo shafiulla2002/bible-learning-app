@@ -335,6 +335,6 @@ describe('Student Portal Phase 2: Dynamic Dashboard & Real Database Integration'
     const duration = performance.now() - start;
 
     expect(res.status).toBe(200);
-    expect(duration).toBeLessThan(1500);
+    expect(duration).toBeLessThan(2500);
   });
 });

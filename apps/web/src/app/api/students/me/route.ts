@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { GET as handleStudentMeGet } from '../../students/me/route';
+import { GET as handleStudentMeGet } from '../../../students/me/route';
 
 export const dynamic = 'force-dynamic';
 
