@@ -1,8 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryDb } from '@/lib/server-db';
-import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
+
+function verifyJwtToken(token: string, secret: string): any {
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    throw new Error('Invalid JWT format');
+  }
+  const [headerB64, payloadB64, signatureB64] = parts;
+
+  const hmac = crypto.createHmac('sha256', secret);
+  hmac.update(`${headerB64}.${payloadB64}`);
+  const expectedSig = hmac.digest('base64url');
+
+  const sigBuf = Buffer.from(signatureB64);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    throw new Error('Invalid signature');
+  }
+
+  const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
+  const payload = JSON.parse(payloadStr);
+
+  if (payload.exp && Date.now() >= payload.exp * 1000) {
+    throw new Error('Token expired');
+  }
+  return payload;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,7 +44,7 @@ export async function GET(request: NextRequest) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
       try {
-        const decoded: any = jwt.verify(
+        const decoded = verifyJwtToken(
           token,
           process.env.JWT_SECRET || 'dev-secret-key-bible-institute-lms-12345'
         );
