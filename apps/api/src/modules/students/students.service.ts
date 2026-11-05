@@ -777,4 +777,456 @@ export class StudentsService {
       activeEnrolmentCount: activeEnrolments.length,
     };
   }
+
+  /**
+   * Phase 2: Dynamic Student Dashboard with full multi-tenant isolation
+   */
+  async getStudentDashboard(user: any) {
+    if (!user || !user.sub || user.sub === 'dev-admin-user') {
+      throw new UnauthorizedException('Authentication token required');
+    }
+
+    if (user.role && user.role !== 'STUDENT') {
+      throw new ForbiddenException(
+        `Access denied: Current role '${user.role}' is not authorized to access Student Portal. Only active STUDENT accounts may access this endpoint.`
+      );
+    }
+
+    const membershipWhere: any = {
+      userId: user.sub,
+      role: Role.STUDENT,
+      status: 'ACTIVE',
+    };
+
+    if (user.instituteId) {
+      membershipWhere.instituteId = user.instituteId;
+    }
+
+    const membership = await this.prisma.membership.findFirst({
+      where: membershipWhere,
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phoneE164: true,
+            avatarUrl: true,
+          },
+        },
+        institute: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logoUrl: true,
+          },
+        },
+        studentProfile: {
+          include: {
+            enrolments: {
+              where: {
+                instituteId: user.instituteId || undefined,
+              },
+              include: {
+                course: {
+                  select: {
+                    id: true,
+                    title: true,
+                    slug: true,
+                    coverImage: true,
+                    level: true,
+                    category: {
+                      select: {
+                        id: true,
+                        name: true,
+                      },
+                    },
+                    instructors: {
+                      select: {
+                        teacherProfile: {
+                          select: {
+                            photoUrl: true,
+                            membership: {
+                              select: {
+                                user: {
+                                  select: {
+                                    fullName: true,
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    modules: {
+                      select: {
+                        id: true,
+                        chapters: {
+                          select: {
+                            id: true,
+                            lessons: {
+                              select: {
+                                id: true,
+                                title: true,
+                                durationSec: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                batch: {
+                  select: {
+                    id: true,
+                    name: true,
+                    startDate: true,
+                    endDate: true,
+                  },
+                },
+                progressRecords: {
+                  select: {
+                    id: true,
+                    lessonId: true,
+                    isCompleted: true,
+                    lastPosSec: true,
+                    completedAt: true,
+                  },
+                },
+              },
+            },
+            attendances: {
+              where: {
+                status: 'PRESENT',
+                instituteId: user.instituteId || undefined,
+              },
+              select: {
+                id: true,
+                date: true,
+                status: true,
+                batchId: true,
+                liveSessionId: true,
+              },
+              orderBy: {
+                date: 'desc',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!membership || !membership.studentProfile) {
+      throw new ForbiddenException(
+        'No active student profile found for this account in the requested institute.'
+      );
+    }
+
+    const studentProfile = membership.studentProfile;
+    const instituteId = membership.instituteId;
+
+    // 1. Process Enrolments & Courses
+    const allEnrolments = studentProfile.enrolments || [];
+    const activeEnrolments = allEnrolments.filter((e) => e.status === 'ACTIVE');
+    const completedEnrolments = allEnrolments.filter(
+      (e) => e.status === 'COMPLETED' || e.progressPct === 100
+    );
+
+    // Collect enrolled batch IDs
+    const enrolledBatchIds = activeEnrolments
+      .map((e) => e.batchId)
+      .filter((id): id is string => Boolean(id));
+
+    // Map course details
+    const continueLearningCourses = activeEnrolments.map((enrolment) => {
+      const course = enrolment.course;
+      const allLessons: Array<{ id: string; title: string; durationSec: number }> = [];
+      if (course?.modules) {
+        for (const mod of course.modules) {
+          if (mod.chapters) {
+            for (const ch of mod.chapters) {
+              if (ch.lessons) {
+                for (const l of ch.lessons) {
+                  allLessons.push(l);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const totalLessons = allLessons.length > 0 ? allLessons.length : 20;
+      const completedProgress = (enrolment.progressRecords || []).filter((p) => p.isCompleted);
+      const completedLessons = Math.min(
+        totalLessons,
+        Math.max(
+          completedProgress.length,
+          Math.round((enrolment.progressPct / 100) * totalLessons)
+        )
+      );
+
+      const instructorName =
+        course?.instructors?.[0]?.teacherProfile?.membership?.user?.fullName ||
+        'Faculty Instructor';
+
+      const completedLessonIds = new Set(completedProgress.map((p) => p.lessonId));
+      const nextLesson = allLessons.find((l) => !completedLessonIds.has(l.id)) || allLessons[0];
+
+      return {
+        enrolmentId: enrolment.id,
+        courseId: course.id,
+        title: course.title,
+        slug: course.slug,
+        coverImage: course.coverImage,
+        category: course.category?.name || 'Biblical Studies',
+        instructorName,
+        completedLessons,
+        totalLessons,
+        progressPct: enrolment.progressPct,
+        nextLessonId: nextLesson?.id || null,
+        nextLessonTitle: nextLesson?.title || 'Lesson 1',
+        batchName: enrolment.batch?.name || null,
+      };
+    });
+
+    // 2. Fetch Upcoming Live Classes
+    let upcomingLiveClasses: any[] = [];
+    if (enrolledBatchIds.length > 0) {
+      const now = new Date();
+      const liveSessions = await this.prisma.liveSession.findMany({
+        where: {
+          instituteId,
+          batchId: { in: enrolledBatchIds },
+          status: { in: ['SCHEDULED', 'LIVE'] },
+          endsAt: { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) },
+        },
+        include: {
+          batch: {
+            select: {
+              id: true,
+              name: true,
+              course: {
+                select: {
+                  title: true,
+                },
+              },
+            },
+          },
+          teacherProfile: {
+            select: {
+              photoUrl: true,
+              membership: {
+                select: {
+                  user: {
+                    select: {
+                      fullName: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: {
+          startsAt: 'asc',
+        },
+        take: 5,
+      });
+
+      upcomingLiveClasses = liveSessions.map((session) => {
+        const isCurrentlyLive =
+          session.status === 'LIVE' ||
+          (now >= new Date(session.startsAt) && now <= new Date(session.endsAt));
+
+        return {
+          id: session.id,
+          title: session.title,
+          courseName: session.batch?.course?.title || session.batch?.name || 'Course Class',
+          instructor:
+            session.teacherProfile?.membership?.user?.fullName || 'Faculty Member',
+          startsAt: session.startsAt,
+          endsAt: session.endsAt,
+          status: isCurrentlyLive ? 'LIVE' : session.status,
+          joinUrl: session.joinUrl || null,
+          room: session.room || null,
+          canJoin: isCurrentlyLive || (new Date(session.startsAt).getTime() - now.getTime() <= 15 * 60 * 1000),
+        };
+      });
+    }
+
+    // 3. Compute Learning Hours & Streak
+    const attendances = studentProfile.attendances || [];
+    const attendedClassesCount = attendances.length;
+    const attendanceHours = attendedClassesCount * 1.5;
+
+    let lessonSeconds = 0;
+    for (const e of allEnrolments) {
+      if (e.progressRecords) {
+        for (const p of e.progressRecords) {
+          if (p.isCompleted) {
+            lessonSeconds += 1800;
+          }
+        }
+      }
+    }
+    const lessonHours = Math.round(lessonSeconds / 3600);
+    const totalLearningHours = Math.max(0, Math.round(attendanceHours + lessonHours));
+
+    const activityDateStrings = new Set<string>();
+    for (const a of attendances) {
+      const d = new Date(a.date).toISOString().split('T')[0];
+      activityDateStrings.add(d);
+    }
+    for (const e of allEnrolments) {
+      for (const p of e.progressRecords || []) {
+        if (p.completedAt) {
+          activityDateStrings.add(new Date(p.completedAt).toISOString().split('T')[0]);
+        }
+      }
+    }
+
+    let streak = 0;
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    const currentCheck = activityDateStrings.has(todayStr)
+      ? today
+      : activityDateStrings.has(yesterdayStr)
+      ? yesterday
+      : null;
+
+    if (currentCheck) {
+      const checkDate = new Date(currentCheck);
+      while (true) {
+        const dateStr = checkDate.toISOString().split('T')[0];
+        if (activityDateStrings.has(dateStr)) {
+          streak++;
+          checkDate.setDate(checkDate.getDate() - 1);
+        } else {
+          break;
+        }
+      }
+    }
+
+    const totalCompletedLessons = continueLearningCourses.reduce(
+      (acc, c) => acc + c.completedLessons,
+      0
+    );
+    const xpPoints =
+      totalCompletedLessons * 100 +
+      attendedClassesCount * 50 +
+      completedEnrolments.length * 500;
+
+    // 4. Learning Progress Donut Chart Calculation
+    const categoryProgressMap = new Map<string, { total: number; completed: number }>();
+    for (const c of continueLearningCourses) {
+      const cat = c.category || 'Biblical Studies';
+      const existing = categoryProgressMap.get(cat) || { total: 0, completed: 0 };
+      existing.total += c.totalLessons;
+      existing.completed += c.completedLessons;
+      categoryProgressMap.set(cat, existing);
+    }
+
+    const categoryBreakdown: Array<{ name: string; percentage: number; color: string }> = [];
+    const colors = ['#2563EB', '#8B5CF6', '#06B6D4'];
+    let colorIdx = 0;
+
+    const totalAllLessons = Array.from(categoryProgressMap.values()).reduce(
+      (acc, v) => acc + v.total,
+      0
+    );
+    const totalAllCompleted = Array.from(categoryProgressMap.values()).reduce(
+      (acc, v) => acc + v.completed,
+      0
+    );
+
+    for (const [catName, progress] of categoryProgressMap.entries()) {
+      const percentage =
+        totalAllLessons > 0 ? Math.round((progress.completed / totalAllLessons) * 100) : 0;
+      categoryBreakdown.push({
+        name: catName,
+        percentage,
+        color: colors[colorIdx % colors.length],
+      });
+      colorIdx++;
+    }
+
+    if (categoryBreakdown.length === 0) {
+      categoryBreakdown.push({
+        name: 'No active courses',
+        percentage: 0,
+        color: '#94A3B8',
+      });
+    }
+
+    const overallProgressPct =
+      totalAllLessons > 0 ? Math.round((totalAllCompleted / totalAllLessons) * 100) : 0;
+
+    // 5. Academic Calendar Events
+    const calendarEvents: Array<{
+      date: string;
+      type: 'LIVE_CLASS' | 'ASSIGNMENT' | 'EXAM' | 'ATTENDANCE';
+      title: string;
+    }> = [];
+
+    for (const c of upcomingLiveClasses) {
+      calendarEvents.push({
+        date: new Date(c.startsAt).toISOString().split('T')[0],
+        type: 'LIVE_CLASS',
+        title: c.title,
+      });
+    }
+
+    for (const a of attendances.slice(0, 30)) {
+      calendarEvents.push({
+        date: new Date(a.date).toISOString().split('T')[0],
+        type: 'ATTENDANCE',
+        title: 'Class Attendance: Present',
+      });
+    }
+
+    return {
+      student: {
+        id: membership.user.id,
+        fullName: membership.user.fullName,
+        email: membership.user.email,
+        phone: membership.user.phoneE164,
+        avatarUrl: membership.user.avatarUrl,
+      },
+      profile: {
+        studentProfileId: studentProfile.id,
+        admissionNo: studentProfile.admissionNo,
+        church: studentProfile.church,
+        preferredLanguage: studentProfile.preferredLanguage,
+        status: studentProfile.status,
+      },
+      institute: {
+        id: membership.institute?.id || membership.instituteId,
+        name: membership.institute?.name || 'Bible Institute',
+        code: membership.institute?.slug?.toUpperCase() || 'BI',
+        logoUrl: membership.institute?.logoUrl || null,
+      },
+      statistics: {
+        enrolledCoursesCount: activeEnrolments.length,
+        completedCoursesCount: completedEnrolments.length,
+        learningHours: totalLearningHours,
+        learningStreak: streak,
+        xpPoints: xpPoints >= 1000 ? `${(xpPoints / 1000).toFixed(1)}K` : `${xpPoints}`,
+        overallProgressPct,
+      },
+      continueLearningCourses,
+      upcomingLiveClasses,
+      calendarEvents,
+      learningProgressChart: {
+        overallProgressPct,
+        categories: categoryBreakdown,
+      },
+    };
+  }
 }

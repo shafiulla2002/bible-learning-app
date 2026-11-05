@@ -19,5 +19,11 @@ export class StudentMeController {
   async getStudentMe(@CurrentUser() user: any) {
     return this.studentsService.getStudentMe(user);
   }
+
+  @Get('dashboard')
+  @HttpCode(HttpStatus.OK)
+  async getStudentDashboard(@CurrentUser() user: any) {
+    return this.studentsService.getStudentDashboard(user);
+  }
 }
 
