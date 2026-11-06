@@ -65,22 +65,35 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
 
   const logout = useCallback(() => {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('current_student_profile_id');
-      localStorage.removeItem('current_institute_id');
-      sessionStorage.clear();
-      // Purge all student caches to avoid cross-tenant/cross-user data bleed
-      clearCache('student');
-      clearCache('courses');
-      clearCache('attendance');
-      clearCache('assignments');
-      clearCache('dashboard');
+      try {
+        localStorage.removeItem('token');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('current_user_role');
+        localStorage.removeItem('current_student_profile_id');
+        localStorage.removeItem('current_institute_id');
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn('localStorage clear note:', e);
+      }
+
+      try {
+        // Clear authentication cookies across domain
+        document.cookie = 'auth_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+        document.cookie = 'token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      } catch (e) {
+        console.warn('cookie clear note:', e);
+      }
+
+      try {
+        clearCache();
+      } catch (e) {}
+
+      // Always perform hard navigation to /login to flush React state and unmount portals
+      const target = options.redirectTo || '/login';
+      window.location.replace(target);
     }
-    setData(null);
-    if (options.redirectTo) {
-      router.push(options.redirectTo);
-    }
-  }, [router, options.redirectTo]);
+  }, [options.redirectTo]);
 
   const fetchStudentContext = useCallback(async () => {
     setIsLoading(true);

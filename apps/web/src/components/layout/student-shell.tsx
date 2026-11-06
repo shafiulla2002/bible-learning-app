@@ -62,7 +62,7 @@ export function StudentShell({
 }: StudentShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: false });
+  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: false, redirectTo: '/login' });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -225,12 +225,12 @@ export function StudentShell({
           )}
 
           {/* Bottom Student Profile Pill */}
-          <div className="p-3 border-t border-blue-500/30">
+          <div className="p-3 border-t border-blue-500/30 flex items-center justify-between gap-1">
             <Link
               href="/student/profile"
               className={`flex items-center ${
                 sidebarCollapsed ? 'justify-center' : 'gap-3'
-              } p-2 rounded-xl hover:bg-white/10 transition`}
+              } p-2 rounded-xl hover:bg-white/10 transition flex-1 min-w-0`}
             >
               <div className="w-9 h-9 rounded-full bg-white text-[#2563EB] font-bold text-xs flex items-center justify-center shrink-0 shadow-sm">
                 {studentInitials}
@@ -246,6 +246,16 @@ export function StudentShell({
                 </div>
               )}
             </Link>
+            {!sidebarCollapsed && (
+              <button
+                type="button"
+                onClick={logout}
+                className="p-2 text-blue-200 hover:text-white hover:bg-white/10 rounded-xl transition cursor-pointer"
+                title="Sign out"
+              >
+                <LogOut size={16} />
+              </button>
+            )}
           </div>
         </aside>
 
@@ -337,11 +347,12 @@ export function StudentShell({
                     <div className="my-1 border-t border-slate-100" />
 
                     <button
+                      type="button"
                       onClick={() => {
                         setUserDropdownOpen(false);
                         logout();
                       }}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 transition text-left font-medium"
+                      className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 transition text-left font-medium cursor-pointer"
                     >
                       <LogOut size={15} />
                       <span>Logout</span>

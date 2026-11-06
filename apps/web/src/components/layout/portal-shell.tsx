@@ -52,6 +52,21 @@ export function PortalShell({
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('current_user_role');
+      localStorage.removeItem('current_institute_id');
+      localStorage.removeItem('current_student_profile_id');
+      sessionStorage.clear();
+      document.cookie = 'auth_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      document.cookie = 'token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      window.location.href = '/login';
+    }
+  };
+
   // Background and text theme configuration for sidebar
   const isDarkSidebar = theme === 'dark' || portalRole === 'TEACHER';
   const sidebarBg = isDarkSidebar ? 'bg-[#1E2235] text-slate-300' : 'bg-white text-slate-600 border-r border-slate-200';
@@ -182,13 +197,14 @@ export function PortalShell({
               <p className="text-[10px] text-slate-400 truncate">{userRoleLabel}</p>
             </div>
           </div>
-          <Link
-            href="/login"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition"
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
             title="Sign out"
           >
             <LogOut size={16} />
-          </Link>
+          </button>
         </div>
       </aside>
 
@@ -225,6 +241,14 @@ export function PortalShell({
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-200">
                 {userRoleLabel}
               </span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="ml-2 p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition cursor-pointer"
+                title="Sign out"
+              >
+                <LogOut size={16} />
+              </button>
             </div>
           </div>
         </header>
