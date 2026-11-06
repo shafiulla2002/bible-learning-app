@@ -38,14 +38,28 @@ export const CANONICAL_SHAFIULLA_STUDENT: AuthenticatedStudentContext = {
   instituteLogoUrl: null,
 };
 
-function verifyJwtToken(token: string, secret: string): any {
+export function signJwtToken(payload: any, secret?: string): string {
+  const effectiveSecret = secret || process.env.JWT_SECRET || 'dev-secret-key-bible-institute-lms-12345';
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+  const hmac = crypto.createHmac('sha256', effectiveSecret);
+  hmac.update(`${headerB64}.${payloadB64}`);
+  const signatureB64 = hmac.digest('base64url');
+
+  return `${headerB64}.${payloadB64}.${signatureB64}`;
+}
+
+export function verifyJwtToken(token: string, secret?: string): any {
+  const effectiveSecret = secret || process.env.JWT_SECRET || 'dev-secret-key-bible-institute-lms-12345';
   const parts = token.split('.');
   if (parts.length !== 3) {
     throw new Error('Invalid JWT format');
   }
   const [headerB64, payloadB64, signatureB64] = parts;
 
-  const hmac = crypto.createHmac('sha256', secret);
+  const hmac = crypto.createHmac('sha256', effectiveSecret);
   hmac.update(`${headerB64}.${payloadB64}`);
   const expectedSig = hmac.digest('base64url');
 
@@ -73,17 +87,24 @@ export async function resolveAuthenticatedStudent(
 
   if (request) {
     const authHeader = request.headers.get('authorization');
+    const cookieHeader = request.headers.get('cookie') || '';
     const devUserId = request.headers.get('x-dev-user-id');
     const devRole = request.headers.get('x-dev-role');
     const devInstituteId = request.headers.get('x-dev-institute-id');
 
+    let token: string | null = null;
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
+      token = authHeader.substring(7);
+    } else {
+      const match = cookieHeader.match(/(?:auth_token|access_token|token)=([^;]+)/);
+      if (match) {
+        token = match[1];
+      }
+    }
+
+    if (token) {
       try {
-        const decoded = verifyJwtToken(
-          token,
-          process.env.JWT_SECRET || 'dev-secret-key-bible-institute-lms-12345'
-        );
+        const decoded = verifyJwtToken(token);
         targetUserId = decoded.sub || decoded.userId;
         targetRole = decoded.role;
         targetInstituteId = decoded.instituteId;
@@ -146,4 +167,3 @@ export async function resolveAuthenticatedStudent(
   // 3. Guaranteed canonical fallback for Shaik Shafiulla
   return CANONICAL_SHAFIULLA_STUDENT;
 }
-
