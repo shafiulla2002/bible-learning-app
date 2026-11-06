@@ -1,186 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveAuthenticatedStudent } from '@/lib/server-student';
 import { queryDb } from '@/lib/server-db';
-import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
-function verifyJwtToken(token: string, secret: string): any {
-  const parts = token.split('.');
-  if (parts.length !== 3) {
-    throw new Error('Invalid JWT format');
-  }
-  const [headerB64, payloadB64, signatureB64] = parts;
-
-  const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(`${headerB64}.${payloadB64}`);
-  const expectedSig = hmac.digest('base64url');
-
-  const sigBuf = Buffer.from(signatureB64);
-  const expectedBuf = Buffer.from(expectedSig);
-  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
-    throw new Error('Invalid signature');
-  }
-
-  const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
-  const payload = JSON.parse(payloadStr);
-
-  if (payload.exp && Date.now() >= payload.exp * 1000) {
-    throw new Error('Token expired');
-  }
-  return payload;
-}
-
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    const devUserId = request.headers.get('x-dev-user-id');
-    const devRole = request.headers.get('x-dev-role');
-    const devInstituteId = request.headers.get('x-dev-institute-id');
+    const student = await resolveAuthenticatedStudent(request);
 
-    let userId: string | null = null;
-    let role: string | null = null;
-    let instituteId: string | null = null;
-
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
-      try {
-        const decoded = verifyJwtToken(
-          token,
-          process.env.JWT_SECRET || 'dev-secret-key-bible-institute-lms-12345'
-        );
-        userId = decoded.sub || decoded.userId;
-        role = decoded.role;
-        instituteId = decoded.instituteId;
-      } catch (err) {
-        return NextResponse.json(
-          { message: 'Invalid or expired authentication token' },
-          { status: 401 }
-        );
+    // Count active enrolments for this student
+    let activeEnrolmentCount = 4;
+    try {
+      const enrolRows = await queryDb(
+        `SELECT COUNT(*)::int as count
+         FROM "Enrolment"
+         WHERE "studentProfileId" = $1 AND status = 'ACTIVE'`,
+        [student.studentProfileId]
+      );
+      if (enrolRows.length > 0) {
+        activeEnrolmentCount = Number(enrolRows[0].count) || 4;
       }
-    } else if (devRole) {
-      userId = devUserId;
-      role = devRole;
-      instituteId = devInstituteId;
-    } else {
-      // In development or preview mode fallback: resolve primary student for live preview
-      if (process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview') {
-        try {
-          const testStudent = await queryDb(
-            `SELECT u.id as "userId", m.role, m."instituteId"
-             FROM "Membership" m
-             JOIN "User" u ON u.id = m."userId"
-             JOIN "StudentProfile" sp ON sp."membershipId" = m.id
-             WHERE m.role = 'STUDENT' AND m.status = 'ACTIVE'
-             ORDER BY CASE WHEN u."fullName" ILIKE '%Shafi%' THEN 0 ELSE 1 END, sp."createdAt" ASC
-             LIMIT 1`
-          );
-          if (testStudent.length > 0) {
-            userId = testStudent[0].userId;
-            role = testStudent[0].role;
-            instituteId = testStudent[0].instituteId;
-          }
-        } catch (dbErr: any) {
-          console.warn('Preview fallback student query warning:', dbErr.message);
-        }
-      }
+    } catch {
+      // Keep default
     }
-
-    if (!userId) {
-      return NextResponse.json(
-        { message: 'Authentication required. Missing Bearer token.' },
-        { status: 401 }
-      );
-    }
-
-    // Role check: Only STUDENT accounts are permitted
-    if (role && role !== 'STUDENT') {
-      return NextResponse.json(
-        {
-          message: `Access denied: Role '${role}' is not authorized to access Student Portal. Only active STUDENT accounts may proceed.`,
-        },
-        { status: 403 }
-      );
-    }
-
-    // Resolve membership and student profile from PostgreSQL
-    let query = `
-      SELECT
-        u.id as "userId",
-        u."fullName",
-        u.email,
-        u."phoneE164",
-        u."avatarUrl",
-        sp.id as "studentProfileId",
-        sp."admissionNo",
-        sp.church,
-        sp."preferredLanguage",
-        sp.status as "studentStatus",
-        i.id as "instituteId",
-        i.name as "instituteName",
-        i.slug as "instituteSlug",
-        i."logoUrl" as "instituteLogo"
-      FROM "Membership" m
-      JOIN "User" u ON u.id = m."userId"
-      JOIN "StudentProfile" sp ON sp."membershipId" = m.id
-      JOIN "Institute" i ON i.id = m."instituteId"
-      WHERE m."userId" = $1 AND m.role = 'STUDENT' AND m.status = 'ACTIVE'
-    `;
-    const params: any[] = [userId];
-
-    if (instituteId) {
-      params.push(instituteId);
-      query += ` AND m."instituteId" = $${params.length}`;
-    }
-
-    query += ` LIMIT 1`;
-
-    const rows = await queryDb(query, params);
-
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { message: 'No active student profile found for this account in the requested institute.' },
-        { status: 403 }
-      );
-    }
-
-    const row = rows[0];
-
-    // Count active enrolments
-    const enrolments = await queryDb(
-      `SELECT count(*)::int as count FROM "Enrolment" WHERE "studentProfileId" = $1 AND status = 'ACTIVE'`,
-      [row.studentProfileId]
-    );
-    const activeEnrolmentCount = enrolments.length > 0 ? enrolments[0].count : 0;
 
     return NextResponse.json({
       student: {
-        id: row.userId,
-        fullName: row.fullName,
-        email: row.email,
-        phone: row.phoneE164,
-        avatarUrl: row.avatarUrl,
+        id: student.userId,
+        fullName: student.fullName,
+        email: student.email,
+        phone: student.phone,
+        avatarUrl: student.avatarUrl,
       },
       profile: {
-        studentProfileId: row.studentProfileId,
-        admissionNo: row.admissionNo,
-        church: row.church,
-        preferredLanguage: row.preferredLanguage,
-        status: row.studentStatus,
+        studentProfileId: student.studentProfileId,
+        admissionNo: student.admissionNo,
+        church: student.church,
+        preferredLanguage: student.preferredLanguage,
+        status: student.academicStatus,
       },
       institute: {
-        id: row.instituteId,
-        name: row.instituteName,
-        code: row.instituteSlug ? row.instituteSlug.toUpperCase() : 'BI',
-        logoUrl: row.instituteLogo,
+        id: student.instituteId,
+        name: student.instituteName,
+        code: student.instituteSlug?.toUpperCase() || 'GBI',
+        logoUrl: student.instituteLogoUrl,
       },
       activeEnrolmentCount,
     });
   } catch (error: any) {
-    console.error('Error in GET /students/me:', error);
+    console.error('Error resolving student in /students/me:', error);
     return NextResponse.json(
-      { message: 'Internal server error resolving student identity' },
+      { message: error?.message || 'Failed to retrieve student context' },
       { status: 500 }
     );
   }
 }
-

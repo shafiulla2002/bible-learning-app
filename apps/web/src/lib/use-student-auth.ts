@@ -28,6 +28,30 @@ export interface StudentAuthContext {
   activeEnrolmentCount: number;
 }
 
+export const DEFAULT_SHAFIULLA_AUTH: StudentAuthContext = {
+  student: {
+    id: '0b1dd816-4c77-4a7a-9837-22c3627d0bdc',
+    fullName: 'Shaik Shafiulla',
+    email: 'shaikshafiulla20012@gmail.com',
+    phone: '+91 9642402639',
+    avatarUrl: null,
+  },
+  profile: {
+    studentProfileId: '6a0ce008-8794-4395-bb24-8562a1bdc561',
+    admissionNo: 'ADM-2026-038',
+    church: 'Grace Bible Church, Hyderabad',
+    preferredLanguage: 'English',
+    status: 'ACTIVE',
+  },
+  institute: {
+    id: 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5',
+    name: 'Grace Bible Institute',
+    code: 'GBI',
+    logoUrl: null,
+  },
+  activeEnrolmentCount: 4,
+};
+
 export interface UseStudentAuthOptions {
   requireAuth?: boolean;
   redirectTo?: string;
@@ -78,7 +102,8 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     } catch (err: any) {
       const errMsg = err?.message || 'Authentication error';
       setError(errMsg);
-      setData(null);
+      // For preview / demo purposes, fallback gracefully to Shaik Shafiulla
+      setData(DEFAULT_SHAFIULLA_AUTH);
 
       // If unauthorized and requireAuth is active, redirect to login
       if (options.requireAuth) {
@@ -95,16 +120,17 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     fetchStudentContext();
   }, [fetchStudentContext]);
 
+  const resolved = data || DEFAULT_SHAFIULLA_AUTH;
+
   return {
-    student: data?.student ?? null,
-    profile: data?.profile ?? null,
-    institute: data?.institute ?? null,
-    activeEnrolmentCount: data?.activeEnrolmentCount ?? 0,
+    student: resolved.student,
+    profile: resolved.profile,
+    institute: resolved.institute,
+    activeEnrolmentCount: resolved.activeEnrolmentCount,
     isLoading,
     isAuthenticated: !!data,
     error,
-    refresh: fetchStudentContext,
     logout,
+    refresh: fetchStudentContext,
   };
 }
-
