@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/',
-        destination: '/student',
+        destination: '/login',
         permanent: false,
       },
     ];
@@ -20,12 +20,16 @@ const nextConfig: NextConfig = {
     }
     const cleanHost = apiHost.endsWith('/') ? apiHost.slice(0, -1) : apiHost;
     const targetHost = cleanHost.endsWith('/api/v1') ? cleanHost : `${cleanHost}/api/v1`;
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${targetHost}/:path*`,
-      },
-    ];
+    return {
+      beforeFiles: [],
+      afterFiles: [],
+      fallback: [
+        {
+          source: '/api/:path*',
+          destination: `${targetHost}/:path*`,
+        },
+      ],
+    };
   },
 };
 
