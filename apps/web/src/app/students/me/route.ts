@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
              JOIN "User" u ON u.id = m."userId"
              JOIN "StudentProfile" sp ON sp."membershipId" = m.id
              WHERE m.role = 'STUDENT' AND m.status = 'ACTIVE'
-             ORDER BY sp."createdAt" ASC
+             ORDER BY CASE WHEN u."fullName" ILIKE '%Shafi%' THEN 0 ELSE 1 END, sp."createdAt" ASC
              LIMIT 1`
           );
           if (testStudent.length > 0) {

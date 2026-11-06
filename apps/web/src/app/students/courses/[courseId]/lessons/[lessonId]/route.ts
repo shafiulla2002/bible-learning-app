@@ -59,14 +59,14 @@ export async function GET(
       role = devRole;
       instituteId = devInstituteId;
     } else {
-      if (process.env.NODE_ENV !== 'production') {
+      if (process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview') {
         const testStudent = await queryDb(
           `SELECT u.id as "userId", m.role, m."instituteId"
            FROM "Membership" m
            JOIN "User" u ON u.id = m."userId"
            JOIN "StudentProfile" sp ON sp."membershipId" = m.id
            WHERE m.role = 'STUDENT' AND m.status = 'ACTIVE'
-           ORDER BY sp."createdAt" ASC
+           ORDER BY CASE WHEN u."fullName" ILIKE '%Shafi%' THEN 0 ELSE 1 END, sp."createdAt" ASC
            LIMIT 1`
         );
         if (testStudent.length > 0) {
