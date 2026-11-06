@@ -56,29 +56,47 @@ export default function LoginPage() {
     }, 400);
   };
 
+  const executeLoginRequest = async (targetPhone: string, targetRole: RoleOption, targetOtp: string) => {
+    const payload = {
+      phoneNumber: targetPhone,
+      role: targetRole === 'ADMIN' ? 'INSTITUTE_ADMIN' : targetRole,
+      otp: targetOtp || '123456',
+    };
+
+    let res = await fetch('/api/auth/phone-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => null);
+
+    if (!res || res.status === 404) {
+      res = await fetch('/auth/phone-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+    }
+
+    if (!res) {
+      throw new Error('Network error contacting authentication service');
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.message || 'Login failed. Please check credentials.');
+    }
+
+    return data;
+  };
+
   const handleLoginSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/auth/phone-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumber: phone,
-          role: selectedRole === 'ADMIN' ? 'INSTITUTE_ADMIN' : selectedRole,
-          otp: otp || '123456',
-        }),
-      });
+      const data = await executeLoginRequest(phone, selectedRole, otp);
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || 'Login failed. Please verify credentials.');
-      }
-
-      // Persist session tokens & user metadata in client storage
       if (typeof window !== 'undefined') {
         localStorage.setItem('token', data.accessToken);
         localStorage.setItem('access_token', data.accessToken);
@@ -90,11 +108,9 @@ export default function LoginPage() {
           localStorage.setItem('current_student_profile_id', data.user.studentProfileId);
         }
 
-        // Set auth cookie
         document.cookie = `auth_token=${data.accessToken}; path=/; max-age=2592000; SameSite=Lax`;
       }
 
-      // Smooth transition to target portal
       router.push(data.redirectUrl || (selectedRole === 'STUDENT' ? '/student' : selectedRole === 'TEACHER' ? '/teacher' : '/admin'));
     } catch (err: any) {
       console.error('Login error:', err);
@@ -112,29 +128,18 @@ export default function LoginPage() {
     setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/auth/phone-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phoneNumber: targetPhone,
-          role: role === 'ADMIN' ? 'INSTITUTE_ADMIN' : role,
-          otp: '123456',
-        }),
-      });
+      const data = await executeLoginRequest(targetPhone, role, '123456');
 
-      const data = await res.json();
-      if (res.ok && data.accessToken) {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('token', data.accessToken);
-          localStorage.setItem('access_token', data.accessToken);
-          localStorage.setItem('auth_token', data.accessToken);
-          localStorage.setItem('current_user_role', data.user.role);
-          localStorage.setItem('current_institute_id', data.user.instituteId || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
-          if (data.user.studentProfileId) {
-            localStorage.setItem('current_student_profile_id', data.user.studentProfileId);
-          }
-          document.cookie = `auth_token=${data.accessToken}; path=/; max-age=2592000; SameSite=Lax`;
+      if (data && data.accessToken && typeof window !== 'undefined') {
+        localStorage.setItem('token', data.accessToken);
+        localStorage.setItem('access_token', data.accessToken);
+        localStorage.setItem('auth_token', data.accessToken);
+        localStorage.setItem('current_user_role', data.user.role);
+        localStorage.setItem('current_institute_id', data.user.instituteId || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+        if (data.user.studentProfileId) {
+          localStorage.setItem('current_student_profile_id', data.user.studentProfileId);
         }
+        document.cookie = `auth_token=${data.accessToken}; path=/; max-age=2592000; SameSite=Lax`;
         router.push(data.redirectUrl);
       } else {
         router.push(role === 'STUDENT' ? '/student' : role === 'TEACHER' ? '/teacher' : '/admin');

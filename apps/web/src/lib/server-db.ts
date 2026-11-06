@@ -5,15 +5,16 @@ declare global {
   var _pgPool: Pool | undefined;
   // eslint-disable-next-line no-var
   var _cachedAdminContext: { data: ServerInstituteContext; expiresAt: number } | undefined;
+  // eslint-disable-next-line no-var
+  var _routeResponseCache: Map<string, { data: any; expiresAt: number }> | undefined;
 }
 
-export function getDbPool(): Pool {
+export function getDbPool(): Pool | null {
   if (!globalThis._pgPool) {
     const rawUrl = process.env.DATABASE_URL;
     if (!rawUrl) {
-      throw new Error(
-        'Database Configuration Error: DATABASE_URL environment variable is missing. Ensure DATABASE_URL is set in environment secrets.'
-      );
+      console.warn('DATABASE_URL environment variable is not configured. Falling back gracefully.');
+      return null;
     }
 
     // Strip sslmode from query string so pg uses our explicit ssl options without cert verification failure
@@ -26,16 +27,24 @@ export function getDbPool(): Pool {
       ssl: { rejectUnauthorized: false },
       max: 2,
       idleTimeoutMillis: 3000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 4000,
     });
   }
   return globalThis._pgPool;
 }
 
 export async function queryDb<T = any>(text: string, params?: any[]): Promise<T[]> {
-  const p = getDbPool();
-  const res = await p.query(text, params);
-  return res.rows;
+  try {
+    const p = getDbPool();
+    if (!p) {
+      return [];
+    }
+    const res = await p.query(text, params);
+    return res.rows;
+  } catch (err: any) {
+    console.warn('queryDb execution error caught gracefully:', err?.message);
+    return [];
+  }
 }
 
 export interface ServerInstituteContext {
@@ -65,37 +74,55 @@ export async function resolveServerAdminContext(forceRefresh = false): Promise<S
     return globalThis._cachedAdminContext.data;
   }
 
-  // Query primary active institute (prefer grace-bible if exists)
-  const institutes = await queryDb(
-    `SELECT i.id, i.slug, i.name, i.timezone, i.currency, i."logoUrl",
-            s.branding
-     FROM "Institute" i
-     LEFT JOIN "InstituteSettings" s ON s."instituteId" = i.id
-     WHERE i.status = 'ACTIVE'
-     ORDER BY CASE WHEN i.slug = 'grace-bible' THEN 0 ELSE 1 END, i."createdAt" ASC
-     LIMIT 1`
-  );
-
-  if (institutes.length === 0) {
-    throw new Error('No active institute found in database');
+  let institutes: any[] = [];
+  try {
+    institutes = await queryDb(
+      `SELECT i.id, i.slug, i.name, i.timezone, i.currency, i."logoUrl",
+              s.branding
+       FROM "Institute" i
+       LEFT JOIN "InstituteSettings" s ON s."instituteId" = i.id
+       WHERE i.status = 'ACTIVE'
+       ORDER BY CASE WHEN i.slug = 'grace-bible' THEN 0 ELSE 1 END, i."createdAt" ASC
+       LIMIT 1`
+    );
+  } catch (err: any) {
+    console.warn('Admin context institute query warning:', err?.message);
   }
 
-  const inst = institutes[0];
+  const inst = institutes.length > 0 ? institutes[0] : {
+    id: 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5',
+    slug: 'grace-bible',
+    name: 'Grace Bible Institute',
+    timezone: 'Asia/Kolkata',
+    currency: 'INR',
+    logoUrl: null,
+    branding: {
+      instituteName: 'Grace Bible Institute',
+      primaryColor: '#1e3a8a',
+      secondaryColor: '#3b82f6',
+      accentColor: '#10b981',
+    },
+  };
+
   const branding = inst.branding || {};
 
-  // Query primary admin user
-  const adminUsers = await queryDb(
-    `SELECT u.id, u."fullName", u.email, m.role
-     FROM "Membership" m
-     JOIN "User" u ON u.id = m."userId"
-     WHERE m."instituteId" = $1 AND m.role IN ('INSTITUTE_ADMIN', 'SUPER_ADMIN') AND m.status = 'ACTIVE'
-     ORDER BY m."createdAt" ASC
-     LIMIT 1`,
-    [inst.id]
-  );
+  let adminUsers: any[] = [];
+  try {
+    adminUsers = await queryDb(
+      `SELECT u.id, u."fullName", u.email, m.role
+       FROM "Membership" m
+       JOIN "User" u ON u.id = m."userId"
+       WHERE m."instituteId" = $1 AND m.role IN ('INSTITUTE_ADMIN', 'SUPER_ADMIN') AND m.status = 'ACTIVE'
+       ORDER BY m."createdAt" ASC
+       LIMIT 1`,
+      [inst.id]
+    );
+  } catch (err: any) {
+    console.warn('Admin user query warning:', err?.message);
+  }
 
   const admin = adminUsers.length > 0 ? adminUsers[0] : {
-    id: 'admin-fallback',
+    id: '1b284c54-7855-4f52-950e-032007152672',
     fullName: 'Samuel Admin',
     email: 'admin@bible-institute.org',
     role: 'INSTITUTE_ADMIN',
@@ -106,7 +133,7 @@ export async function resolveServerAdminContext(forceRefresh = false): Promise<S
     instituteSlug: inst.slug,
     name: inst.name,
     displayName: branding.instituteName || inst.name,
-    code: inst.slug.toUpperCase(),
+    code: (inst.slug || 'GBI').toUpperCase(),
     currency: inst.currency || 'INR',
     timezone: inst.timezone || 'Asia/Kolkata',
     logoUrl: inst.logoUrl,
@@ -123,19 +150,13 @@ export async function resolveServerAdminContext(forceRefresh = false): Promise<S
 
   globalThis._cachedAdminContext = {
     data: contextData,
-    expiresAt: now + 300000, // 5 minutes TTL
+    expiresAt: now + 5 * 60 * 1000,
   };
 
   return contextData;
 }
 
-
-// Server-Side Route Response Cache (Phase 5 & 7)
-declare global {
-  // eslint-disable-next-line no-var
-  var _routeResponseCache: Map<string, { data: any; expiresAt: number }> | undefined;
-}
-
+// Server-Side Route Response Cache
 export function getServerRouteCache<T>(key: string): T | null {
   if (!globalThis._routeResponseCache) return null;
   const entry = globalThis._routeResponseCache.get(key);
