@@ -62,21 +62,25 @@ export async function GET(request: NextRequest) {
       role = devRole;
       instituteId = devInstituteId;
     } else {
-      // In development mode fallback: resolve primary test student for local preview
-      if (process.env.NODE_ENV !== 'production') {
-        const testStudent = await queryDb(
-          `SELECT u.id as "userId", m.role, m."instituteId"
-           FROM "Membership" m
-           JOIN "User" u ON u.id = m."userId"
-           JOIN "StudentProfile" sp ON sp."membershipId" = m.id
-           WHERE m.role = 'STUDENT' AND m.status = 'ACTIVE'
-           ORDER BY sp."createdAt" ASC
-           LIMIT 1`
-        );
-        if (testStudent.length > 0) {
-          userId = testStudent[0].userId;
-          role = testStudent[0].role;
-          instituteId = testStudent[0].instituteId;
+      // In development or preview mode fallback: resolve primary student for live preview
+      if (process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview') {
+        try {
+          const testStudent = await queryDb(
+            `SELECT u.id as "userId", m.role, m."instituteId"
+             FROM "Membership" m
+             JOIN "User" u ON u.id = m."userId"
+             JOIN "StudentProfile" sp ON sp."membershipId" = m.id
+             WHERE m.role = 'STUDENT' AND m.status = 'ACTIVE'
+             ORDER BY sp."createdAt" ASC
+             LIMIT 1`
+          );
+          if (testStudent.length > 0) {
+            userId = testStudent[0].userId;
+            role = testStudent[0].role;
+            instituteId = testStudent[0].instituteId;
+          }
+        } catch (dbErr: any) {
+          console.warn('Preview fallback student query warning:', dbErr.message);
         }
       }
     }
