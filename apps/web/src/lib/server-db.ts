@@ -11,7 +11,7 @@ declare global {
 
 export function getDbPool(): Pool | null {
   if (!globalThis._pgPool) {
-    const rawUrl = process.env.DATABASE_URL;
+    const rawUrl = process.env.DATABASE_URL || 'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=3';
     if (!rawUrl) {
       console.warn('DATABASE_URL environment variable is not configured. Falling back gracefully.');
       return null;
