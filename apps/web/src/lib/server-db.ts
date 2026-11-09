@@ -20,12 +20,12 @@ export function getDbPool(): Pool | null {
     // Strip sslmode from query string so pg uses our explicit ssl options without cert verification failure
     const cleanUrl = rawUrl.replace(/\?sslmode=[^&]+&?/, '?').replace(/\?$/, '');
 
-    // Serverless-optimized pool config: max 2 connections per lambda instance,
+    // Serverless-optimized pool config: max 4 connections per lambda instance,
     // quick 3s idle release to strictly respect CloudSQL 25-connection ceiling
     globalThis._pgPool = new Pool({
       connectionString: cleanUrl,
       ssl: { rejectUnauthorized: false },
-      max: 2,
+      max: 4,
       idleTimeoutMillis: 3000,
       connectionTimeoutMillis: 4000,
     });

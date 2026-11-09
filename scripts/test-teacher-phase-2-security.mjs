@@ -13,6 +13,7 @@ const cleanUrl = env.DATABASE_URL.replace(/\?sslmode=[^&]+&?/, '?').replace(/\?$
 const pool = new Pool({
   connectionString: cleanUrl,
   ssl: { rejectUnauthorized: false },
+  max: 4,
 });
 
 // Helper for JWT signing
@@ -169,7 +170,7 @@ async function resolveTeacher(request, dbQueryOverride = null) {
   };
 }
 
-// Emulate GET /api/teachers/dashboard handler
+// Emulate GET /api/teachers/dashboard handler with Phase 2.1 Optimized Queries
 async function handleGetTeacherDashboard(request, dbQueryOverride = null) {
   try {
     const teacher = await resolveTeacher(request, dbQueryOverride);
@@ -177,97 +178,109 @@ async function handleGetTeacherDashboard(request, dbQueryOverride = null) {
     const queryFn = dbQueryOverride || (async (q, p) => (await pool.query(q, p)).rows);
 
     const [
-      batchesCountRes,
-      studentsCountRes,
-      coursesCountRes,
-      todayClassesCountRes,
-      pendingAssignCountRes,
-      attendanceSummaryRes,
+      statsAndAttendanceRes,
       todayScheduleRes,
       assignedBatchesRes,
       pendingAssignmentsRes,
-      upcomingClassesRes,
-      upcomingExamsRes,
+      upcomingEventsRes,
     ] = await Promise.all([
+      // 1. Consolidated Statistics & Attendance Overview (CTE Aggregation)
       queryFn(
-        `SELECT COUNT(DISTINCT bt."batchId")::int as count
-         FROM "BatchTeacher" bt
-         JOIN "Batch" b ON b.id = bt."batchId"
-         WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2 AND b.status = 'ACTIVE'`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      queryFn(
-        `SELECT COUNT(DISTINCT e."studentProfileId")::int as count
-         FROM "Enrolment" e
-         JOIN "BatchTeacher" bt ON bt."batchId" = e."batchId"
-         WHERE bt."teacherProfileId" = $1 AND e."instituteId" = $2 AND e.status = 'ACTIVE'`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      queryFn(
-        `SELECT COUNT(DISTINCT ci."courseId")::int as count
-         FROM "CourseInstructor" ci
-         JOIN "Course" c ON c.id = ci."courseId"
-         WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND c.status = 'PUBLISHED'`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      queryFn(
-        `SELECT COUNT(ls.id)::int as count
-         FROM "LiveSession" ls
-         JOIN "Institute" i ON i.id = ls."instituteId"
-         WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
-           AND (ls."startsAt" AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date = (NOW() AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      queryFn(
-        `SELECT COUNT(s.id)::int as count
-         FROM "Submission" s
-         JOIN "Assignment" a ON a.id = s."assignmentId"
-         WHERE s."instituteId" = $2 AND s.status = 'SUBMITTED'
-           AND (
-             a."batchId" IN (SELECT bt."batchId" FROM "BatchTeacher" bt WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2)
-             OR a."courseId" IN (SELECT ci."courseId" FROM "CourseInstructor" ci WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2)
-           )`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      queryFn(
-        `SELECT 
-           COUNT(*)::int as "totalRecords",
-           COUNT(CASE WHEN a.status = 'PRESENT' THEN 1 END)::int as "presentCount",
-           COUNT(CASE WHEN a.status = 'ABSENT' THEN 1 END)::int as "absentCount",
-           COUNT(CASE WHEN a.status = 'LATE' THEN 1 END)::int as "lateCount",
-           COUNT(CASE WHEN a.status = 'EXCUSED' THEN 1 END)::int as "excusedCount",
-           COUNT(DISTINCT a.date)::int as "totalSessionsMarked",
-           ROUND(
-             CASE WHEN COUNT(*) > 0 
-               THEN (COUNT(CASE WHEN a.status IN ('PRESENT', 'LATE') THEN 1 END)::numeric / COUNT(*)::numeric) * 100 
-               ELSE 0 
-             END, 1
-           )::float as "attendanceRatePct"
-         FROM "Attendance" a
-         WHERE a."instituteId" = $2
-           AND a."batchId" IN (
-             SELECT bt."batchId" 
-             FROM "BatchTeacher" bt 
-             WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2
-           )`,
+        `WITH 
+        batch_agg AS (
+          SELECT COUNT(DISTINCT bt."batchId")::int as assigned_batches
+          FROM "BatchTeacher" bt
+          JOIN "Batch" b ON b.id = bt."batchId"
+          WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2 AND b.status = 'ACTIVE'
+        ),
+        student_agg AS (
+          SELECT COUNT(DISTINCT e."studentProfileId")::int as assigned_students
+          FROM "Enrolment" e
+          JOIN "BatchTeacher" bt ON bt."batchId" = e."batchId"
+          WHERE bt."teacherProfileId" = $1 AND e."instituteId" = $2 AND e.status = 'ACTIVE'
+        ),
+        course_agg AS (
+          SELECT COUNT(DISTINCT ci."courseId")::int as instructing_courses
+          FROM "CourseInstructor" ci
+          JOIN "Course" c ON c.id = ci."courseId"
+          WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND c.status = 'PUBLISHED'
+        ),
+        today_classes AS (
+          SELECT COUNT(ls.id)::int as today_classes
+          FROM "LiveSession" ls
+          JOIN "Institute" i ON i.id = ls."instituteId"
+          WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
+            AND (ls."startsAt" AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date = (NOW() AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date
+        ),
+        pending_assign AS (
+          SELECT COUNT(s.id)::int as pending_assignments
+          FROM "Submission" s
+          JOIN "Assignment" a ON a.id = s."assignmentId"
+          WHERE s."instituteId" = $2 AND s.status = 'SUBMITTED'
+            AND (
+              a."batchId" IN (SELECT bt."batchId" FROM "BatchTeacher" bt WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2)
+              OR a."courseId" IN (SELECT ci."courseId" FROM "CourseInstructor" ci WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2)
+            )
+        ),
+        att_agg AS (
+          SELECT 
+            COUNT(*)::int as total_records,
+            COUNT(CASE WHEN a.status = 'PRESENT' THEN 1 END)::int as present_count,
+            COUNT(CASE WHEN a.status = 'ABSENT' THEN 1 END)::int as absent_count,
+            COUNT(CASE WHEN a.status = 'LATE' THEN 1 END)::int as late_count,
+            COUNT(CASE WHEN a.status = 'EXCUSED' THEN 1 END)::int as excused_count,
+            COUNT(DISTINCT a.date)::int as total_sessions_marked,
+            ROUND(
+              CASE WHEN COUNT(*) > 0 
+                THEN (COUNT(CASE WHEN a.status IN ('PRESENT', 'LATE') THEN 1 END)::numeric / COUNT(*)::numeric) * 100 
+                ELSE 0 
+              END, 1
+            )::float as attendance_rate_pct
+          FROM "Attendance" a
+          WHERE a."instituteId" = $2
+            AND a."batchId" IN (
+              SELECT bt."batchId" 
+              FROM "BatchTeacher" bt 
+              WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2
+            )
+        )
+        SELECT 
+          b.assigned_batches,
+          s.assigned_students,
+          c.instructing_courses,
+          tc.today_classes,
+          pa.pending_assignments,
+          att.total_records,
+          att.present_count,
+          att.absent_count,
+          att.late_count,
+          att.excused_count,
+          att.total_sessions_marked,
+          att.attendance_rate_pct
+        FROM batch_agg b
+        CROSS JOIN student_agg s
+        CROSS JOIN course_agg c
+        CROSS JOIN today_classes tc
+        CROSS JOIN pending_assign pa
+        CROSS JOIN att_agg att`,
         [teacherProfileId, instituteId]
       ).catch(() => [{
-        totalRecords: 0,
-        presentCount: 0,
-        absentCount: 0,
-        lateCount: 0,
-        excusedCount: 0,
-        totalSessionsMarked: 0,
-        attendanceRatePct: 0,
+        assigned_batches: 0,
+        assigned_students: 0,
+        instructing_courses: 0,
+        today_classes: 0,
+        pending_assignments: 0,
+        total_records: 0,
+        present_count: 0,
+        absent_count: 0,
+        late_count: 0,
+        excused_count: 0,
+        total_sessions_marked: 0,
+        attendance_rate_pct: 0,
       }]),
 
       queryFn(
-        `SELECT ls.id, ls.title, ls."startsAt", ls."endsAt", ls.status, ls.room, ls."joinUrl",
+        `SELECT ls.id, ls.title, ls."startsAt", ls."endsAt", ls.status::text as status, ls.room, ls."joinUrl",
                 c.title as "courseTitle", b.name as "batchName", b.code as "batchCode"
          FROM "LiveSession" ls
          JOIN "Batch" b ON b.id = ls."batchId"
@@ -321,39 +334,44 @@ async function handleGetTeacherDashboard(request, dbQueryOverride = null) {
       ).catch(() => []),
 
       queryFn(
-        `SELECT ls.id, ls.title, ls."startsAt" as "eventDate", ls."endsAt", ls.status, ls.room, ls."joinUrl",
-                c.title as "courseTitle", b.name as "batchName", b.code as "batchCode",
-                'LIVE_CLASS' as "eventType"
-         FROM "LiveSession" ls
-         JOIN "Batch" b ON b.id = ls."batchId"
-         JOIN "Course" c ON c.id = b."courseId"
-         WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
-         ORDER BY ls."startsAt" DESC
-         LIMIT 5`,
-        [teacherProfileId, instituteId]
-      ).catch(() => []),
-
-      queryFn(
-        `SELECT e.id, e.title, e."createdAt" as "eventDate", e.type as status, e."durationMin",
-                c.title as "courseTitle", NULL as "batchName", NULL as "batchCode",
-                'EXAMINATION' as "eventType"
-         FROM "Exam" e
-         JOIN "Course" c ON c.id = e."courseId"
-         JOIN "CourseInstructor" ci ON ci."courseId" = c.id
-         WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND e."instituteId" = $2
-         LIMIT 5`,
+        `SELECT * FROM (
+           SELECT ls.id, ls.title, ls."startsAt" as "eventDate", ls."endsAt" as "endDate", ls.status::text as status, ls.room, ls."joinUrl",
+                  c.title as "courseTitle", b.name as "batchName",
+                  'LIVE_CLASS' as "eventType", NULL::int as "durationMin"
+           FROM "LiveSession" ls
+           JOIN "Batch" b ON b.id = ls."batchId"
+           JOIN "Course" c ON c.id = b."courseId"
+           WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
+           
+           UNION ALL
+           
+           SELECT e.id, e.title, e."createdAt" as "eventDate", NULL::timestamptz as "endDate", e.type::text as status, NULL as room, NULL as "joinUrl",
+                  c.title as "courseTitle", NULL as "batchName",
+                  'EXAMINATION' as "eventType", e."durationMin"
+           FROM "Exam" e
+           JOIN "Course" c ON c.id = e."courseId"
+           JOIN "CourseInstructor" ci ON ci."courseId" = c.id
+           WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND e."instituteId" = $2
+         ) upcoming
+         ORDER BY "eventDate" DESC
+         LIMIT 6`,
         [teacherProfileId, instituteId]
       ).catch(() => []),
     ]);
 
-    const attSummary = attendanceSummaryRes[0] || {
-      totalRecords: 0,
-      presentCount: 0,
-      absentCount: 0,
-      lateCount: 0,
-      excusedCount: 0,
-      totalSessionsMarked: 0,
-      attendanceRatePct: 0,
+    const statsRow = statsAndAttendanceRes[0] || {
+      assigned_batches: 0,
+      assigned_students: 0,
+      instructing_courses: 0,
+      today_classes: 0,
+      pending_assignments: 0,
+      total_records: 0,
+      present_count: 0,
+      absent_count: 0,
+      late_count: 0,
+      excused_count: 0,
+      total_sessions_marked: 0,
+      attendance_rate_pct: 0,
     };
 
     return {
@@ -372,19 +390,27 @@ async function handleGetTeacherDashboard(request, dbQueryOverride = null) {
           name: teacher.instituteName,
         },
         statistics: {
-          assignedBatchesCount: Number(batchesCountRes[0]?.count) || 0,
-          assignedStudentsCount: Number(studentsCountRes[0]?.count) || 0,
-          instructingCoursesCount: Number(coursesCountRes[0]?.count) || 0,
-          todayClassesCount: Number(todayClassesCountRes[0]?.count) || 0,
-          pendingAssignmentsCount: Number(pendingAssignCountRes[0]?.count) || 0,
-          attendanceRatePct: Number(attSummary.attendanceRatePct) || 0,
-          totalAttendanceRecords: Number(attSummary.totalRecords) || 0,
+          assignedBatchesCount: Number(statsRow.assigned_batches) || 0,
+          assignedStudentsCount: Number(statsRow.assigned_students) || 0,
+          instructingCoursesCount: Number(statsRow.instructing_courses) || 0,
+          todayClassesCount: Number(statsRow.today_classes) || 0,
+          pendingAssignmentsCount: Number(statsRow.pending_assignments) || 0,
+          attendanceRatePct: Number(statsRow.attendance_rate_pct) || 0,
+          totalAttendanceRecords: Number(statsRow.total_records) || 0,
         },
         todaySchedule: todayScheduleRes,
         assignedBatches: assignedBatchesRes,
         pendingAssignments: pendingAssignmentsRes,
-        upcomingEvents: [...upcomingClassesRes, ...upcomingExamsRes],
-        attendanceSummary: attSummary,
+        upcomingEvents: upcomingEventsRes,
+        attendanceSummary: {
+          totalRecords: Number(statsRow.total_records) || 0,
+          presentCount: Number(statsRow.present_count) || 0,
+          absentCount: Number(statsRow.absent_count) || 0,
+          lateCount: Number(statsRow.late_count) || 0,
+          excusedCount: Number(statsRow.excused_count) || 0,
+          totalSessionsMarked: Number(statsRow.total_sessions_marked) || 0,
+          attendanceRatePct: Number(statsRow.attendance_rate_pct) || 0,
+        },
       },
     };
   } catch (err) {
@@ -404,7 +430,7 @@ async function handleGetTeacherDashboard(request, dbQueryOverride = null) {
 // 2. Main Test Suite
 async function runPhase2TestSuite() {
   console.log('========================================================================');
-  console.log('BIBLE INSTITUTE LMS – TEACHER PORTAL PHASE 2: DASHBOARD TEST SUITE');
+  console.log('BIBLE INSTITUTE LMS – TEACHER PORTAL PHASE 2.1: VERIFICATION TEST SUITE');
   console.log('========================================================================\n');
 
   const testResults = [];
@@ -421,22 +447,18 @@ async function runPhase2TestSuite() {
   const primaryInstituteId = 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
   const secondaryInstituteId = '6728b343-544a-4970-b10b-56284caf96a0';
 
-  // Dr. John Mark
   const teacherA = {
     userId: 'a4a0f3b1-2466-45e6-9996-94837af05e6b',
     fullName: 'Dr. John Mark',
     profileId: '8c1897c2-6390-4c43-8cfe-7a32dc1b0fb2',
-    batchId: 'ba0c54b3-93fa-4cb4-b403-ad2db30d79f2',
   };
 
-  // Rev. David Paul
   const teacherB = {
     userId: 'c49cadad-bb86-4367-acd4-31987257caee',
     fullName: 'Rev. David Paul',
     profileId: '2ef86b90-a150-481b-8af4-d82170a259cf',
   };
 
-  // Dr. Timothy Keller
   const teacherC = {
     userId: '73008a0e-bc89-4f2b-afa9-0feeca0a530a',
     fullName: 'Dr. Timothy Keller',
@@ -607,8 +629,6 @@ async function runPhase2TestSuite() {
     const batchesA = resA.body.assignedBatches.map(b => b.id);
     const batchesB = resB.body.assignedBatches.map(b => b.id);
 
-    // Dr. John Mark has batch BST-2026-M (ba0c54b3...)
-    // Rev. David Paul has batch CH-2026-E (8d90800e...) and PLC-2026 (3d8bd883...)
     const noLeakage = !batchesA.includes('8d90800e-8414-4101-930a-9d82c46852e2') &&
                       !batchesB.includes('ba0c54b3-93fa-4cb4-b403-ad2db30d79f2');
 
@@ -636,8 +656,6 @@ async function runPhase2TestSuite() {
       handleGetTeacherDashboard(reqC),
     ]);
 
-    // Teacher C (Dr. Timothy Keller) instructs Systematic Theology which has 1 pending assignment
-    // Teacher A (Dr. John Mark) does not instruct Systematic Theology, so pending assignments = 0
     assertTest(
       resA.body.statistics.pendingAssignmentsCount === 0 &&
       resA.body.pendingAssignments.length === 0 &&
@@ -666,7 +684,6 @@ async function runPhase2TestSuite() {
       handleGetTeacherDashboard(reqC),
     ]);
 
-    // Teacher A's batch has 38 attendance logs, while Teacher C's batch has different logs
     assertTest(
       resA.body.attendanceSummary.totalRecords === 38 &&
       resA.body.attendanceSummary.presentCount === 37 &&
@@ -700,7 +717,7 @@ async function runPhase2TestSuite() {
     const crossToken = signJwt({
       sub: teacherA.userId,
       role: 'TEACHER',
-      instituteId: secondaryInstituteId, // Foreign institute
+      instituteId: secondaryInstituteId,
     });
     const req = new NextRequest('http://localhost:3000/api/teachers/dashboard', {
       headers: { authorization: `Bearer ${crossToken}` },
@@ -742,10 +759,8 @@ async function runPhase2TestSuite() {
     const req = new NextRequest('http://localhost:3000/api/teachers/dashboard', {
       headers: { authorization: `Bearer ${token}` },
     });
-    // Mock empty database returns
     const emptyQueryDb = async () => [];
     const res = await handleGetTeacherDashboard(req, emptyQueryDb);
-    // Since membership returns empty, it will throw 403 active teacher profile not found
     assertTest(
       res.status === 403,
       '15. Empty membership gracefully returns 403 error without 500 crash',
@@ -760,7 +775,6 @@ async function runPhase2TestSuite() {
       headers: { authorization: `Bearer ${tokenA}` },
     });
     const res = await handleGetTeacherDashboard(req);
-    // 9 unique students enrolled across batches
     assertTest(
       res.body.statistics.assignedStudentsCount === 9,
       '16. COUNT(DISTINCT studentProfileId) prevents student count inflation',
@@ -769,7 +783,7 @@ async function runPhase2TestSuite() {
   }
 
   console.log('\n========================================================================');
-  console.log('PHASE 2 SECURITY & DASHBOARD TEST SUITE SUMMARY:');
+  console.log('PHASE 2.1 VERIFICATION TEST SUITE SUMMARY:');
   const passed = testResults.filter(r => r.pass).length;
   const failed = testResults.filter(r => !r.pass).length;
   console.log(`TOTAL: ${testResults.length} | PASSED: ${passed} | FAILED: ${failed}`);
@@ -787,4 +801,3 @@ runPhase2TestSuite().catch(async (err) => {
   await pool.end();
   process.exit(1);
 });
-

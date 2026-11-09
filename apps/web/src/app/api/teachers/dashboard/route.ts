@@ -9,106 +9,114 @@ export async function GET(request: NextRequest) {
     const teacher = await resolveAuthenticatedTeacher(request);
     const { teacherProfileId, instituteId } = teacher;
 
-    // Execute parallel, tenant-isolated queries scoped strictly to teacherProfileId and instituteId
+    // Phase 2.1 Optimized Execution:
+    // Consolidates 11 individual query round-trips into 5 targeted, parallel, tenant-isolated queries.
+    // Query 1 aggregates all metrics and attendance overview in a single CTE scan.
     const [
-      batchesCountRes,
-      studentsCountRes,
-      coursesCountRes,
-      todayClassesCountRes,
-      pendingAssignCountRes,
-      attendanceSummaryRes,
+      statsAndAttendanceRes,
       todayScheduleRes,
       assignedBatchesRes,
       pendingAssignmentsRes,
-      upcomingClassesRes,
-      upcomingExamsRes,
+      upcomingEventsRes,
     ] = await Promise.all([
-      // 1. Active Assigned Batches Count
+      // 1. Consolidated Statistics & Attendance Overview (CTE Aggregation)
       queryDb(
-        `SELECT COUNT(DISTINCT bt."batchId")::int as count
-         FROM "BatchTeacher" bt
-         JOIN "Batch" b ON b.id = bt."batchId"
-         WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2 AND b.status = 'ACTIVE'`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      // 2. Unique Active Assigned Students Count
-      queryDb(
-        `SELECT COUNT(DISTINCT e."studentProfileId")::int as count
-         FROM "Enrolment" e
-         JOIN "BatchTeacher" bt ON bt."batchId" = e."batchId"
-         WHERE bt."teacherProfileId" = $1 AND e."instituteId" = $2 AND e.status = 'ACTIVE'`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      // 3. Instructing Published Courses Count
-      queryDb(
-        `SELECT COUNT(DISTINCT ci."courseId")::int as count
-         FROM "CourseInstructor" ci
-         JOIN "Course" c ON c.id = ci."courseId"
-         WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND c.status = 'PUBLISHED'`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      // 4. Today's Scheduled Classes Count (Institute-local date aware)
-      queryDb(
-        `SELECT COUNT(ls.id)::int as count
-         FROM "LiveSession" ls
-         JOIN "Institute" i ON i.id = ls."instituteId"
-         WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
-           AND (ls."startsAt" AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date = (NOW() AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      // 5. Pending Submissions Count awaiting grading
-      queryDb(
-        `SELECT COUNT(s.id)::int as count
-         FROM "Submission" s
-         JOIN "Assignment" a ON a.id = s."assignmentId"
-         WHERE s."instituteId" = $2 AND s.status = 'SUBMITTED'
-           AND (
-             a."batchId" IN (SELECT bt."batchId" FROM "BatchTeacher" bt WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2)
-             OR a."courseId" IN (SELECT ci."courseId" FROM "CourseInstructor" ci WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2)
-           )`,
-        [teacherProfileId, instituteId]
-      ).catch(() => [{ count: 0 }]),
-
-      // 6. Attendance Overview Summary for teacher's cohorts
-      queryDb(
-        `SELECT 
-           COUNT(*)::int as "totalRecords",
-           COUNT(CASE WHEN a.status = 'PRESENT' THEN 1 END)::int as "presentCount",
-           COUNT(CASE WHEN a.status = 'ABSENT' THEN 1 END)::int as "absentCount",
-           COUNT(CASE WHEN a.status = 'LATE' THEN 1 END)::int as "lateCount",
-           COUNT(CASE WHEN a.status = 'EXCUSED' THEN 1 END)::int as "excusedCount",
-           COUNT(DISTINCT a.date)::int as "totalSessionsMarked",
-           ROUND(
-             CASE WHEN COUNT(*) > 0 
-               THEN (COUNT(CASE WHEN a.status IN ('PRESENT', 'LATE') THEN 1 END)::numeric / COUNT(*)::numeric) * 100 
-               ELSE 0 
-             END, 1
-           )::float as "attendanceRatePct"
-         FROM "Attendance" a
-         WHERE a."instituteId" = $2
-           AND a."batchId" IN (
-             SELECT bt."batchId" 
-             FROM "BatchTeacher" bt 
-             WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2
-           )`,
+        `WITH 
+        batch_agg AS (
+          SELECT COUNT(DISTINCT bt."batchId")::int as assigned_batches
+          FROM "BatchTeacher" bt
+          JOIN "Batch" b ON b.id = bt."batchId"
+          WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2 AND b.status = 'ACTIVE'
+        ),
+        student_agg AS (
+          SELECT COUNT(DISTINCT e."studentProfileId")::int as assigned_students
+          FROM "Enrolment" e
+          JOIN "BatchTeacher" bt ON bt."batchId" = e."batchId"
+          WHERE bt."teacherProfileId" = $1 AND e."instituteId" = $2 AND e.status = 'ACTIVE'
+        ),
+        course_agg AS (
+          SELECT COUNT(DISTINCT ci."courseId")::int as instructing_courses
+          FROM "CourseInstructor" ci
+          JOIN "Course" c ON c.id = ci."courseId"
+          WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND c.status = 'PUBLISHED'
+        ),
+        today_classes AS (
+          SELECT COUNT(ls.id)::int as today_classes
+          FROM "LiveSession" ls
+          JOIN "Institute" i ON i.id = ls."instituteId"
+          WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
+            AND (ls."startsAt" AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date = (NOW() AT TIME ZONE COALESCE(i.timezone, 'Asia/Kolkata'))::date
+        ),
+        pending_assign AS (
+          SELECT COUNT(s.id)::int as pending_assignments
+          FROM "Submission" s
+          JOIN "Assignment" a ON a.id = s."assignmentId"
+          WHERE s."instituteId" = $2 AND s.status = 'SUBMITTED'
+            AND (
+              a."batchId" IN (SELECT bt."batchId" FROM "BatchTeacher" bt WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2)
+              OR a."courseId" IN (SELECT ci."courseId" FROM "CourseInstructor" ci WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2)
+            )
+        ),
+        att_agg AS (
+          SELECT 
+            COUNT(*)::int as total_records,
+            COUNT(CASE WHEN a.status = 'PRESENT' THEN 1 END)::int as present_count,
+            COUNT(CASE WHEN a.status = 'ABSENT' THEN 1 END)::int as absent_count,
+            COUNT(CASE WHEN a.status = 'LATE' THEN 1 END)::int as late_count,
+            COUNT(CASE WHEN a.status = 'EXCUSED' THEN 1 END)::int as excused_count,
+            COUNT(DISTINCT a.date)::int as total_sessions_marked,
+            ROUND(
+              CASE WHEN COUNT(*) > 0 
+                THEN (COUNT(CASE WHEN a.status IN ('PRESENT', 'LATE') THEN 1 END)::numeric / COUNT(*)::numeric) * 100 
+                ELSE 0 
+              END, 1
+            )::float as attendance_rate_pct
+          FROM "Attendance" a
+          WHERE a."instituteId" = $2
+            AND a."batchId" IN (
+              SELECT bt."batchId" 
+              FROM "BatchTeacher" bt 
+              WHERE bt."teacherProfileId" = $1 AND bt."instituteId" = $2
+            )
+        )
+        SELECT 
+          b.assigned_batches,
+          s.assigned_students,
+          c.instructing_courses,
+          tc.today_classes,
+          pa.pending_assignments,
+          att.total_records,
+          att.present_count,
+          att.absent_count,
+          att.late_count,
+          att.excused_count,
+          att.total_sessions_marked,
+          att.attendance_rate_pct
+        FROM batch_agg b
+        CROSS JOIN student_agg s
+        CROSS JOIN course_agg c
+        CROSS JOIN today_classes tc
+        CROSS JOIN pending_assign pa
+        CROSS JOIN att_agg att`,
         [teacherProfileId, instituteId]
       ).catch(() => [{
-        totalRecords: 0,
-        presentCount: 0,
-        absentCount: 0,
-        lateCount: 0,
-        excusedCount: 0,
-        totalSessionsMarked: 0,
-        attendanceRatePct: 0,
+        assigned_batches: 0,
+        assigned_students: 0,
+        instructing_courses: 0,
+        today_classes: 0,
+        pending_assignments: 0,
+        total_records: 0,
+        present_count: 0,
+        absent_count: 0,
+        late_count: 0,
+        excused_count: 0,
+        total_sessions_marked: 0,
+        attendance_rate_pct: 0,
       }]),
 
-      // 7. Today's Teaching Schedule (Institute-local date aware)
+      // 2. Today's Teaching Schedule (Institute-local date aware)
       queryDb(
-        `SELECT ls.id, ls.title, ls."startsAt", ls."endsAt", ls.status, ls.room, ls."joinUrl",
+        `SELECT ls.id, ls.title, ls."startsAt", ls."endsAt", ls.status::text as status, ls.room, ls."joinUrl",
                 c.title as "courseTitle", b.name as "batchName", b.code as "batchCode"
          FROM "LiveSession" ls
          JOIN "Batch" b ON b.id = ls."batchId"
@@ -120,7 +128,7 @@ export async function GET(request: NextRequest) {
         [teacherProfileId, instituteId]
       ).catch(() => []),
 
-      // 8. Assigned Batches Preview (active cohorts)
+      // 3. Assigned Batches Preview (active cohorts)
       queryDb(
         `SELECT b.id, b.name, b.code, b.status, b."startDate", b."endDate", b.capacity,
                 c.id as "courseId", c.title as "courseTitle", c.slug as "courseSlug", c.level as "courseLevel",
@@ -141,7 +149,7 @@ export async function GET(request: NextRequest) {
         [teacherProfileId, instituteId]
       ).catch(() => []),
 
-      // 9. Assignments Awaiting Grading Preview
+      // 4. Assignments Awaiting Grading Preview
       queryDb(
         `SELECT a.id, a.title, a."dueAt", a.status, a."maxMarks",
                 c.id as "courseId", c.title as "courseTitle",
@@ -163,42 +171,46 @@ export async function GET(request: NextRequest) {
         [teacherProfileId, instituteId]
       ).catch(() => []),
 
-      // 10. Upcoming Live Classes
+      // 5. Consolidated Upcoming Events (Live Classes + Exams combined via UNION ALL)
       queryDb(
-        `SELECT ls.id, ls.title, ls."startsAt" as "eventDate", ls."endsAt", ls.status, ls.room, ls."joinUrl",
-                c.title as "courseTitle", b.name as "batchName", b.code as "batchCode",
-                'LIVE_CLASS' as "eventType"
-         FROM "LiveSession" ls
-         JOIN "Batch" b ON b.id = ls."batchId"
-         JOIN "Course" c ON c.id = b."courseId"
-         WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
-         ORDER BY ls."startsAt" DESC
-         LIMIT 5`,
-        [teacherProfileId, instituteId]
-      ).catch(() => []),
-
-      // 11. Upcoming Examinations (Course-instructor relationship scoped)
-      queryDb(
-        `SELECT e.id, e.title, e."createdAt" as "eventDate", e.type as status, e."durationMin",
-                c.title as "courseTitle", NULL as "batchName", NULL as "batchCode",
-                'EXAMINATION' as "eventType"
-         FROM "Exam" e
-         JOIN "Course" c ON c.id = e."courseId"
-         JOIN "CourseInstructor" ci ON ci."courseId" = c.id
-         WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND e."instituteId" = $2
-         LIMIT 5`,
+        `SELECT * FROM (
+           SELECT ls.id, ls.title, ls."startsAt" as "eventDate", ls."endsAt" as "endDate", ls.status::text as status, ls.room, ls."joinUrl",
+                  c.title as "courseTitle", b.name as "batchName",
+                  'LIVE_CLASS' as "eventType", NULL::int as "durationMin"
+           FROM "LiveSession" ls
+           JOIN "Batch" b ON b.id = ls."batchId"
+           JOIN "Course" c ON c.id = b."courseId"
+           WHERE ls."teacherProfileId" = $1 AND ls."instituteId" = $2
+           
+           UNION ALL
+           
+           SELECT e.id, e.title, e."createdAt" as "eventDate", NULL::timestamptz as "endDate", e.type::text as status, NULL as room, NULL as "joinUrl",
+                  c.title as "courseTitle", NULL as "batchName",
+                  'EXAMINATION' as "eventType", e."durationMin"
+           FROM "Exam" e
+           JOIN "Course" c ON c.id = e."courseId"
+           JOIN "CourseInstructor" ci ON ci."courseId" = c.id
+           WHERE ci."teacherProfileId" = $1 AND ci."instituteId" = $2 AND e."instituteId" = $2
+         ) upcoming
+         ORDER BY "eventDate" DESC
+         LIMIT 6`,
         [teacherProfileId, instituteId]
       ).catch(() => []),
     ]);
 
-    const attSummary = attendanceSummaryRes[0] || {
-      totalRecords: 0,
-      presentCount: 0,
-      absentCount: 0,
-      lateCount: 0,
-      excusedCount: 0,
-      totalSessionsMarked: 0,
-      attendanceRatePct: 0,
+    const statsRow = statsAndAttendanceRes[0] || {
+      assigned_batches: 0,
+      assigned_students: 0,
+      instructing_courses: 0,
+      today_classes: 0,
+      pending_assignments: 0,
+      total_records: 0,
+      present_count: 0,
+      absent_count: 0,
+      late_count: 0,
+      excused_count: 0,
+      total_sessions_marked: 0,
+      attendance_rate_pct: 0,
     };
 
     // Format assigned batches
@@ -233,34 +245,20 @@ export async function GET(request: NextRequest) {
       pendingReviewCount: Number(a.pendingReviewCount) || 0,
     }));
 
-    // Merge upcoming events (Live Classes & Exams)
-    const upcomingEvents = [
-      ...upcomingClassesRes.map((cls: any) => ({
-        id: cls.id,
-        title: cls.title,
-        eventType: 'LIVE_CLASS' as const,
-        courseTitle: cls.courseTitle,
-        batchName: cls.batchName,
-        eventDate: cls.eventDate,
-        endDate: cls.endsAt || null,
-        status: cls.status,
-        room: cls.room || null,
-        joinUrl: cls.joinUrl || null,
-      })),
-      ...upcomingExamsRes.map((ex: any) => ({
-        id: ex.id,
-        title: ex.title,
-        eventType: 'EXAMINATION' as const,
-        courseTitle: ex.courseTitle,
-        batchName: null,
-        eventDate: ex.eventDate,
-        endDate: null,
-        status: ex.status,
-        room: null,
-        joinUrl: null,
-        durationMin: ex.durationMin || 30,
-      })),
-    ];
+    // Format upcoming events
+    const upcomingEvents = upcomingEventsRes.map((evt: any) => ({
+      id: evt.id,
+      title: evt.title,
+      eventType: evt.eventType as 'LIVE_CLASS' | 'EXAMINATION',
+      courseTitle: evt.courseTitle,
+      batchName: evt.batchName || null,
+      eventDate: evt.eventDate,
+      endDate: evt.endDate || null,
+      status: evt.status,
+      room: evt.room || null,
+      joinUrl: evt.joinUrl || null,
+      durationMin: evt.durationMin || null,
+    }));
 
     // Format today's schedule
     const todaySchedule = todayScheduleRes.map((s: any) => ({
@@ -296,29 +294,29 @@ export async function GET(request: NextRequest) {
         name: teacher.instituteName,
         code: (teacher.instituteSlug || 'GBI').toUpperCase(),
         logoUrl: teacher.instituteLogoUrl,
-        timezone: 'Asia/Kolkata',
+        timezone: teacher.timezone || 'Asia/Kolkata',
       },
       statistics: {
-        assignedBatchesCount: Number(batchesCountRes[0]?.count) || 0,
-        assignedStudentsCount: Number(studentsCountRes[0]?.count) || 0,
-        instructingCoursesCount: Number(coursesCountRes[0]?.count) || 0,
-        todayClassesCount: Number(todayClassesCountRes[0]?.count) || 0,
-        pendingAssignmentsCount: Number(pendingAssignCountRes[0]?.count) || 0,
-        attendanceRatePct: Number(attSummary.attendanceRatePct) || 0,
-        totalAttendanceRecords: Number(attSummary.totalRecords) || 0,
+        assignedBatchesCount: Number(statsRow.assigned_batches) || 0,
+        assignedStudentsCount: Number(statsRow.assigned_students) || 0,
+        instructingCoursesCount: Number(statsRow.instructing_courses) || 0,
+        todayClassesCount: Number(statsRow.today_classes) || 0,
+        pendingAssignmentsCount: Number(statsRow.pending_assignments) || 0,
+        attendanceRatePct: Number(statsRow.attendance_rate_pct) || 0,
+        totalAttendanceRecords: Number(statsRow.total_records) || 0,
       },
       todaySchedule,
       assignedBatches,
       pendingAssignments,
       upcomingEvents,
       attendanceSummary: {
-        totalRecords: Number(attSummary.totalRecords) || 0,
-        presentCount: Number(attSummary.presentCount) || 0,
-        absentCount: Number(attSummary.absentCount) || 0,
-        lateCount: Number(attSummary.lateCount) || 0,
-        excusedCount: Number(attSummary.excusedCount) || 0,
-        totalSessionsMarked: Number(attSummary.totalSessionsMarked) || 0,
-        attendanceRatePct: Number(attSummary.attendanceRatePct) || 0,
+        totalRecords: Number(statsRow.total_records) || 0,
+        presentCount: Number(statsRow.present_count) || 0,
+        absentCount: Number(statsRow.absent_count) || 0,
+        lateCount: Number(statsRow.late_count) || 0,
+        excusedCount: Number(statsRow.excused_count) || 0,
+        totalSessionsMarked: Number(statsRow.total_sessions_marked) || 0,
+        attendanceRatePct: Number(statsRow.attendance_rate_pct) || 0,
       },
     });
   } catch (err: any) {
@@ -335,4 +333,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
