@@ -11,6 +11,7 @@ export async function GET(request: NextRequest) {
     const resolvedInstituteId = student.instituteId;
 
     let sessionRows: any[] = [];
+    let dbSuccess = false;
     try {
       sessionRows = await queryDb(
         `SELECT ls.id, ls.title, ls.description, ls.room, ls."startsAt", ls."endsAt", ls."joinUrl", ls."recordingUrl", ls.status as "rawStatus",
@@ -19,19 +20,22 @@ export async function GET(request: NextRequest) {
                 att.status as "attendanceStatus"
          FROM "LiveSession" ls
          JOIN "Batch" b ON ls."batchId" = b.id
+         JOIN "Enrolment" e ON e."batchId" = b.id AND e."studentProfileId" = $1 AND e.status = 'ACTIVE'
          JOIN "Course" c ON b."courseId" = c.id
          LEFT JOIN "TeacherProfile" tp ON ls."teacherProfileId" = tp.id
          LEFT JOIN "Membership" tm ON tp."membershipId" = tm.id
          LEFT JOIN "User" u ON tm."userId" = u.id
          LEFT JOIN "Attendance" att ON att."liveSessionId" = ls.id AND att."studentProfileId" = $1
+         WHERE b."instituteId" = $2
          ORDER BY ls."startsAt" ASC`,
-        [studentProfileId]
+        [studentProfileId, resolvedInstituteId]
       );
+      dbSuccess = true;
     } catch (err: any) {
       console.warn('Live session query warning:', err?.message);
     }
 
-    if (sessionRows.length === 0) {
+    if (!dbSuccess && sessionRows.length === 0) {
       sessionRows = [
         {
           id: 'live-shaf-1',

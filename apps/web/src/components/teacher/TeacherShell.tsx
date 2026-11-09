@@ -45,7 +45,7 @@ const defaultTeacherNavItems: TeacherNavItem[] = [
   { label: 'Attendance', href: '/teacher/attendance', icon: <CalendarCheck size={18} /> },
   { label: 'Assignments', href: '/teacher/assignments', icon: <FileCheck2 size={18} /> },
   { label: 'Examinations', href: '/teacher/exams', icon: <GraduationCap size={18} /> },
-  { label: 'Live Classes', href: '/teacher/classes', icon: <Radio size={18} />, badge: 'LIVE', badgeColor: 'bg-rose-500' },
+  { label: 'Live Classes', href: '/teacher/live-classes', icon: <Radio size={18} />, badge: 'LIVE', badgeColor: 'bg-rose-500' },
   { label: 'Timetable', href: '/teacher/timetable', icon: <Clock size={18} /> },
   { label: 'Study Materials', href: '/teacher/materials', icon: <FileText size={18} /> },
   { label: 'Notifications', href: '/teacher/notifications', icon: <Bell size={18} /> },
@@ -190,7 +190,9 @@ export function TeacherShell({
               const isActive =
                 item.href === '/teacher'
                   ? pathname === '/teacher'
-                  : pathname.startsWith(item.href);
+                  : pathname.startsWith(item.href) ||
+                    (item.href === '/teacher/live-classes' && pathname.startsWith('/teacher/classes')) ||
+                    (item.href === '/teacher/classes' && pathname.startsWith('/teacher/live-classes'));
 
               return (
                 <Link

@@ -233,7 +233,78 @@ export class TeacherMeController {
   ) {
     return this.teachersService.evaluateTeacherExamAttempt(user, examId, attemptId, body);
   }
+
+  // =========================================================================
+  // PHASE 7: LIVE CLASSES & TIMETABLE MANAGEMENT
+  // =========================================================================
+
+  @Get('live-classes')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherLiveClasses(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherLiveClasses(user, query);
+  }
+
+  @Get('live-classes/:sessionId')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherLiveClassDetail(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.teachersService.getTeacherLiveClassDetail(user, sessionId);
+  }
+
+  @Post('live-classes')
+  @HttpCode(HttpStatus.CREATED)
+  async createTeacherLiveClass(@CurrentUser() user: any, @Body() body: any) {
+    return this.teachersService.createTeacherLiveClass(user, body);
+  }
+
+  @Put('live-classes/:sessionId')
+  @HttpCode(HttpStatus.OK)
+  async updateTeacherLiveClass(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.updateTeacherLiveClass(user, sessionId, body);
+  }
+
+  @Post('live-classes/:sessionId/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancelTeacherLiveClass(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.cancelTeacherLiveClass(user, sessionId, body);
+  }
+
+  @Get('timetable')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherTimetable(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherTimetable(user, query);
+  }
+
+  @Get('live-classes/:sessionId/attendance')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherLiveClassAttendance(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.teachersService.getTeacherLiveClassAttendance(user, sessionId);
+  }
+
+  @Post('live-classes/:sessionId/attendance')
+  @HttpCode(HttpStatus.OK)
+  async markTeacherLiveClassAttendance(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.markTeacherLiveClassAttendance(user, sessionId, body);
+  }
 }
+
 
 
 

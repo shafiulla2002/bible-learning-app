@@ -4178,4 +4178,913 @@ export class TeachersService {
       data: updated,
     };
   }
+
+  // ==========================================
+  // PHASE 7: LIVE CLASSES & TIMETABLE METHODS
+  // ==========================================
+
+  async getTeacherLiveClasses(
+    user: any,
+    options: {
+      courseId?: string;
+      batchId?: string;
+      status?: string;
+      date?: string;
+      search?: string;
+      page?: number | string;
+      limit?: number | string;
+    } = {}
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    // 1. Fetch teacher assigned batches and courses
+    const assignedBatchTeachers = await this.prisma.batchTeacher.findMany({
+      where: { teacherProfileId, instituteId },
+      include: {
+        batch: {
+          include: {
+            course: { select: { id: true, title: true } },
+          },
+        },
+      },
+      orderBy: { batch: { name: 'asc' } },
+    });
+
+    const assignedBatchIds = assignedBatchTeachers.map((bt) => bt.batchId);
+    const assignedCourseIds = Array.from(new Set(assignedBatchTeachers.map((bt) => bt.batch.courseId)));
+
+    if (assignedBatchIds.length === 0) {
+      return {
+        success: true,
+        data: [],
+        metrics: {
+          totalScheduled: 0,
+          classesToday: 0,
+          upcomingClasses: 0,
+          ongoingClasses: 0,
+          completedClasses: 0,
+          cancelledClasses: 0,
+          totalAssignedBatches: 0,
+        },
+        meta: {
+          total: 0,
+          page: Number(options.page) || 1,
+          limit: Number(options.limit) || 10,
+          totalPages: 0,
+        },
+      };
+    }
+
+    if (options.batchId && options.batchId !== 'ALL' && !assignedBatchIds.includes(options.batchId)) {
+      throw new ForbiddenException('You are not authorized to view live classes for this batch.');
+    }
+
+    if (options.courseId && options.courseId !== 'ALL' && !assignedCourseIds.includes(options.courseId)) {
+      throw new ForbiddenException('You are not authorized to view live classes for this course.');
+    }
+
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 10));
+    const skip = (page - 1) * limit;
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+    // Filter building
+    const where: any = {
+      instituteId,
+      batchId: { in: assignedBatchIds },
+    };
+
+    if (options.batchId && options.batchId !== 'ALL') {
+      where.batchId = options.batchId;
+    }
+
+    if (options.courseId && options.courseId !== 'ALL') {
+      where.batch = { courseId: options.courseId };
+    }
+
+    if (options.status && options.status !== 'ALL') {
+      if (options.status === 'LIVE' || options.status === 'ONGOING') {
+        where.OR = [
+          { status: LiveSessionStatus.LIVE },
+          { startsAt: { lte: now }, endsAt: { gte: now }, status: { not: LiveSessionStatus.CANCELLED } },
+        ];
+      } else {
+        where.status = options.status;
+      }
+    }
+
+    if (options.date) {
+      const d = new Date(options.date);
+      if (!isNaN(d.getTime())) {
+        const dStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const dEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+        where.startsAt = { gte: dStart, lt: dEnd };
+      }
+    }
+
+    if (options.search?.trim()) {
+      const s = options.search.trim();
+      where.OR = [
+        { title: { contains: s, mode: 'insensitive' } },
+        { description: { contains: s, mode: 'insensitive' } },
+        { room: { contains: s, mode: 'insensitive' } },
+      ];
+    }
+
+    const [total, sessions] = await Promise.all([
+      this.prisma.liveSession.count({ where }),
+      this.prisma.liveSession.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { startsAt: 'desc' },
+        include: {
+          batch: {
+            include: {
+              course: { select: { id: true, title: true } },
+              _count: { select: { enrolments: { where: { status: 'ACTIVE' } } } },
+            },
+          },
+          teacherProfile: {
+            include: {
+              membership: {
+                include: {
+                  user: { select: { id: true, fullName: true, avatarUrl: true } },
+                },
+              },
+            },
+          },
+          _count: {
+            select: { attendances: true },
+          },
+        },
+      }),
+    ]);
+
+    // Aggregate metrics across all assigned sessions for teacher
+    const allTeacherSessions = await this.prisma.liveSession.findMany({
+      where: {
+        instituteId,
+        batchId: { in: assignedBatchIds },
+      },
+      select: {
+        id: true,
+        startsAt: true,
+        endsAt: true,
+        status: true,
+      },
+    });
+
+    let totalScheduled = 0;
+    let classesToday = 0;
+    let upcomingClasses = 0;
+    let ongoingClasses = 0;
+    let completedClasses = 0;
+    let cancelledClasses = 0;
+
+    allTeacherSessions.forEach((s) => {
+      if (s.status === LiveSessionStatus.CANCELLED) {
+        cancelledClasses++;
+      } else if (s.status === LiveSessionStatus.COMPLETED) {
+        completedClasses++;
+      } else {
+        totalScheduled++;
+        if (s.startsAt >= todayStart && s.startsAt < todayEnd) {
+          classesToday++;
+        }
+        if (s.status === LiveSessionStatus.LIVE || (s.startsAt <= now && s.endsAt >= now)) {
+          ongoingClasses++;
+        } else if (s.startsAt > now) {
+          upcomingClasses++;
+        } else if (s.endsAt < now) {
+          completedClasses++;
+        }
+      }
+    });
+
+    const data = sessions.map((s) => {
+      const isOngoing =
+        (s.startsAt <= now && s.endsAt >= now && s.status !== LiveSessionStatus.CANCELLED) ||
+        s.status === LiveSessionStatus.LIVE;
+      let displayStatus = s.status as string;
+      if (isOngoing && s.status !== LiveSessionStatus.CANCELLED) {
+        displayStatus = 'LIVE';
+      }
+
+      let meetingProvider = 'GOOGLE_MEET';
+      if (s.joinUrl?.includes('zoom.us')) meetingProvider = 'ZOOM';
+      else if (s.joinUrl?.includes('teams.microsoft.com')) meetingProvider = 'MICROSOFT_TEAMS';
+
+      const durationMin = Math.round((s.endsAt.getTime() - s.startsAt.getTime()) / (1000 * 60));
+
+      return {
+        id: s.id,
+        title: s.title,
+        description: s.description,
+        room: s.room,
+        courseId: s.batch.courseId,
+        courseTitle: s.batch.course.title,
+        batchId: s.batchId,
+        batchName: s.batch.name,
+        teacherProfileId: s.teacherProfileId,
+        teacherName: s.teacherProfile?.membership?.user?.fullName || 'Faculty Instructor',
+        teacherAvatarUrl: s.teacherProfile?.membership?.user?.avatarUrl || null,
+        startsAt: s.startsAt.toISOString(),
+        endsAt: s.endsAt.toISOString(),
+        durationMin,
+        meetingProvider,
+        joinUrl: s.joinUrl,
+        recordingUrl: s.recordingUrl,
+        status: displayStatus,
+        rawStatus: s.status,
+        enrolledStudentsCount: s.batch._count.enrolments,
+        markedAttendanceCount: s._count.attendances,
+        canJoin: !!s.joinUrl && s.status !== LiveSessionStatus.CANCELLED,
+        createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
+      };
+    });
+
+    return {
+      success: true,
+      data,
+      metrics: {
+        totalScheduled,
+        classesToday,
+        upcomingClasses,
+        ongoingClasses,
+        completedClasses,
+        cancelledClasses,
+        totalAssignedBatches: assignedBatchIds.length,
+      },
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
+  }
+
+  async getTeacherLiveClassDetail(user: any, sessionId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: { id: sessionId, instituteId },
+      include: {
+        batch: {
+          include: {
+            course: { select: { id: true, title: true, slug: true } },
+            enrolments: {
+              where: { status: 'ACTIVE' },
+              include: {
+                studentProfile: {
+                  include: {
+                    membership: {
+                      include: {
+                        user: { select: { id: true, fullName: true, email: true, avatarUrl: true, phoneE164: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        teacherProfile: {
+          include: {
+            membership: {
+              include: {
+                user: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+              },
+            },
+          },
+        },
+        attendances: {
+          include: {
+            studentProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: { select: { id: true, fullName: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found in this institute');
+    }
+
+    const isTeacher = session.teacherProfileId === teacherProfileId;
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: { batchId: session.batchId, teacherProfileId, instituteId },
+    });
+
+    if (!isTeacher && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to view details for this live class');
+    }
+
+    const now = new Date();
+    const isOngoing =
+      (session.startsAt <= now && session.endsAt >= now && session.status !== LiveSessionStatus.CANCELLED) ||
+      session.status === LiveSessionStatus.LIVE;
+    let displayStatus = session.status as string;
+    if (isOngoing && session.status !== LiveSessionStatus.CANCELLED) {
+      displayStatus = 'LIVE';
+    }
+
+    const attendanceMap = new Map<string, any>();
+    session.attendances.forEach((att) => {
+      attendanceMap.set(att.studentProfileId, att);
+    });
+
+    const roster = session.batch.enrolments.map((enr) => {
+      const sp = enr.studentProfile;
+      const u = sp.membership?.user;
+      const att = attendanceMap.get(sp.id);
+
+      return {
+        studentProfileId: sp.id,
+        admissionNo: sp.admissionNo || 'N/A',
+        studentName: u?.fullName || 'Enrolled Student',
+        email: u?.email || '',
+        phone: u?.phoneE164 || '',
+        avatarUrl: u?.avatarUrl || null,
+        attendanceStatus: att?.status || null,
+        remarks: att?.remarks || null,
+        markedAt: att?.markedAt ? att.markedAt.toISOString() : null,
+      };
+    });
+
+    const presentCount = roster.filter((r) => r.attendanceStatus === 'PRESENT').length;
+    const lateCount = roster.filter((r) => r.attendanceStatus === 'LATE').length;
+    const absentCount = roster.filter((r) => r.attendanceStatus === 'ABSENT').length;
+    const excusedCount = roster.filter((r) => r.attendanceStatus === 'EXCUSED').length;
+
+    return {
+      success: true,
+      data: {
+        id: session.id,
+        title: session.title,
+        description: session.description,
+        room: session.room,
+        courseId: session.batch.courseId,
+        courseTitle: session.batch.course.title,
+        batchId: session.batchId,
+        batchName: session.batch.name,
+        teacherProfileId: session.teacherProfileId,
+        teacherName: session.teacherProfile?.membership?.user?.fullName || 'Faculty Instructor',
+        teacherAvatarUrl: session.teacherProfile?.membership?.user?.avatarUrl || null,
+        startsAt: session.startsAt.toISOString(),
+        endsAt: session.endsAt.toISOString(),
+        durationMin: Math.round((session.endsAt.getTime() - session.startsAt.getTime()) / (1000 * 60)),
+        status: displayStatus,
+        rawStatus: session.status,
+        joinUrl: session.joinUrl,
+        recordingUrl: session.recordingUrl,
+        enrolledCount: roster.length,
+        attendanceSummary: {
+          totalEnrolled: roster.length,
+          totalMarked: session.attendances.length,
+          presentCount,
+          lateCount,
+          absentCount,
+          excusedCount,
+          attendanceRatePct: roster.length > 0 ? Math.round(((presentCount + lateCount) / roster.length) * 100) : 0,
+        },
+        roster,
+      },
+    };
+  }
+
+  async createTeacherLiveClass(user: any, payload: any) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    if (!payload.title || !payload.title.trim()) {
+      throw new BadRequestException('Live class title is mandatory');
+    }
+    if (!payload.batchId) {
+      throw new BadRequestException('Batch selection is mandatory');
+    }
+
+    // Verify teacher assignment to batch
+    const assignment = await this.prisma.batchTeacher.findFirst({
+      where: {
+        batchId: payload.batchId,
+        teacherProfileId,
+        instituteId,
+      },
+      include: {
+        batch: {
+          include: { course: true },
+        },
+      },
+    });
+
+    if (!assignment) {
+      throw new ForbiddenException('You are not assigned to instruct this batch');
+    }
+
+    const startsAt = new Date(payload.startsAt);
+    const endsAt = new Date(payload.endsAt);
+
+    if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime())) {
+      throw new BadRequestException('Valid start and end date/time are required');
+    }
+    if (startsAt >= endsAt) {
+      throw new BadRequestException('Session start time must be before end time');
+    }
+
+    // Check schedule conflict
+    const conflict = await this.checkScheduleConflict(instituteId, {
+      teacherProfileId,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+    });
+
+    if (conflict.hasConflict) {
+      throw new BadRequestException(
+        conflict.message || `Teacher has an overlapping live session scheduled (${conflict.conflictingSession?.title})`
+      );
+    }
+
+    // Validate meeting URL if provided
+    let joinUrl = payload.joinUrl ? String(payload.joinUrl).trim() : null;
+    if (joinUrl) {
+      if (!joinUrl.startsWith('http://') && !joinUrl.startsWith('https://')) {
+        throw new BadRequestException('Meeting URL must start with http:// or https://');
+      }
+    }
+
+    const session = await this.prisma.liveSession.create({
+      data: {
+        instituteId,
+        batchId: payload.batchId,
+        teacherProfileId,
+        title: payload.title.trim(),
+        description: payload.description?.trim() || null,
+        room: payload.room?.trim() || null,
+        startsAt,
+        endsAt,
+        joinUrl,
+        recordingUrl: payload.recordingUrl?.trim() || null,
+        status: LiveSessionStatus.SCHEDULED,
+      },
+      include: {
+        batch: {
+          include: { course: { select: { id: true, title: true } } },
+        },
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'LIVE_CLASS_SCHEDULED',
+        entityType: 'LiveSession',
+        entityId: session.id,
+        metadata: {
+          title: session.title,
+          batchId: session.batchId,
+          startsAt: session.startsAt,
+          endsAt: session.endsAt,
+          joinUrl: session.joinUrl,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Live class scheduled successfully',
+      data: session,
+    };
+  }
+
+  async updateTeacherLiveClass(user: any, sessionId: string, payload: any) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: { id: sessionId, instituteId },
+      include: { batch: true },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found in your institute');
+    }
+
+    // Verify teacher authorization
+    const isTeacher = session.teacherProfileId === teacherProfileId;
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: { batchId: session.batchId, teacherProfileId, instituteId },
+    });
+
+    if (!isTeacher && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to update this live class');
+    }
+
+    if (session.status === LiveSessionStatus.COMPLETED) {
+      throw new BadRequestException('Completed sessions cannot be rescheduled or modified');
+    }
+
+    const updateData: any = {};
+    if (payload.title !== undefined) {
+      if (!payload.title.trim()) throw new BadRequestException('Title cannot be empty');
+      updateData.title = payload.title.trim();
+    }
+    if (payload.description !== undefined) {
+      updateData.description = payload.description?.trim() || null;
+    }
+    if (payload.room !== undefined) {
+      updateData.room = payload.room?.trim() || null;
+    }
+    if (payload.joinUrl !== undefined) {
+      const jUrl = payload.joinUrl ? String(payload.joinUrl).trim() : null;
+      if (jUrl && !jUrl.startsWith('http://') && !jUrl.startsWith('https://')) {
+        throw new BadRequestException('Meeting URL must start with http:// or https://');
+      }
+      updateData.joinUrl = jUrl;
+    }
+    if (payload.recordingUrl !== undefined) {
+      updateData.recordingUrl = payload.recordingUrl?.trim() || null;
+    }
+
+    let newStartsAt = session.startsAt;
+    let newEndsAt = session.endsAt;
+    let timesChanged = false;
+
+    if (payload.startsAt) {
+      newStartsAt = new Date(payload.startsAt);
+      timesChanged = true;
+    }
+    if (payload.endsAt) {
+      newEndsAt = new Date(payload.endsAt);
+      timesChanged = true;
+    }
+
+    if (timesChanged) {
+      if (isNaN(newStartsAt.getTime()) || isNaN(newEndsAt.getTime())) {
+        throw new BadRequestException('Valid start and end date/time are required');
+      }
+      if (newStartsAt >= newEndsAt) {
+        throw new BadRequestException('Session start time must be before end time');
+      }
+
+      const conflict = await this.checkScheduleConflict(instituteId, {
+        teacherProfileId,
+        startsAt: newStartsAt.toISOString(),
+        endsAt: newEndsAt.toISOString(),
+        excludeSessionId: sessionId,
+      });
+
+      if (conflict.hasConflict) {
+        throw new BadRequestException(
+          conflict.message || `Schedule conflict with session: ${conflict.conflictingSession?.title}`
+        );
+      }
+
+      updateData.startsAt = newStartsAt;
+      updateData.endsAt = newEndsAt;
+    }
+
+    const updated = await this.prisma.liveSession.update({
+      where: { id: sessionId },
+      data: updateData,
+      include: {
+        batch: {
+          include: { course: { select: { id: true, title: true } } },
+        },
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'LIVE_CLASS_UPDATED',
+        entityType: 'LiveSession',
+        entityId: sessionId,
+        metadata: {
+          sessionId,
+          updatedFields: Object.keys(updateData),
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Live class updated successfully',
+      data: updated,
+    };
+  }
+
+  async cancelTeacherLiveClass(user: any, sessionId: string, payload: any = {}) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: { id: sessionId, instituteId },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found in your institute');
+    }
+
+    const isTeacher = session.teacherProfileId === teacherProfileId;
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: { batchId: session.batchId, teacherProfileId, instituteId },
+    });
+
+    if (!isTeacher && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to cancel this live class');
+    }
+
+    if (session.status === LiveSessionStatus.CANCELLED) {
+      return { success: true, message: 'Class is already cancelled', data: session };
+    }
+
+    const updated = await this.prisma.liveSession.update({
+      where: { id: sessionId },
+      data: {
+        status: LiveSessionStatus.CANCELLED,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'LIVE_CLASS_CANCELLED',
+        entityType: 'LiveSession',
+        entityId: sessionId,
+        metadata: {
+          sessionId,
+          reason: payload.reason?.trim() || null,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Live class cancelled successfully',
+      data: updated,
+    };
+  }
+
+  async getTeacherTimetable(
+    user: any,
+    options: {
+      startDate?: string;
+      endDate?: string;
+      courseId?: string;
+      batchId?: string;
+    } = {}
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const assignedBatchTeachers = await this.prisma.batchTeacher.findMany({
+      where: { teacherProfileId, instituteId },
+    });
+    const assignedBatchIds = assignedBatchTeachers.map((bt) => bt.batchId);
+
+    if (assignedBatchIds.length === 0) {
+      return { success: true, items: [] };
+    }
+
+    const where: any = {
+      instituteId,
+      batchId: { in: assignedBatchIds },
+    };
+
+    if (options.startDate && options.endDate) {
+      where.startsAt = {
+        gte: new Date(options.startDate),
+        lte: new Date(options.endDate),
+      };
+    } else if (options.startDate) {
+      where.startsAt = { gte: new Date(options.startDate) };
+    }
+
+    if (options.batchId && options.batchId !== 'ALL') {
+      where.batchId = options.batchId;
+    }
+    if (options.courseId && options.courseId !== 'ALL') {
+      where.batch = { courseId: options.courseId };
+    }
+
+    const sessions = await this.prisma.liveSession.findMany({
+      where,
+      orderBy: { startsAt: 'asc' },
+      include: {
+        batch: {
+          include: { course: { select: { id: true, title: true } } },
+        },
+      },
+    });
+
+    const items = sessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      description: s.description,
+      room: s.room,
+      courseId: s.batch.courseId,
+      courseTitle: s.batch.course.title,
+      batchId: s.batchId,
+      batchName: s.batch.name,
+      startsAt: s.startsAt.toISOString(),
+      endsAt: s.endsAt.toISOString(),
+      durationMin: Math.round((s.endsAt.getTime() - s.startsAt.getTime()) / (1000 * 60)),
+      status: s.status,
+      joinUrl: s.joinUrl,
+    }));
+
+    return {
+      success: true,
+      items,
+    };
+  }
+
+  async getTeacherLiveClassAttendance(user: any, sessionId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: { id: sessionId, instituteId },
+      include: {
+        batch: {
+          include: {
+            course: { select: { id: true, title: true } },
+            enrolments: {
+              where: { status: 'ACTIVE' },
+              include: {
+                studentProfile: {
+                  include: {
+                    membership: {
+                      include: {
+                        user: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        attendances: true,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found');
+    }
+
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: { batchId: session.batchId, teacherProfileId, instituteId },
+    });
+    if (!isBatchTeacher && session.teacherProfileId !== teacherProfileId) {
+      throw new ForbiddenException('You are not authorized to view attendance for this session');
+    }
+
+    const attMap = new Map<string, any>();
+    session.attendances.forEach((a) => attMap.set(a.studentProfileId, a));
+
+    const roster = session.batch.enrolments.map((enr) => {
+      const sp = enr.studentProfile;
+      const att = attMap.get(sp.id);
+      return {
+        studentProfileId: sp.id,
+        admissionNo: sp.admissionNo || 'N/A',
+        studentName: sp.membership?.user?.fullName || 'Student',
+        email: sp.membership?.user?.email || '',
+        avatarUrl: sp.membership?.user?.avatarUrl || null,
+        attendanceId: att?.id || null,
+        status: att?.status || 'ABSENT',
+        remarks: att?.remarks || null,
+        isMarked: Boolean(att),
+      };
+    });
+
+    return {
+      success: true,
+      data: {
+        sessionId: session.id,
+        sessionTitle: session.title,
+        batchName: session.batch.name,
+        courseTitle: session.batch.course.title,
+        startsAt: session.startsAt.toISOString(),
+        roster,
+      },
+    };
+  }
+
+  async markTeacherLiveClassAttendance(user: any, sessionId: string, payload: any) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: { id: sessionId, instituteId },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found');
+    }
+
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: { batchId: session.batchId, teacherProfileId, instituteId },
+    });
+    if (!isBatchTeacher && session.teacherProfileId !== teacherProfileId) {
+      throw new ForbiddenException('You are not authorized to mark attendance for this session');
+    }
+
+    if (!Array.isArray(payload.records) || payload.records.length === 0) {
+      throw new BadRequestException('Attendance records array is required');
+    }
+
+    const sessionDate = new Date(
+      session.startsAt.getFullYear(),
+      session.startsAt.getMonth(),
+      session.startsAt.getDate()
+    );
+    const validStatuses = Object.values(AttendanceStatus);
+
+    let markedCount = 0;
+    for (const rec of payload.records) {
+      if (!rec.studentProfileId) continue;
+      const status = validStatuses.includes(rec.status) ? rec.status : AttendanceStatus.PRESENT;
+
+      // Verify student is actively enrolled in batch
+      const enrolment = await this.prisma.enrolment.findFirst({
+        where: {
+          batchId: session.batchId,
+          studentProfileId: rec.studentProfileId,
+          status: 'ACTIVE',
+        },
+      });
+
+      if (!enrolment) {
+        continue;
+      }
+
+      const existing = await this.prisma.attendance.findFirst({
+        where: {
+          liveSessionId: sessionId,
+          studentProfileId: rec.studentProfileId,
+        },
+      });
+
+      if (existing) {
+        await this.prisma.attendance.update({
+          where: { id: existing.id },
+          data: {
+            status,
+            remarks: rec.remarks?.trim() || null,
+            updatedById: authUser.id,
+            markedAt: new Date(),
+          },
+        });
+      } else {
+        await this.prisma.attendance.create({
+          data: {
+            instituteId,
+            batchId: session.batchId,
+            studentProfileId: rec.studentProfileId,
+            enrolmentId: enrolment.id,
+            liveSessionId: sessionId,
+            mode: AttendanceMode.LIVE_SESSION,
+            date: sessionDate,
+            status,
+            remarks: rec.remarks?.trim() || null,
+            markedById: authUser.id,
+            markedByRole: 'TEACHER',
+            markedAt: new Date(),
+          },
+        });
+      }
+      markedCount++;
+    }
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'LIVE_CLASS_ATTENDANCE_MARKED',
+        entityType: 'LiveSession',
+        entityId: sessionId,
+        metadata: {
+          sessionId,
+          markedCount,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: `Successfully recorded attendance for ${markedCount} students`,
+    };
+  }
 }
