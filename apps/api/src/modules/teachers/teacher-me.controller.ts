@@ -1,9 +1,12 @@
 import {
   Controller,
   Get,
+  Post,
   UseGuards,
   HttpCode,
   HttpStatus,
+  Query,
+  Body,
 } from '@nestjs/common';
 import { TeachersService } from './teachers.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
@@ -24,6 +27,34 @@ export class TeacherMeController {
   @HttpCode(HttpStatus.OK)
   async getTeacherDashboard(@CurrentUser() user: any) {
     return this.teachersService.getTeacherDashboard(user);
+  }
+
+  @Get('students')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherStudents(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherStudents(user, query);
+  }
+
+  @Get('attendance/batches')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherAttendanceBatches(@CurrentUser() user: any) {
+    return this.teachersService.getTeacherAttendanceBatches(user);
+  }
+
+  @Get('attendance/roster')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherAttendanceRoster(
+    @CurrentUser() user: any,
+    @Query('batchId') batchId: string,
+    @Query('date') date: string,
+  ) {
+    return this.teachersService.getTeacherAttendanceRoster(user, batchId, date);
+  }
+
+  @Post('attendance/mark')
+  @HttpCode(HttpStatus.OK)
+  async markTeacherAttendance(@CurrentUser() user: any, @Body() body: any) {
+    return this.teachersService.markTeacherAttendance(user, body);
   }
 }
 

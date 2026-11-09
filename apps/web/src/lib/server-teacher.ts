@@ -21,6 +21,7 @@ export interface AuthenticatedTeacherContext {
   instituteName: string;
   instituteSlug: string;
   instituteLogoUrl: string | null;
+  timezone: string;
 }
 
 export class TeacherAuthError extends Error {
@@ -89,7 +90,8 @@ export async function resolveAuthenticatedTeacher(
            m.id as "membershipId", m.role, m.status as "membershipStatus", m."instituteId",
            tp.id as "teacherProfileId", tp."employeeCode", tp.qualifications, tp.specialization,
            tp."experienceYears", tp.bio, tp."photoUrl", tp.status as "teacherStatus",
-           i.name as "instituteName", i.slug as "instituteSlug", i."logoUrl" as "instituteLogoUrl"
+           i.name as "instituteName", i.slug as "instituteSlug", i."logoUrl" as "instituteLogoUrl",
+           COALESCE(i.timezone, 'Asia/Kolkata') as "instituteTimezone"
     FROM "Membership" m
     JOIN "User" u ON u.id = m."userId"
     JOIN "TeacherProfile" tp ON tp."membershipId" = m.id
@@ -168,6 +170,7 @@ export async function resolveAuthenticatedTeacher(
     instituteName: record.instituteName,
     instituteSlug: record.instituteSlug,
     instituteLogoUrl: record.instituteLogoUrl,
+    timezone: record.instituteTimezone || 'Asia/Kolkata',
   };
 }
 

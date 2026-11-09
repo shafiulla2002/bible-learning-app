@@ -25,7 +25,7 @@ import {
   ScheduleConflictResult,
   TeacherStatus,
 } from '@bible-lms/shared';
-import { Role, MembershipStatus, LiveSessionStatus } from '@prisma/client';
+import { Role, MembershipStatus, LiveSessionStatus, AttendanceStatus, AttendanceMode } from '@prisma/client';
 
 @Injectable()
 export class TeachersService {
@@ -1338,6 +1338,526 @@ export class TeachersService {
         totalSessionsMarked: uniqueDates.size,
         attendanceRatePct,
       },
+    };
+  }
+
+  /**
+   * Helper to resolve and validate the authenticated teacher and active membership
+   */
+  private async resolveTeacherMembership(user: any) {
+    if (!user || (!user.sub && !user.userId)) {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== Role.TEACHER) {
+      throw new ForbiddenException(
+        `Access denied: Current role '${user.role}' is not authorized to access Teacher Portal.`
+      );
+    }
+    const tokenUserId = user.sub || user.userId;
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: tokenUserId,
+        role: Role.TEACHER,
+        status: 'ACTIVE',
+        ...(user.instituteId ? { instituteId: user.instituteId } : {}),
+      },
+      include: {
+        user: true,
+        institute: true,
+        teacherProfile: true,
+      },
+    });
+
+    if (!membership || !membership.teacherProfile) {
+      throw new ForbiddenException('No active teacher profile found for this account');
+    }
+
+    if (membership.teacherProfile.status !== 'ACTIVE') {
+      throw new ForbiddenException('Teacher profile is inactive or pending review');
+    }
+
+    return {
+      teacherProfile: membership.teacherProfile,
+      membership,
+      user: membership.user,
+      institute: membership.institute,
+      teacherProfileId: membership.teacherProfile.id,
+      instituteId: membership.instituteId,
+    };
+  }
+
+  /**
+   * Requirement: Teacher My Students Roster
+   * Retrieves all students enrolled in batches assigned to the authenticated teacher.
+   */
+  async getTeacherStudents(
+    user: any,
+    options: {
+      search?: string;
+      batchId?: string;
+      status?: string;
+      page?: number | string;
+      limit?: number | string;
+    } = {}
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    // 1. Fetch all assigned batches for this teacher (through BatchTeacher)
+    const assignedBatchTeachers = await this.prisma.batchTeacher.findMany({
+      where: {
+        teacherProfileId,
+        instituteId,
+      },
+      include: {
+        batch: {
+          include: {
+            course: true,
+          },
+        },
+      },
+      orderBy: { batch: { name: 'asc' } },
+    });
+
+    const assignedBatches = assignedBatchTeachers.map((bt) => ({
+      id: bt.batch.id,
+      name: bt.batch.name,
+      code: bt.batch.code,
+      courseTitle: bt.batch.course?.title || 'General Course',
+    }));
+
+    const assignedBatchIds = assignedBatchTeachers.map((bt) => bt.batchId);
+    if (assignedBatchIds.length === 0) {
+      return {
+        success: true,
+        items: [],
+        totalCount: 0,
+        page: Number(options.page) || 1,
+        limit: Number(options.limit) || 10,
+        totalPages: 0,
+        assignedBatches: [],
+      };
+    }
+
+    // 2. Validate requested batchId filter if provided
+    let effectiveBatchIds = assignedBatchIds;
+    if (options.batchId && options.batchId !== 'ALL') {
+      if (!assignedBatchIds.includes(options.batchId)) {
+        // Teacher is not assigned to this batch -> Return empty list safely
+        return {
+          success: true,
+          items: [],
+          totalCount: 0,
+          page: Number(options.page) || 1,
+          limit: Number(options.limit) || 10,
+          totalPages: 0,
+          assignedBatches,
+        };
+      }
+      effectiveBatchIds = [options.batchId];
+    }
+
+    // 3. Pagination calculation
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 10));
+    const skip = (page - 1) * limit;
+
+    // 4. Build where condition for enrolments
+    const whereClause: any = {
+      instituteId,
+      batchId: { in: effectiveBatchIds },
+      studentProfile: {
+        status: 'ACTIVE',
+        membership: {
+          status: 'ACTIVE',
+        },
+      },
+    };
+
+    if (options.status && options.status !== 'ALL') {
+      whereClause.status = options.status;
+    }
+
+    if (options.search && options.search.trim()) {
+      const q = options.search.trim();
+      whereClause.OR = [
+        {
+          studentProfile: {
+            admissionNo: { contains: q, mode: 'insensitive' },
+          },
+        },
+        {
+          studentProfile: {
+            membership: {
+              user: {
+                fullName: { contains: q, mode: 'insensitive' },
+              },
+            },
+          },
+        },
+      ];
+    }
+
+    const [totalCount, enrolments] = await Promise.all([
+      this.prisma.enrolment.count({ where: whereClause }),
+      this.prisma.enrolment.findMany({
+        where: whereClause,
+        skip,
+        take: limit,
+        orderBy: [
+          { studentProfile: { membership: { user: { fullName: 'asc' } } } },
+        ],
+        include: {
+          batch: true,
+          course: true,
+          studentProfile: {
+            include: {
+              membership: {
+                include: {
+                  user: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const items = enrolments.map((e) => {
+      const u = e.studentProfile?.membership?.user;
+      return {
+        id: e.id,
+        enrolmentId: e.id,
+        studentProfileId: e.studentProfileId,
+        admissionNo: e.studentProfile?.admissionNo || 'N/A',
+        fullName: u?.fullName || 'Enrolled Student',
+        email: u?.email || null,
+        phone: u?.phoneE164 ? u.phoneE164.replace(/(\d{3})\d{4}(\d{3})/, '$1****$2') : null,
+        avatarUrl: u?.avatarUrl || null,
+        batchId: e.batchId,
+        batchName: e.batch?.name || 'Unassigned Batch',
+        batchCode: e.batch?.code || null,
+        courseId: e.courseId,
+        courseTitle: e.course?.title || 'Theological Studies',
+        enrolmentStatus: e.status,
+        enrolledAt: e.createdAt,
+      };
+    });
+
+    return {
+      success: true,
+      items,
+      totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+      assignedBatches,
+    };
+  }
+
+  /**
+   * Requirement: Teacher Attendance Batches
+   * Returns assigned batches with real active student counts.
+   */
+  async getTeacherAttendanceBatches(user: any) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const assignedBatchTeachers = await this.prisma.batchTeacher.findMany({
+      where: {
+        teacherProfileId,
+        instituteId,
+      },
+      include: {
+        batch: {
+          include: {
+            course: true,
+            _count: {
+              select: {
+                enrolments: {
+                  where: {
+                    status: 'ACTIVE',
+                    studentProfile: { status: 'ACTIVE', membership: { status: 'ACTIVE' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { batch: { name: 'asc' } },
+    });
+
+    const batches = assignedBatchTeachers.map((bt) => ({
+      id: bt.batch.id,
+      name: bt.batch.name,
+      code: bt.batch.code,
+      courseId: bt.batch.courseId,
+      courseTitle: bt.batch.course?.title || 'General Course',
+      role: bt.role,
+      totalStudents: bt.batch._count.enrolments,
+      status: bt.batch.status,
+    }));
+
+    return {
+      success: true,
+      batches,
+    };
+  }
+
+  /**
+   * Requirement: Teacher Attendance Roster for Date
+   * Validates teacher assignment and returns students with their attendance status.
+   */
+  async getTeacherAttendanceRoster(user: any, batchId: string, dateStr: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    if (!batchId) {
+      throw new BadRequestException('batchId is required');
+    }
+
+    // Verify teacher is assigned to this batch
+    const assignment = await this.prisma.batchTeacher.findFirst({
+      where: {
+        batchId,
+        teacherProfileId,
+        instituteId,
+      },
+    });
+
+    if (!assignment) {
+      throw new ForbiddenException(
+        'You are not an assigned instructor for this batch and cannot view or take its attendance.'
+      );
+    }
+
+    const batch = await this.prisma.batch.findFirst({
+      where: { id: batchId, instituteId },
+      include: { course: true },
+    });
+
+    if (!batch) {
+      throw new NotFoundException('Batch not found');
+    }
+
+    const targetDate = dateStr ? new Date(dateStr) : new Date();
+    const isoDateOnly = targetDate.toISOString().slice(0, 10);
+    const dateObj = new Date(isoDateOnly);
+
+    // Fetch active enrolled students
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: {
+        instituteId,
+        batchId,
+        status: 'ACTIVE',
+        studentProfile: {
+          status: 'ACTIVE',
+          membership: { status: 'ACTIVE' },
+        },
+      },
+      include: {
+        studentProfile: {
+          include: {
+            membership: {
+              include: {
+                user: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { studentProfile: { admissionNo: 'asc' } },
+    });
+
+    // Fetch existing attendance records for this batch on targetDate
+    const existingAttendance = await this.prisma.attendance.findMany({
+      where: {
+        instituteId,
+        batchId,
+        date: dateObj,
+      },
+    });
+
+    const attendanceMap = new Map(
+      existingAttendance.map((a) => [a.studentProfileId, a])
+    );
+
+    const roster = enrolments.map((e) => {
+      const u = e.studentProfile?.membership?.user;
+      const att = attendanceMap.get(e.studentProfileId);
+      return {
+        studentProfileId: e.studentProfileId,
+        admissionNo: e.studentProfile?.admissionNo || 'N/A',
+        fullName: u?.fullName || 'Enrolled Student',
+        email: u?.email || null,
+        enrolmentId: e.id,
+        enrolmentStatus: e.status,
+        enrolledAt: e.createdAt,
+        status: att?.status || 'PRESENT',
+        isMarked: Boolean(att),
+        remarks: att?.remarks || '',
+        markedAt: att?.markedAt || null,
+      };
+    });
+
+    const presentCount = roster.filter((r) => r.status === 'PRESENT').length;
+    const absentCount = roster.filter((r) => r.status === 'ABSENT').length;
+    const lateCount = roster.filter((r) => r.status === 'LATE').length;
+    const excusedCount = roster.filter((r) => r.status === 'EXCUSED').length;
+    const totalCount = roster.length;
+    const attendanceRatePct =
+      totalCount > 0
+        ? Math.round(((presentCount + lateCount) / totalCount) * 100)
+        : 0;
+
+    return {
+      success: true,
+      batch: {
+        id: batch.id,
+        name: batch.name,
+        code: batch.code,
+        courseTitle: batch.course?.title || 'General Course',
+      },
+      date: isoDateOnly,
+      summary: {
+        totalStudents: totalCount,
+        presentCount,
+        absentCount,
+        lateCount,
+        excusedCount,
+        attendanceRatePct,
+        isRecorded: existingAttendance.length > 0,
+      },
+      roster,
+    };
+  }
+
+  /**
+   * Requirement: Mark Teacher Attendance (Atomic Bulk Upsert)
+   */
+  async markTeacherAttendance(
+    user: any,
+    payload: {
+      batchId: string;
+      date: string;
+      records: Array<{
+        studentProfileId: string;
+        enrolmentId?: string;
+        status: AttendanceStatus;
+        remarks?: string;
+      }>;
+    }
+  ) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    if (!payload.batchId || !payload.date || !Array.isArray(payload.records)) {
+      throw new BadRequestException('batchId, date, and records array are required');
+    }
+
+    // Verify teacher is assigned to this batch
+    const assignment = await this.prisma.batchTeacher.findFirst({
+      where: {
+        batchId: payload.batchId,
+        teacherProfileId,
+        instituteId,
+      },
+    });
+
+    if (!assignment) {
+      throw new ForbiddenException(
+        'You are not an assigned instructor for this batch and cannot mark its attendance.'
+      );
+    }
+
+    const isoDateOnly = new Date(payload.date).toISOString().slice(0, 10);
+    const dateObj = new Date(isoDateOnly);
+
+    // Verify enrolments for these students
+    const studentProfileIds = payload.records.map((r) => r.studentProfileId);
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: {
+        instituteId,
+        batchId: payload.batchId,
+        studentProfileId: { in: studentProfileIds },
+      },
+      select: { id: true, studentProfileId: true },
+    });
+    const enrolmentMap = new Map(enrolments.map((e) => [e.studentProfileId, e.id]));
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      let markedCount = 0;
+
+      for (const rec of payload.records) {
+        const enrolmentId = rec.enrolmentId || enrolmentMap.get(rec.studentProfileId);
+        const existing = await tx.attendance.findFirst({
+          where: {
+            instituteId,
+            batchId: payload.batchId,
+            studentProfileId: rec.studentProfileId,
+            date: dateObj,
+          },
+        });
+
+        if (existing) {
+          if (existing.status !== rec.status || existing.remarks !== rec.remarks) {
+            await tx.attendanceAuditLog.create({
+              data: {
+                attendanceId: existing.id,
+                previousStatus: existing.status,
+                newStatus: rec.status,
+                previousRemarks: existing.remarks,
+                newRemarks: rec.remarks || null,
+                changedById: authUser.id,
+                changedByRole: 'TEACHER',
+              },
+            });
+
+            await tx.attendance.update({
+              where: { id: existing.id },
+              data: {
+                status: rec.status,
+                remarks: rec.remarks !== undefined ? rec.remarks : existing.remarks,
+                updatedById: authUser.id,
+              },
+            });
+          }
+        } else {
+          const created = await tx.attendance.create({
+            data: {
+              instituteId,
+              batchId: payload.batchId,
+              studentProfileId: rec.studentProfileId,
+              enrolmentId: enrolmentId || null,
+              date: dateObj,
+              status: rec.status,
+              remarks: rec.remarks || null,
+              markedById: authUser.id,
+              markedByRole: 'TEACHER',
+            },
+          });
+
+          await tx.attendanceAuditLog.create({
+            data: {
+              attendanceId: created.id,
+              previousStatus: rec.status,
+              newStatus: rec.status,
+              previousRemarks: null,
+              newRemarks: rec.remarks || null,
+              changedById: authUser.id,
+              changedByRole: 'TEACHER',
+            },
+          });
+        }
+        markedCount++;
+      }
+
+      return { markedCount };
+    });
+
+    return {
+      success: true,
+      message: `Successfully recorded attendance for ${result.markedCount} students`,
+      date: isoDateOnly,
+      batchId: payload.batchId,
+      recordsUpdated: result.markedCount,
     };
   }
 }
