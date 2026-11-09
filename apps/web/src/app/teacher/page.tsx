@@ -1,240 +1,322 @@
 'use client';
 
 import React from 'react';
-import { PortalShell } from '@/components/layout/portal-shell';
-import { StatCard } from '@/components/ui/stat-card';
-import { Card, CardHeader } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import {
   CalendarCheck,
-  LayoutDashboard,
-  BookOpen,
-  Users,
-  Calendar,
   FileCheck2,
-  Bell,
+  Users,
+  Radio,
+  BookOpen,
   PlusCircle,
   CheckCircle2,
-  UploadCloud,
-  Clock,
+  Calendar,
+  Sparkles,
   ArrowRight,
-  ExternalLink,
+  ShieldCheck,
+  Clock,
+  Layers,
 } from 'lucide-react';
-
-const teacherNav = [
-  { label: 'Dashboard', href: '/teacher', icon: <LayoutDashboard size={18} /> },
-  { label: 'Assigned Courses', href: '/teacher/courses', icon: <BookOpen size={18} /> },
-  { label: 'Attendance', href: '/teacher/attendance', icon: <CalendarCheck size={18} /> },
-  { label: 'My Students', href: '/teacher/students', icon: <Users size={18} /> },
-  { label: 'Live Sessions', href: '/teacher/classes', icon: <Calendar size={18} /> },
-  { label: 'Grading & Submissions', href: '/teacher/grading', icon: <FileCheck2 size={18} />, badge: '6 New' },
-  { label: 'Announcements', href: '/teacher/announcements', icon: <Bell size={18} /> },
-];
+import { TeacherShell } from '@/components/teacher/TeacherShell';
+import { useTeacherAuth } from '@/lib/use-teacher-auth';
 
 export default function TeacherDashboardPage() {
+  const { teacher, institute, stats } = useTeacherAuth({ requireAuth: false });
+
+  const teacherName = teacher?.fullName || 'Faculty Instructor';
+  const instituteName = institute?.name || 'Grace Bible Institute';
+  const specialization = teacher?.specialization || 'Theology & Biblical Studies';
+  const employeeCode = teacher?.employeeCode || 'FACULTY';
+
   return (
-    <PortalShell
-      portalTitle="Teacher Portal"
-      portalRole="TEACHER"
-      navItems={teacherNav}
-      userName="Dr. Samuel Mathew"
-      userRoleLabel="Lead Faculty"
-      theme="dark"
-    >
-      <div className="space-y-8">
-        {/* Welcome & Quick Action Header (EduFlow Style) */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Welcome Back, Dr. Samuel
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Here is what is happening with your Bible courses and student submissions today.
-            </p>
-          </div>
+    <TeacherShell>
+      <div className="space-y-6">
+        
+        {/* Welcome Hero Banner matching Learnify/Student blue aesthetic */}
+        <div className="rounded-3xl bg-gradient-to-r from-slate-900 via-[#1E293B] to-blue-950 p-6 md:p-8 text-white relative overflow-hidden shadow-xl border border-slate-800">
+          <div className="absolute right-0 top-0 translate-x-12 -translate-y-8 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+          
+          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-blue-200 text-xs font-semibold backdrop-blur-md border border-white/10">
+                <Sparkles size={13} className="text-blue-400" />
+                <span>{instituteName} • Faculty Dashboard</span>
+              </div>
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
+                Welcome back, {teacherName}! 👋
+              </h1>
+              <p className="text-xs md:text-sm text-slate-300 leading-relaxed">
+                {specialization} • ID: <span className="text-white font-mono font-semibold">{employeeCode}</span>.
+                Manage your assigned cohorts, record lecture attendance, and track student theological coursework.
+              </p>
+            </div>
 
-          {/* Quick Action Tiles */}
-          <div className="flex items-center gap-2">
-            <Button variant="primary" size="sm" className="gap-1.5">
-              <PlusCircle size={15} />
-              Create Assignment
-            </Button>
-            <Link href="/teacher/attendance">
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <CheckCircle2 size={15} />
-                Mark Attendance
-              </Button>
-            </Link>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <UploadCloud size={15} />
-              Upload Material
-            </Button>
+            {/* Quick Action Buttons */}
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <Link
+                href="/teacher/attendance"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition cursor-pointer"
+              >
+                <CheckCircle2 size={16} />
+                <span>Mark Attendance</span>
+              </Link>
+              <Link
+                href="/teacher/assignments"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/15 transition cursor-pointer"
+              >
+                <PlusCircle size={16} />
+                <span>Assignments</span>
+              </Link>
+              <Link
+                href="/teacher/classes"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/15 transition cursor-pointer"
+              >
+                <Radio size={16} />
+                <span>Live Classes</span>
+              </Link>
+            </div>
           </div>
         </div>
 
-        {/* 4 Stat Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          <StatCard
-            title="Total Classes"
-            value="12"
-            icon={<BookOpen size={20} />}
-            trend="+2 This Term"
-            trendPositive={true}
-            colorScheme="blue"
-          />
-          <StatCard
-            title="Total Students"
-            value="186"
-            icon={<Users size={20} />}
-            trend="+18 Enrolled"
-            trendPositive={true}
-            colorScheme="purple"
-          />
-          <StatCard
-            title="Pending Submissions"
-            value="24"
-            icon={<FileCheck2 size={20} />}
-            trend="Needs Grading"
-            trendPositive={false}
-            colorScheme="amber"
-          />
-          <StatCard
-            title="Attendance Rate"
-            value="94%"
-            icon={<Calendar size={20} />}
-            trend="+3.2% vs last term"
-            trendPositive={true}
-            colorScheme="emerald"
-          />
+        {/* Foundation Stat Cards - Powered strictly by live API stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Assigned Batches
+              </p>
+              <h3 className="text-2xl font-extrabold text-slate-900 mt-1">
+                {stats.assignedBatchesCount}
+              </h3>
+              <p className="text-[11px] text-emerald-600 font-medium mt-0.5">Active Teaching Cohorts</p>
+            </div>
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <Layers size={22} />
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Assigned Students
+              </p>
+              <h3 className="text-2xl font-extrabold text-slate-900 mt-1">
+                {stats.assignedStudentsCount}
+              </h3>
+              <p className="text-[11px] text-blue-600 font-medium mt-0.5">Enrolled Across Batches</p>
+            </div>
+            <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
+              <Users size={22} />
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Instructing Courses
+              </p>
+              <h3 className="text-2xl font-extrabold text-slate-900 mt-1">
+                {stats.assignedCoursesCount}
+              </h3>
+              <p className="text-[11px] text-amber-600 font-medium mt-0.5">Curriculum Modules</p>
+            </div>
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
+              <BookOpen size={22} />
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Faculty Status
+              </p>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  {teacher?.status || 'ACTIVE'}
+                </h3>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium mt-0.5">Verified Profile</p>
+            </div>
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <ShieldCheck size={22} />
+            </div>
+          </div>
         </div>
 
-        {/* Main 2-Column Area: Recent Activity & Upcoming Classes */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Submissions Queue */}
-          <Card>
-            <CardHeader
-              title="Recent Submissions"
-              subtitle="Student assignments awaiting your review and grading"
-              action={
-                <span className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer">
+        {/* Phase 2 Feature Containers (Foundational Placeholders) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Main Content Pane: Today's Schedule & Quick Attendance */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                    Today&apos;s Teaching Schedule
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Live lecture sessions and cohort timetable for today
+                  </p>
+                </div>
+                <Link
+                  href="/teacher/timetable"
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                >
+                  <span>View Timetable</span>
+                  <ArrowRight size={13} />
+                </Link>
+              </div>
+
+              {/* Placeholder container for Phase 2 dynamic calendar queries */}
+              <div className="p-8 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto">
+                  <Clock size={20} />
+                </div>
+                <h4 className="text-xs font-bold text-slate-800">
+                  Daily Class Schedule Connected
+                </h4>
+                <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                  Real-time lecture schedules, room links, and batch attendance triggers will appear here in Phase 2.
+                </p>
+                <div className="pt-2">
+                  <Link
+                    href="/teacher/attendance"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 transition shadow-2xs"
+                  >
+                    <CalendarCheck size={14} className="text-blue-600" />
+                    <span>Open Attendance Register</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            {/* Assignments & Grading Container */}
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                    Submissions Awaiting Grading
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Pending student theological essays, exegesis papers, and exam results
+                  </p>
+                </div>
+                <Link
+                  href="/teacher/assignments"
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                >
+                  <span>All Assignments</span>
+                  <ArrowRight size={13} />
+                </Link>
+              </div>
+
+              <div className="p-8 rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center mx-auto">
+                  <FileCheck2 size={20} />
+                </div>
+                <h4 className="text-xs font-bold text-slate-800">
+                  Grading Queue Ready
+                </h4>
+                <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                  Incoming student submissions awaiting faculty review will be listed here with one-click evaluation in Phase 2 & 5.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Sidebar: Active Cohorts & Faculty Resources */}
+          <div className="space-y-6">
+            
+            {/* Assigned Cohorts Box */}
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">
+                  My Assigned Batches
+                </h3>
+                <Link
+                  href="/teacher/batches"
+                  className="text-xs font-semibold text-blue-600 hover:underline"
+                >
                   View All
-                </span>
-              }
-            />
-            <div className="space-y-3">
-              <div className="p-3.5 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs">
-                    GT
-                  </div>
-                  <div>
-                    <h5 className="text-xs font-bold text-slate-900">Grace Thomas</h5>
-                    <p className="text-[11px] text-slate-500">Theology Essay 2 · Submitted 1h ago</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="warning">To Grade</Badge>
-                  <Button size="sm" variant="outline" className="text-xs px-2.5 py-1">
-                    Grade
-                  </Button>
-                </div>
+                </Link>
               </div>
 
-              <div className="p-3.5 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs">
-                    DJ
+              <div className="space-y-3">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-bold text-slate-900">Biblical Studies Cohort</p>
+                    <p className="text-[10px] text-slate-500 font-medium">Morning Session • 2026</p>
                   </div>
-                  <div>
-                    <h5 className="text-xs font-bold text-slate-900">Daniel Joseph</h5>
-                    <p className="text-[11px] text-slate-500">Church History Timeline · Submitted 3h ago</p>
-                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/60">
+                    Lead Faculty
+                  </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="warning">To Grade</Badge>
-                  <Button size="sm" variant="outline" className="text-xs px-2.5 py-1">
-                    Grade
-                  </Button>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
-                    EW
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-bold text-slate-900">Church History Cohort</p>
+                    <p className="text-[10px] text-slate-500 font-medium">Evening Session • 2026</p>
                   </div>
-                  <div>
-                    <h5 className="text-xs font-bold text-slate-900">Esther Williams</h5>
-                    <p className="text-[11px] text-slate-500">Hermeneutics Reflection · Graded</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="success">92 / 100</Badge>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                    Faculty
+                  </span>
                 </div>
               </div>
             </div>
-          </Card>
 
-          {/* Upcoming Live Sessions to Host */}
-          <Card>
-            <CardHeader
-              title="Today's Teaching Schedule"
-              subtitle="Scheduled Google Meet classes"
-              action={
-                <span className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer">
-                  Schedule Class
-                </span>
-              }
-            />
-            <div className="space-y-3">
-              <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-blue-600 text-white flex flex-col items-center justify-center font-bold">
-                    <span className="text-xs">07:30</span>
-                    <span className="text-[9px] font-normal uppercase">PM</span>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h5 className="text-xs font-bold text-slate-900">
-                        Biblical Interpretation Q&A
-                      </h5>
-                      <Badge variant="live">Starting in 20m</Badge>
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Batch 2026-A · 32 Students Enrolled
-                    </p>
-                  </div>
-                </div>
-                <Button size="sm" variant="primary">
-                  Start Meet
-                </Button>
-              </div>
-
-              <div className="p-4 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 flex flex-col items-center justify-center font-bold">
-                    <span className="text-xs">10:00</span>
-                    <span className="text-[9px] font-normal uppercase">AM</span>
-                  </div>
-                  <div>
-                    <h5 className="text-xs font-bold text-slate-900">
-                      Foundations of Bible Study
-                    </h5>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Tomorrow · Batch 2026-B · 45 Students
-                    </p>
-                  </div>
-                </div>
-                <Button size="sm" variant="outline">
-                  Prepare Notes
-                </Button>
+            {/* Quick Links Card */}
+            <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-xs space-y-3">
+              <h3 className="text-sm font-bold text-slate-900">
+                Faculty Quick Access
+              </h3>
+              <div className="space-y-1.5 text-xs font-semibold">
+                <Link
+                  href="/teacher/batches"
+                  className="flex items-center justify-between p-2.5 rounded-xl text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Layers size={15} className="text-slate-400" />
+                    <span>My Batches</span>
+                  </span>
+                  <ArrowRight size={13} className="text-slate-400" />
+                </Link>
+                <Link
+                  href="/teacher/students"
+                  className="flex items-center justify-between p-2.5 rounded-xl text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Users size={15} className="text-slate-400" />
+                    <span>My Students Roster</span>
+                  </span>
+                  <ArrowRight size={13} className="text-slate-400" />
+                </Link>
+                <Link
+                  href="/teacher/classes"
+                  className="flex items-center justify-between p-2.5 rounded-xl text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Radio size={15} className="text-slate-400" />
+                    <span>Live Classes</span>
+                  </span>
+                  <ArrowRight size={13} className="text-slate-400" />
+                </Link>
+                <Link
+                  href="/teacher/profile"
+                  className="flex items-center justify-between p-2.5 rounded-xl text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <ShieldCheck size={15} className="text-slate-400" />
+                    <span>Faculty Profile & Bio</span>
+                  </span>
+                  <ArrowRight size={13} className="text-slate-400" />
+                </Link>
               </div>
             </div>
-          </Card>
+
+          </div>
         </div>
+
       </div>
-    </PortalShell>
+    </TeacherShell>
   );
 }
