@@ -3216,4 +3216,966 @@ export class TeachersService {
       },
     };
   }
+
+  // =========================================================================
+  // PHASE 6: EXAMINATIONS & ONLINE TESTS MANAGEMENT
+  // =========================================================================
+
+  private async verifyTeacherCourseOrBatchAccess(
+    teacherProfileId: string,
+    instituteId: string,
+    courseId: string,
+    batchId?: string | null
+  ) {
+    const isDirectCourse = await this.prisma.courseInstructor.findFirst({
+      where: { courseId, teacherProfileId, instituteId },
+    });
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: {
+        teacherProfileId,
+        instituteId,
+        ...(batchId
+          ? { batchId }
+          : { batch: { courseId } }),
+      },
+    });
+
+    if (!isDirectCourse && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to manage examinations for this course or batch.');
+    }
+  }
+
+  async getTeacherExams(user: any, options: any = {}) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const [instructorCourses, assignedBatches] = await Promise.all([
+      this.prisma.courseInstructor.findMany({
+        where: { teacherProfileId, instituteId },
+        select: { courseId: true },
+      }),
+      this.prisma.batchTeacher.findMany({
+        where: { teacherProfileId, instituteId },
+        include: { batch: { select: { id: true, courseId: true } } },
+      }),
+    ]);
+
+    const assignedCourseIds = Array.from(
+      new Set([
+        ...instructorCourses.map((ci) => ci.courseId),
+        ...assignedBatches.map((bt) => bt.batch.courseId),
+      ])
+    );
+    const assignedBatchIds = Array.from(new Set(assignedBatches.map((bt) => bt.batch.id)));
+
+    if (assignedCourseIds.length === 0 && assignedBatchIds.length === 0) {
+      return {
+        success: true,
+        data: [],
+        metrics: {
+          total: 0,
+          published: 0,
+          draft: 0,
+          scheduled: 0,
+          completed: 0,
+          totalAttempts: 0,
+          pendingEvaluations: 0,
+          avgScore: 0,
+        },
+        meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
+      };
+    }
+
+    if (options.courseId && options.courseId !== 'ALL' && !assignedCourseIds.includes(options.courseId)) {
+      throw new ForbiddenException('You are not authorized to view examinations for this course');
+    }
+    if (options.batchId && options.batchId !== 'ALL' && !assignedBatchIds.includes(options.batchId)) {
+      throw new ForbiddenException('You are not authorized to view examinations for this batch');
+    }
+
+    const whereClause: any = {
+      instituteId,
+      OR: [
+        { courseId: { in: assignedCourseIds } },
+        ...(assignedBatchIds.length > 0 ? [{ batchId: { in: assignedBatchIds } }] : []),
+      ],
+    };
+
+    if (options.courseId && options.courseId !== 'ALL') {
+      whereClause.courseId = options.courseId;
+    }
+    if (options.batchId && options.batchId !== 'ALL') {
+      whereClause.batchId = options.batchId;
+    }
+    if (options.status && options.status !== 'ALL') {
+      whereClause.status = options.status;
+    }
+    if (options.search && options.search.trim()) {
+      whereClause.OR = [
+        { title: { contains: options.search.trim(), mode: 'insensitive' } },
+        { course: { title: { contains: options.search.trim(), mode: 'insensitive' } } },
+      ];
+    }
+
+    const page = Math.max(1, parseInt(options.page || '1', 10));
+    const limit = Math.min(100, Math.max(1, parseInt(options.limit || '10', 10)));
+    const skip = (page - 1) * limit;
+
+    const [allExamsForMetrics, exams, totalCount] = await Promise.all([
+      this.prisma.exam.findMany({
+        where: {
+          instituteId,
+          OR: [
+            { courseId: { in: assignedCourseIds } },
+            ...(assignedBatchIds.length > 0 ? [{ batchId: { in: assignedBatchIds } }] : []),
+          ],
+        },
+        include: {
+          attempts: { select: { id: true, status: true, score: true } },
+        },
+      }),
+      this.prisma.exam.findMany({
+        where: whereClause,
+        include: {
+          course: { select: { id: true, title: true } },
+          batch: { select: { id: true, name: true, code: true } },
+          questions: { select: { id: true, marks: true } },
+          attempts: { select: { id: true, status: true, score: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.exam.count({ where: whereClause }),
+    ]);
+
+    // Compute metrics
+    const now = new Date();
+    let publishedCount = 0;
+    let draftCount = 0;
+    let scheduledCount = 0;
+    let completedCount = 0;
+    let totalAttemptsCount = 0;
+    let pendingEvaluationsCount = 0;
+    let totalScoreSum = 0;
+    let evaluatedCount = 0;
+
+    allExamsForMetrics.forEach((e: any) => {
+      if (e.status === 'PUBLISHED') publishedCount++;
+      if (e.status === 'DRAFT') draftCount++;
+      if (e.startAt && new Date(e.startAt) > now) scheduledCount++;
+      if (e.endAt && new Date(e.endAt) < now) completedCount++;
+
+      if (e.attempts) {
+        totalAttemptsCount += e.attempts.length;
+        e.attempts.forEach((a: any) => {
+          if (a.status === 'SUBMITTED') pendingEvaluationsCount++;
+          if (a.status === 'EVALUATED' && typeof a.score === 'number') {
+            totalScoreSum += a.score;
+            evaluatedCount++;
+          }
+        });
+      }
+    });
+
+    const avgScore = evaluatedCount > 0 ? Math.round(totalScoreSum / evaluatedCount) : 0;
+
+    // Student counts per scope
+    const mappedExams = await Promise.all(
+      exams.map(async (exam: any) => {
+        let totalStudents = 0;
+        if (exam.batchId) {
+          totalStudents = await this.prisma.enrolment.count({
+            where: { batchId: exam.batchId, instituteId, status: 'ACTIVE' },
+          });
+        } else {
+          totalStudents = await this.prisma.enrolment.count({
+            where: { courseId: exam.courseId, instituteId, status: 'ACTIVE' },
+          });
+        }
+
+        const attempts = exam.attempts || [];
+        const evaluated = attempts.filter((a: any) => a.status === 'EVALUATED').length;
+        const pendingEval = attempts.filter((a: any) => a.status === 'SUBMITTED').length;
+
+        return {
+          id: exam.id,
+          title: exam.title,
+          instructions: exam.instructions,
+          type: exam.type,
+          courseId: exam.courseId,
+          courseTitle: exam.course?.title || 'Unknown Course',
+          batchId: exam.batchId,
+          batchName: exam.batch?.name || 'All Batches',
+          batchCode: exam.batch?.code || null,
+          durationMin: exam.durationMin,
+          totalMarks: exam.totalMarks,
+          passMarks: exam.passMarks,
+          status: exam.status,
+          startAt: exam.startAt ? new Date(exam.startAt).toISOString() : null,
+          endAt: exam.endAt ? new Date(exam.endAt).toISOString() : null,
+          totalQuestions: exam.questions?.length || 0,
+          totalStudents,
+          attemptCount: attempts.length,
+          evaluatedCount: evaluated,
+          pendingEvaluationCount: pendingEval,
+          createdAt: exam.createdAt.toISOString(),
+          updatedAt: exam.updatedAt.toISOString(),
+        };
+      })
+    );
+
+    return {
+      success: true,
+      data: mappedExams,
+      metrics: {
+        total: allExamsForMetrics.length,
+        published: publishedCount,
+        draft: draftCount,
+        scheduled: scheduledCount,
+        completed: completedCount,
+        totalAttempts: totalAttemptsCount,
+        pendingEvaluations: pendingEvaluationsCount,
+        avgScore,
+      },
+      meta: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit),
+      },
+    };
+  }
+
+  async getTeacherExamDetail(user: any, examId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+      include: {
+        course: { select: { id: true, title: true } },
+        batch: { select: { id: true, name: true, code: true } },
+        questions: {
+          include: {
+            options: {
+              select: { id: true, label: true, isCorrect: true },
+            },
+          },
+          orderBy: { position: 'asc' },
+        },
+        attempts: {
+          select: { id: true, status: true, score: true, startedAt: true, submittedAt: true },
+        },
+      },
+    });
+
+    if (!exam) {
+      throw new NotFoundException('Examination not found');
+    }
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    let totalStudents = 0;
+    if (exam.batchId) {
+      totalStudents = await this.prisma.enrolment.count({
+        where: { batchId: exam.batchId, instituteId, status: 'ACTIVE' },
+      });
+    } else {
+      totalStudents = await this.prisma.enrolment.count({
+        where: { courseId: exam.courseId, instituteId, status: 'ACTIVE' },
+      });
+    }
+
+    const attempts = exam.attempts || [];
+    const submittedCount = attempts.filter((a: any) => a.status === 'SUBMITTED' || a.status === 'EVALUATED').length;
+    const evaluatedCount = attempts.filter((a: any) => a.status === 'EVALUATED').length;
+    const pendingEvalCount = attempts.filter((a: any) => a.status === 'SUBMITTED').length;
+
+    return {
+      success: true,
+      data: {
+        id: exam.id,
+        title: exam.title,
+        instructions: exam.instructions,
+        type: exam.type,
+        courseId: exam.courseId,
+        courseTitle: exam.course?.title,
+        batchId: exam.batchId,
+        batchName: exam.batch?.name || 'All Batches',
+        durationMin: exam.durationMin,
+        totalMarks: exam.totalMarks,
+        passMarks: exam.passMarks,
+        status: exam.status,
+        startAt: exam.startAt ? new Date(exam.startAt).toISOString() : null,
+        endAt: exam.endAt ? new Date(exam.endAt).toISOString() : null,
+        totalQuestions: exam.questions.length,
+        totalStudents,
+        attemptCount: attempts.length,
+        submittedCount,
+        evaluatedCount,
+        pendingEvaluationCount: pendingEvalCount,
+        questions: exam.questions.map((q) => ({
+          id: q.id,
+          prompt: q.prompt,
+          type: q.type,
+          marks: q.marks,
+          position: q.position,
+          options: q.options || [],
+        })),
+        createdAt: exam.createdAt.toISOString(),
+        updatedAt: exam.updatedAt.toISOString(),
+      },
+    };
+  }
+
+  async createTeacherExam(user: any, payload: any) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    if (!payload.title || !payload.title.trim()) {
+      throw new BadRequestException('Examination title is required');
+    }
+    if (!payload.courseId) {
+      throw new BadRequestException('Course is required');
+    }
+    const durationMin = Number(payload.durationMin || 30);
+    if (isNaN(durationMin) || durationMin <= 0) {
+      throw new BadRequestException('Duration must be a positive integer in minutes');
+    }
+    const totalMarks = Number(payload.totalMarks || 100);
+    if (isNaN(totalMarks) || totalMarks <= 0) {
+      throw new BadRequestException('Total marks must be greater than zero');
+    }
+    const passMarks = Number(payload.passMarks || Math.round(totalMarks * 0.4));
+    if (isNaN(passMarks) || passMarks < 0 || passMarks > totalMarks) {
+      throw new BadRequestException('Passing marks cannot exceed total marks');
+    }
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, payload.courseId, payload.batchId);
+
+    let startAt: Date | null = null;
+    let endAt: Date | null = null;
+    if (payload.startAt) {
+      startAt = new Date(payload.startAt);
+      if (isNaN(startAt.getTime())) throw new BadRequestException('Invalid start time format');
+    }
+    if (payload.endAt) {
+      endAt = new Date(payload.endAt);
+      if (isNaN(endAt.getTime())) throw new BadRequestException('Invalid end time format');
+    }
+    if (startAt && endAt && startAt >= endAt) {
+      throw new BadRequestException('Start time must be strictly before end time');
+    }
+
+    const created = await this.prisma.exam.create({
+      data: {
+        instituteId,
+        courseId: payload.courseId,
+        batchId: payload.batchId || null,
+        title: payload.title.trim(),
+        instructions: payload.instructions?.trim() || null,
+        type: payload.type === 'EXAM' ? 'EXAM' : 'QUIZ',
+        durationMin,
+        totalMarks,
+        passMarks,
+        status: payload.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT',
+        startAt,
+        endAt,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'EXAM_CREATED',
+        entityType: 'Exam',
+        entityId: created.id,
+        metadata: {
+          title: created.title,
+          courseId: created.courseId,
+          batchId: created.batchId,
+          totalMarks: created.totalMarks,
+          status: created.status,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Examination created successfully',
+      data: created,
+    };
+  }
+
+  async updateTeacherExam(user: any, examId: string, payload: any) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const existing = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+    });
+    if (!existing) {
+      throw new NotFoundException('Examination not found');
+    }
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, existing.courseId, existing.batchId);
+
+    const updateData: any = {};
+    if (payload.title !== undefined) {
+      if (!payload.title.trim()) throw new BadRequestException('Title cannot be empty');
+      updateData.title = payload.title.trim();
+    }
+    if (payload.instructions !== undefined) {
+      updateData.instructions = payload.instructions?.trim() || null;
+    }
+    if (payload.durationMin !== undefined) {
+      const dur = Number(payload.durationMin);
+      if (isNaN(dur) || dur <= 0) throw new BadRequestException('Duration must be positive');
+      updateData.durationMin = dur;
+    }
+    if (payload.totalMarks !== undefined) {
+      const tm = Number(payload.totalMarks);
+      if (isNaN(tm) || tm <= 0) throw new BadRequestException('Total marks must be greater than zero');
+      updateData.totalMarks = tm;
+    }
+    if (payload.passMarks !== undefined) {
+      const pm = Number(payload.passMarks);
+      const effectiveTotal = updateData.totalMarks || existing.totalMarks;
+      if (isNaN(pm) || pm < 0 || pm > effectiveTotal) {
+        throw new BadRequestException('Passing marks cannot exceed total marks');
+      }
+      updateData.passMarks = pm;
+    }
+    if (payload.batchId !== undefined) {
+      if (payload.batchId) {
+        await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, existing.courseId, payload.batchId);
+      }
+      updateData.batchId = payload.batchId || null;
+    }
+    if (payload.startAt !== undefined) {
+      updateData.startAt = payload.startAt ? new Date(payload.startAt) : null;
+    }
+    if (payload.endAt !== undefined) {
+      updateData.endAt = payload.endAt ? new Date(payload.endAt) : null;
+    }
+    if (payload.status !== undefined) {
+      updateData.status = payload.status;
+    }
+
+    const updated = await this.prisma.exam.update({
+      where: { id: examId },
+      data: updateData,
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'EXAM_UPDATED',
+        entityType: 'Exam',
+        entityId: examId,
+        metadata: {
+          updatedFields: Object.keys(updateData),
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Examination updated successfully',
+      data: updated,
+    };
+  }
+
+  async publishTeacherExam(user: any, examId: string) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+      include: { questions: true },
+    });
+    if (!exam) {
+      throw new NotFoundException('Examination not found');
+    }
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    if (exam.questions.length === 0) {
+      throw new BadRequestException('Cannot publish examination without any questions. Add questions before publishing.');
+    }
+
+    const updated = await this.prisma.exam.update({
+      where: { id: examId },
+      data: { status: 'PUBLISHED' },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'EXAM_PUBLISHED',
+        entityType: 'Exam',
+        entityId: examId,
+        metadata: {
+          title: updated.title,
+          totalQuestions: exam.questions.length,
+          totalMarks: updated.totalMarks,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Examination published successfully',
+      data: updated,
+    };
+  }
+
+  async addTeacherExamQuestion(user: any, examId: string, payload: any) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+    });
+    if (!exam) throw new NotFoundException('Examination not found');
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    if (!payload.prompt || !payload.prompt.trim()) {
+      throw new BadRequestException('Question prompt is required');
+    }
+    const marks = Number(payload.marks || 5);
+    if (isNaN(marks) || marks <= 0) {
+      throw new BadRequestException('Question marks must be a positive integer');
+    }
+
+    const maxPos = await this.prisma.question.findFirst({
+      where: { examId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    });
+    const position = (maxPos?.position ?? -1) + 1;
+
+    const validTypes = ['MCQ_SINGLE', 'MCQ_MULTI', 'TRUE_FALSE', 'SHORT', 'DESCRIPTIVE'];
+    const qType = validTypes.includes(payload.type) ? payload.type : 'MCQ_SINGLE';
+
+    const question = await this.prisma.question.create({
+      data: {
+        instituteId,
+        examId,
+        prompt: payload.prompt.trim(),
+        marks,
+        position,
+        type: qType,
+      },
+    });
+
+    // Create options if provided (MCQ or TRUE_FALSE)
+    if (Array.isArray(payload.options) && payload.options.length > 0) {
+      await Promise.all(
+        payload.options.map((opt: any) =>
+          this.prisma.questionOption.create({
+            data: {
+              questionId: question.id,
+              label: String(opt.label || '').trim(),
+              isCorrect: Boolean(opt.isCorrect),
+            },
+          })
+        )
+      );
+    }
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'EXAM_QUESTION_CREATED',
+        entityType: 'Question',
+        entityId: question.id,
+        metadata: { examId, prompt: question.prompt, marks: question.marks },
+      },
+    });
+
+    const fullQuestion = await this.prisma.question.findUnique({
+      where: { id: question.id },
+      include: { options: true },
+    });
+
+    return {
+      success: true,
+      message: 'Question added successfully',
+      data: fullQuestion,
+    };
+  }
+
+  async updateTeacherExamQuestion(user: any, examId: string, questionId: string, payload: any) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+    });
+    if (!exam) throw new NotFoundException('Examination not found');
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    const question = await this.prisma.question.findFirst({
+      where: { id: questionId, examId },
+    });
+    if (!question) throw new NotFoundException('Question not found in this examination');
+
+    const updateData: any = {};
+    if (payload.prompt !== undefined) {
+      if (!payload.prompt.trim()) throw new BadRequestException('Prompt cannot be empty');
+      updateData.prompt = payload.prompt.trim();
+    }
+    if (payload.marks !== undefined) {
+      const m = Number(payload.marks);
+      if (isNaN(m) || m <= 0) throw new BadRequestException('Marks must be greater than zero');
+      updateData.marks = m;
+    }
+    if (payload.type !== undefined) {
+      updateData.type = payload.type;
+    }
+    if (payload.position !== undefined) {
+      updateData.position = Number(payload.position);
+    }
+
+    await this.prisma.question.update({
+      where: { id: questionId },
+      data: updateData,
+    });
+
+    // Update options if provided
+    if (Array.isArray(payload.options)) {
+      await this.prisma.questionOption.deleteMany({ where: { questionId } });
+      await Promise.all(
+        payload.options.map((opt: any) =>
+          this.prisma.questionOption.create({
+            data: {
+              questionId,
+              label: String(opt.label || '').trim(),
+              isCorrect: Boolean(opt.isCorrect),
+            },
+          })
+        )
+      );
+    }
+
+    const updated = await this.prisma.question.findUnique({
+      where: { id: questionId },
+      include: { options: true },
+    });
+
+    return {
+      success: true,
+      message: 'Question updated successfully',
+      data: updated,
+    };
+  }
+
+  async deleteTeacherExamQuestion(user: any, examId: string, questionId: string) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+    });
+    if (!exam) throw new NotFoundException('Examination not found');
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    const question = await this.prisma.question.findFirst({
+      where: { id: questionId, examId },
+    });
+    if (!question) throw new NotFoundException('Question not found');
+
+    await this.prisma.questionOption.deleteMany({ where: { questionId } });
+    await this.prisma.attemptAnswer.deleteMany({ where: { questionId } });
+    await this.prisma.question.delete({ where: { id: questionId } });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'EXAM_QUESTION_DELETED',
+        entityType: 'Question',
+        entityId: questionId,
+        metadata: { examId },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Question deleted successfully',
+    };
+  }
+
+  async getTeacherExamResults(user: any, examId: string, options: any = {}) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+      include: {
+        course: { select: { id: true, title: true } },
+        batch: { select: { id: true, name: true } },
+      },
+    });
+    if (!exam) throw new NotFoundException('Examination not found');
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    // Fetch all active enrolled students
+    const enrolmentWhere: any = {
+      instituteId,
+      status: 'ACTIVE',
+      ...(exam.batchId ? { batchId: exam.batchId } : { courseId: exam.courseId }),
+    };
+
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: enrolmentWhere,
+      include: {
+        studentProfile: {
+          include: {
+            membership: {
+              include: {
+                user: { select: { id: true, fullName: true, email: true, avatarUrl: true, phoneE164: true } },
+              },
+            },
+          },
+        },
+        batch: { select: { id: true, name: true, code: true } },
+      },
+    });
+
+    const attempts = await this.prisma.examAttempt.findMany({
+      where: { examId, instituteId },
+      orderBy: { startedAt: 'desc' },
+    });
+
+    const attemptsByStudent = new Map<string, any>();
+    attempts.forEach((att) => {
+      if (!attemptsByStudent.has(att.studentProfileId)) {
+        attemptsByStudent.set(att.studentProfileId, att);
+      }
+    });
+
+    let results = enrolments.map((enr) => {
+      const sp = enr.studentProfile;
+      const u = sp.membership?.user;
+      const att = attemptsByStudent.get(sp.id);
+
+      const isAttempted = Boolean(att);
+      const score = att?.score !== null && att?.score !== undefined ? att.score : null;
+      const percentage = score !== null ? Math.round((score / exam.totalMarks) * 100) : null;
+      const passed = score !== null ? score >= exam.passMarks : null;
+
+      let evaluationStatus: 'NOT_ATTEMPTED' | 'IN_PROGRESS' | 'PENDING_EVALUATION' | 'EVALUATED' = 'NOT_ATTEMPTED';
+      if (!isAttempted) evaluationStatus = 'NOT_ATTEMPTED';
+      else if (att.status === 'IN_PROGRESS') evaluationStatus = 'IN_PROGRESS';
+      else if (att.status === 'SUBMITTED') evaluationStatus = 'PENDING_EVALUATION';
+      else if (att.status === 'EVALUATED') evaluationStatus = 'EVALUATED';
+
+      return {
+        studentProfileId: sp.id,
+        admissionNo: sp.admissionNo || 'N/A',
+        studentName: u?.fullName || 'Enrolled Student',
+        email: u?.email,
+        phone: u?.phoneE164,
+        avatarUrl: u?.avatarUrl,
+        batchName: enr.batch?.name || exam.batch?.name || 'All Batches',
+        attemptId: att?.id || null,
+        attemptStatus: att?.status || 'NOT_ATTEMPTED',
+        evaluationStatus,
+        startedAt: att?.startedAt ? att.startedAt.toISOString() : null,
+        submittedAt: att?.submittedAt ? att.submittedAt.toISOString() : null,
+        score,
+        totalMarks: exam.totalMarks,
+        passMarks: exam.passMarks,
+        percentage,
+        passed,
+        feedback: att?.feedback || null,
+      };
+    });
+
+    // Filters
+    if (options.status && options.status !== 'ALL') {
+      results = results.filter((r) => r.evaluationStatus === options.status || r.attemptStatus === options.status);
+    }
+    if (options.search && options.search.trim()) {
+      const qLower = options.search.trim().toLowerCase();
+      results = results.filter(
+        (r) =>
+          r.studentName.toLowerCase().includes(qLower) ||
+          r.admissionNo.toLowerCase().includes(qLower) ||
+          (r.email && r.email.toLowerCase().includes(qLower))
+      );
+    }
+
+    const totalStudents = enrolments.length;
+    const attemptedCount = results.filter((r) => r.attemptId !== null).length;
+    const evaluatedCount = results.filter((r) => r.evaluationStatus === 'EVALUATED').length;
+    const pendingEvaluationCount = results.filter((r) => r.evaluationStatus === 'PENDING_EVALUATION').length;
+    const passedCount = results.filter((r) => r.passed === true).length;
+
+    return {
+      success: true,
+      data: {
+        exam: {
+          id: exam.id,
+          title: exam.title,
+          courseId: exam.courseId,
+          courseTitle: exam.course?.title,
+          batchId: exam.batchId,
+          batchName: exam.batch?.name || 'All Batches',
+          totalMarks: exam.totalMarks,
+          passMarks: exam.passMarks,
+          durationMin: exam.durationMin,
+        },
+        summary: {
+          totalStudents,
+          attemptedCount,
+          evaluatedCount,
+          pendingEvaluationCount,
+          passedCount,
+          passRate: attemptedCount > 0 ? Math.round((passedCount / attemptedCount) * 100) : 0,
+        },
+        results,
+      },
+    };
+  }
+
+  async getTeacherExamAttempt(user: any, examId: string, attemptId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+    });
+    if (!exam) throw new NotFoundException('Examination not found');
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    const attempt = await this.prisma.examAttempt.findFirst({
+      where: { id: attemptId, examId, instituteId },
+      include: {
+        studentProfile: {
+          include: {
+            membership: {
+              include: {
+                user: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
+              },
+            },
+          },
+        },
+        answers: {
+          include: {
+            question: {
+              include: {
+                options: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!attempt) throw new NotFoundException('Attempt not found for this examination');
+
+    return {
+      success: true,
+      data: {
+        id: attempt.id,
+        examId: attempt.examId,
+        studentName: attempt.studentProfile?.membership?.user?.fullName,
+        admissionNo: attempt.studentProfile?.admissionNo,
+        email: attempt.studentProfile?.membership?.user?.email,
+        startedAt: attempt.startedAt.toISOString(),
+        submittedAt: attempt.submittedAt?.toISOString() || null,
+        status: attempt.status,
+        score: attempt.score,
+        totalMarks: exam.totalMarks,
+        passMarks: exam.passMarks,
+        feedback: attempt.feedback,
+        answers: attempt.answers.map((ans) => ({
+          questionId: ans.questionId,
+          prompt: ans.question.prompt,
+          type: ans.question.type,
+          maxMarks: ans.question.marks,
+          chosenText: ans.chosenText,
+          scoreAwarded: ans.score,
+          feedback: ans.feedback,
+          options: ans.question.options.map((o) => ({
+            id: o.id,
+            label: o.label,
+            isCorrect: o.isCorrect,
+          })),
+        })),
+      },
+    };
+  }
+
+  async evaluateTeacherExamAttempt(user: any, examId: string, attemptId: string, payload: any) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const exam = await this.prisma.exam.findFirst({
+      where: { id: examId, instituteId },
+    });
+    if (!exam) throw new NotFoundException('Examination not found');
+
+    await this.verifyTeacherCourseOrBatchAccess(teacherProfileId, instituteId, exam.courseId, exam.batchId);
+
+    const attempt = await this.prisma.examAttempt.findFirst({
+      where: { id: attemptId, examId, instituteId },
+    });
+    if (!attempt) throw new NotFoundException('Attempt not found');
+
+    const totalScore = Number(payload.score);
+    if (isNaN(totalScore) || totalScore < 0 || totalScore > exam.totalMarks) {
+      throw new BadRequestException(`Awarded score must be between 0 and maximum exam marks (${exam.totalMarks})`);
+    }
+
+    // Save individual question scores if provided
+    if (Array.isArray(payload.answers)) {
+      for (const ans of payload.answers) {
+        if (ans.questionId && ans.score !== undefined) {
+          await this.prisma.attemptAnswer.updateMany({
+            where: { attemptId, questionId: ans.questionId },
+            data: {
+              score: Math.round(Number(ans.score)),
+              feedback: ans.feedback?.trim() || null,
+            },
+          });
+        }
+      }
+    }
+
+    const updated = await this.prisma.examAttempt.update({
+      where: { id: attemptId },
+      data: {
+        score: Math.round(totalScore),
+        status: 'EVALUATED',
+        feedback: payload.feedback?.trim() || null,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'EXAM_ATTEMPT_EVALUATED',
+        entityType: 'ExamAttempt',
+        entityId: attemptId,
+        metadata: {
+          examId,
+          studentProfileId: attempt.studentProfileId,
+          previousScore: attempt.score,
+          awardedScore: updated.score,
+          totalMarks: exam.totalMarks,
+          feedback: updated.feedback,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Examination attempt evaluated successfully',
+      data: updated,
+    };
+  }
 }

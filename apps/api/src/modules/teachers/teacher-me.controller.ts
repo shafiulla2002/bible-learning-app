@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -131,6 +132,106 @@ export class TeacherMeController {
     @Body() body: any,
   ) {
     return this.teachersService.gradeTeacherSubmission(user, assignmentId, submissionId, body);
+  }
+
+  // =========================================================================
+  // PHASE 6: EXAMINATIONS & ONLINE TESTS MANAGEMENT
+  // =========================================================================
+
+  @Get('exams')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherExams(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherExams(user, query);
+  }
+
+  @Get('exams/:examId')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherExamDetail(@CurrentUser() user: any, @Param('examId') examId: string) {
+    return this.teachersService.getTeacherExamDetail(user, examId);
+  }
+
+  @Post('exams')
+  @HttpCode(HttpStatus.CREATED)
+  async createTeacherExam(@CurrentUser() user: any, @Body() body: any) {
+    return this.teachersService.createTeacherExam(user, body);
+  }
+
+  @Put('exams/:examId')
+  @HttpCode(HttpStatus.OK)
+  async updateTeacherExam(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.updateTeacherExam(user, examId, body);
+  }
+
+  @Post('exams/:examId/publish')
+  @HttpCode(HttpStatus.OK)
+  async publishTeacherExam(@CurrentUser() user: any, @Param('examId') examId: string) {
+    return this.teachersService.publishTeacherExam(user, examId);
+  }
+
+  @Post('exams/:examId/questions')
+  @HttpCode(HttpStatus.CREATED)
+  async addTeacherExamQuestion(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.addTeacherExamQuestion(user, examId, body);
+  }
+
+  @Put('exams/:examId/questions/:questionId')
+  @HttpCode(HttpStatus.OK)
+  async updateTeacherExamQuestion(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Param('questionId') questionId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.updateTeacherExamQuestion(user, examId, questionId, body);
+  }
+
+  @Delete('exams/:examId/questions/:questionId')
+  @HttpCode(HttpStatus.OK)
+  async deleteTeacherExamQuestion(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Param('questionId') questionId: string,
+  ) {
+    return this.teachersService.deleteTeacherExamQuestion(user, examId, questionId);
+  }
+
+  @Get('exams/:examId/results')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherExamResults(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Query() query: any,
+  ) {
+    return this.teachersService.getTeacherExamResults(user, examId, query);
+  }
+
+  @Get('exams/:examId/attempts/:attemptId')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherExamAttempt(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Param('attemptId') attemptId: string,
+  ) {
+    return this.teachersService.getTeacherExamAttempt(user, examId, attemptId);
+  }
+
+  @Post('exams/:examId/attempts/:attemptId/evaluate')
+  @HttpCode(HttpStatus.OK)
+  async evaluateTeacherExamAttempt(
+    @CurrentUser() user: any,
+    @Param('examId') examId: string,
+    @Param('attemptId') attemptId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.evaluateTeacherExamAttempt(user, examId, attemptId, body);
   }
 }
 

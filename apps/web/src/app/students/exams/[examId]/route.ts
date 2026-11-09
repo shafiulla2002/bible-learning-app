@@ -86,7 +86,7 @@ export async function GET(
     const studentProfileId = studentMembership.studentProfileId;
 
     const examRows = await queryDb(
-      `SELECT ex.id, ex.title, ex.type, ex."durationMin", ex."totalMarks", ex."passMarks",
+      `SELECT ex.id, ex.title, ex.type, ex.status, ex."durationMin", ex."totalMarks", ex."passMarks",
               ex."courseId", c.title as "courseTitle",
               (SELECT COUNT(*) FROM "Question" q WHERE q."examId" = ex.id)::int as "totalQuestions"
        FROM "Exam" ex
@@ -100,6 +100,13 @@ export async function GET(
     }
 
     const ex = examRows[0];
+
+    if (ex.status && ex.status !== 'PUBLISHED') {
+      return NextResponse.json(
+        { message: 'Examination is currently in draft and not accessible.' },
+        { status: 403 }
+      );
+    }
 
     // Enrolment check
     const enrolmentRows = await queryDb(

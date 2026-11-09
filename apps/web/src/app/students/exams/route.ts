@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
            WHERE a."examId" = ex.id AND a."studentProfileId" = $1
            ORDER BY a."startedAt" DESC LIMIT 1
          ) att ON true
+         WHERE COALESCE(ex.status, 'PUBLISHED') = 'PUBLISHED'
          ORDER BY ex."createdAt" DESC`,
         [studentProfileId]
       );

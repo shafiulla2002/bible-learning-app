@@ -19,6 +19,7 @@ export interface TeacherCourseItem {
   role: string;
   batchCount: number;
   studentCount: number;
+  assignedBatches?: { id: string; name: string; studentCount: number }[];
   curriculumStats: {
     moduleCount: number;
     chapterCount: number;

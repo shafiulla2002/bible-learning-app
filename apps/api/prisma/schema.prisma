@@ -620,6 +620,7 @@ model Batch {
   liveSessions    LiveSession[]
   attendances     Attendance[]
   assignments     Assignment[]
+  exams           Exam[]
   sourceTransfers BatchTransferLog[] @relation("SourceBatchTransfers")
   targetTransfers BatchTransferLog[] @relation("TargetBatchTransfers")
 
@@ -835,11 +836,17 @@ model Exam {
   instituteId String
   courseId    String
   course      Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  batchId     String?
+  batch       Batch?    @relation(fields: [batchId], references: [id])
   title       String
+  instructions String?
   type        ExamType  @default(QUIZ)
   durationMin Int       @default(30)
   totalMarks  Int       @default(100)
   passMarks   Int       @default(60)
+  status      String    @default("DRAFT")
+  startAt     DateTime?
+  endAt       DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -847,6 +854,7 @@ model Exam {
   attempts  ExamAttempt[]
 
   @@index([courseId])
+  @@index([batchId])
 }
 
 model Question {
@@ -884,6 +892,7 @@ model ExamAttempt {
   submittedAt      DateTime?
   score            Int?
   status           String         @default("IN_PROGRESS")
+  feedback         String?
 
   answers AttemptAnswer[]
 }
@@ -896,6 +905,7 @@ model AttemptAnswer {
   question   Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
   chosenText String?
   score      Int?
+  feedback   String?
 
   @@unique([attemptId, questionId])
 }

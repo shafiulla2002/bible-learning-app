@@ -86,7 +86,7 @@ export async function POST(
     const studentProfileId = studentMembership.studentProfileId;
 
     const examRows = await queryDb(
-      `SELECT id, "courseId", "durationMin" FROM "Exam"
+      `SELECT id, "courseId", "durationMin", status FROM "Exam"
        WHERE id = $1 AND "instituteId" = $2 LIMIT 1`,
       [examId, resolvedInstituteId]
     );
@@ -96,6 +96,13 @@ export async function POST(
     }
 
     const ex = examRows[0];
+
+    if (ex.status && ex.status !== 'PUBLISHED') {
+      return NextResponse.json(
+        { message: 'This examination is currently in draft and cannot be attempted.' },
+        { status: 400 }
+      );
+    }
 
     const enrolmentRows = await queryDb(
       `SELECT id FROM "Enrolment"
