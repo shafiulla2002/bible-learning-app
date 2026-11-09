@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -89,6 +90,49 @@ export class TeacherMeController {
   ) {
     return this.teachersService.uploadTeacherResource(user, courseId, lessonId, body);
   }
+
+  @Get('assignments')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherAssignments(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherAssignments(user, query);
+  }
+
+  @Get('assignments/:assignmentId')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherAssignmentDetail(
+    @CurrentUser() user: any,
+    @Param('assignmentId') assignmentId: string,
+  ) {
+    return this.teachersService.getTeacherAssignmentDetail(user, assignmentId);
+  }
+
+  @Post('assignments')
+  @HttpCode(HttpStatus.CREATED)
+  async createTeacherAssignment(@CurrentUser() user: any, @Body() body: any) {
+    return this.teachersService.createTeacherAssignment(user, body);
+  }
+
+  @Put('assignments/:assignmentId')
+  @HttpCode(HttpStatus.OK)
+  async updateTeacherAssignment(
+    @CurrentUser() user: any,
+    @Param('assignmentId') assignmentId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.updateTeacherAssignment(user, assignmentId, body);
+  }
+
+  @Post('assignments/:assignmentId/submissions/:submissionId/grade')
+  @HttpCode(HttpStatus.OK)
+  async gradeTeacherSubmission(
+    @CurrentUser() user: any,
+    @Param('assignmentId') assignmentId: string,
+    @Param('submissionId') submissionId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.gradeTeacherSubmission(user, assignmentId, submissionId, body);
+  }
 }
+
 
 

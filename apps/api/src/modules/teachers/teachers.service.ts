@@ -2513,4 +2513,707 @@ export class TeachersService {
       },
     };
   }
+
+  /**
+   * Requirement: Teacher Assignments List
+   * Retrieves all assignments belonging to courses or batches assigned to the authenticated teacher.
+   */
+  async getTeacherAssignments(
+    user: any,
+    options: {
+      search?: string;
+      status?: string;
+      courseId?: string;
+      batchId?: string;
+      page?: number | string;
+      limit?: number | string;
+    } = {}
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    // 1. Fetch authorized course IDs and batch IDs
+    const directInstructors = await this.prisma.courseInstructor.findMany({
+      where: { teacherProfileId, instituteId },
+      select: { courseId: true },
+    });
+    const batchTeachers = await this.prisma.batchTeacher.findMany({
+      where: { teacherProfileId, instituteId },
+      select: { batchId: true, batch: { select: { courseId: true } } },
+    });
+
+    const directCourseIds = directInstructors.map((ci) => ci.courseId);
+    const batchCourseIds = batchTeachers
+      .map((bt) => bt.batch?.courseId)
+      .filter((id): id is string => Boolean(id));
+    const assignedCourseIds = Array.from(new Set([...directCourseIds, ...batchCourseIds]));
+    const assignedBatchIds = batchTeachers.map((bt) => bt.batchId);
+
+    if (assignedCourseIds.length === 0 && assignedBatchIds.length === 0) {
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page: Number(options.page) || 1,
+          limit: Number(options.limit) || 10,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      };
+    }
+
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 10));
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      instituteId,
+      OR: [
+        { courseId: { in: assignedCourseIds } },
+        { batchId: { in: assignedBatchIds } },
+      ],
+    };
+
+    if (options.status && options.status !== 'ALL') {
+      where.status = options.status;
+    }
+
+    if (options.courseId && options.courseId !== 'ALL') {
+      if (!assignedCourseIds.includes(options.courseId)) {
+        throw new ForbiddenException('You are not authorized to view assignments for this course.');
+      }
+      where.courseId = options.courseId;
+    }
+
+    if (options.batchId && options.batchId !== 'ALL') {
+      if (!assignedBatchIds.includes(options.batchId)) {
+        throw new ForbiddenException('You are not authorized to view assignments for this batch.');
+      }
+      where.batchId = options.batchId;
+    }
+
+    if (options.search?.trim()) {
+      const s = options.search.trim();
+      where.AND = [
+        {
+          OR: [
+            { title: { contains: s, mode: 'insensitive' } },
+            { instructions: { contains: s, mode: 'insensitive' } },
+            { course: { title: { contains: s, mode: 'insensitive' } } },
+            { batch: { name: { contains: s, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
+
+    const total = await this.prisma.assignment.count({ where });
+
+    const assignments = await this.prisma.assignment.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { dueAt: 'desc' },
+      include: {
+        course: { select: { id: true, title: true, slug: true } },
+        batch: { select: { id: true, name: true, code: true } },
+        submissions: {
+          select: {
+            id: true,
+            status: true,
+            submittedAt: true,
+            marksAwarded: true,
+          },
+        },
+      },
+    });
+
+    // Compute active enrolments for the courses/batches in this list
+    const courseIds = Array.from(new Set(assignments.map((a) => a.courseId)));
+    const batchIds = Array.from(
+      new Set(assignments.map((a) => a.batchId).filter((id): id is string => Boolean(id)))
+    );
+
+    const courseEnrolments = await this.prisma.enrolment.groupBy({
+      by: ['courseId'],
+      where: {
+        courseId: { in: courseIds },
+        instituteId,
+        status: 'ACTIVE',
+      },
+      _count: { id: true },
+    });
+
+    const courseEnrolmentMap = new Map<string, number>();
+    for (const ce of courseEnrolments) {
+      if (ce.courseId) courseEnrolmentMap.set(ce.courseId, ce._count.id);
+    }
+
+    const batchEnrolmentMap = new Map<string, number>();
+    if (batchIds.length > 0) {
+      const batchEnrolments = await this.prisma.enrolment.groupBy({
+        by: ['batchId'],
+        where: {
+          batchId: { in: batchIds },
+          instituteId,
+          status: 'ACTIVE',
+        },
+        _count: { id: true },
+      });
+      for (const be of batchEnrolments) {
+        if (be.batchId) batchEnrolmentMap.set(be.batchId, be._count.id);
+      }
+    }
+
+    const data = assignments.map((a) => {
+      const totalStudents: number = a.batchId
+        ? (batchEnrolmentMap.get(a.batchId) || 0)
+        : (courseEnrolmentMap.get(a.courseId) || 0);
+
+      const submittedCount = a.submissions.length;
+      const gradedCount = a.submissions.filter((s) => s.status === 'GRADED').length;
+      const pendingCount = Math.max(0, totalStudents - submittedCount);
+      const lateCount = a.submissions.filter(
+        (s) => new Date(s.submittedAt) > new Date(a.dueAt)
+      ).length;
+
+      return {
+        id: a.id,
+        title: a.title,
+        instructions: a.instructions,
+        dueAt: a.dueAt.toISOString(),
+        maxMarks: a.maxMarks,
+        status: a.status,
+        courseId: a.courseId,
+        courseTitle: a.course?.title || 'Unknown Course',
+        batchId: a.batchId || null,
+        batchName: a.batch?.name || 'All Cohorts',
+        totalStudents,
+        submittedCount,
+        gradedCount,
+        pendingCount,
+        lateCount,
+        createdAt: a.createdAt.toISOString(),
+        updatedAt: a.updatedAt.toISOString(),
+      };
+    });
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
+  /**
+   * Requirement: Teacher Assignment Detail & Student Submissions Roster
+   */
+  async getTeacherAssignmentDetail(user: any, assignmentId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const assignment = await this.prisma.assignment.findFirst({
+      where: { id: assignmentId, instituteId },
+      include: {
+        course: { select: { id: true, title: true, slug: true } },
+        batch: { select: { id: true, name: true, code: true } },
+        submissions: {
+          include: {
+            studentProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: {
+                      select: {
+                        id: true,
+                        fullName: true,
+                        email: true,
+                        phoneE164: true,
+                        avatarUrl: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { submittedAt: 'desc' },
+        },
+      },
+    });
+
+    if (!assignment) {
+      throw new NotFoundException('Assignment not found in your institute');
+    }
+
+    // Verify teacher assignment to this course or batch
+    const isDirectCourse = await this.prisma.courseInstructor.findFirst({
+      where: { courseId: assignment.courseId, teacherProfileId, instituteId },
+    });
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: {
+        teacherProfileId,
+        instituteId,
+        ...(assignment.batchId
+          ? { batchId: assignment.batchId }
+          : { batch: { courseId: assignment.courseId } }),
+      },
+    });
+
+    if (!isDirectCourse && !isBatchTeacher) {
+      throw new ForbiddenException(
+        'You are not authorized to view or manage submissions for this assignment.'
+      );
+    }
+
+    // Fetch all active enrolled students for the assignment's scope
+    const enrolmentWhere: any = {
+      instituteId,
+      status: 'ACTIVE',
+      studentProfile: { status: 'ACTIVE', membership: { status: 'ACTIVE' } },
+    };
+    if (assignment.batchId) {
+      enrolmentWhere.batchId = assignment.batchId;
+    } else {
+      enrolmentWhere.courseId = assignment.courseId;
+    }
+
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: enrolmentWhere,
+      include: {
+        batch: { select: { id: true, name: true, code: true } },
+        studentProfile: {
+          include: {
+            membership: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    fullName: true,
+                    email: true,
+                    phoneE164: true,
+                    avatarUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { studentProfile: { admissionNo: 'asc' } },
+    });
+
+    const submissionMap = new Map(
+      assignment.submissions.map((s) => [s.studentProfileId, s])
+    );
+
+    const submissionsRoster = enrolments.map((e) => {
+      const sp = e.studentProfile;
+      const u = sp?.membership?.user;
+      const sub = submissionMap.get(sp.id);
+
+      const isLate = sub ? new Date(sub.submittedAt) > new Date(assignment.dueAt) : false;
+
+      return {
+        studentProfileId: sp.id,
+        admissionNo: sp.admissionNo || 'N/A',
+        studentName: u?.fullName || 'Enrolled Student',
+        email: u?.email || null,
+        phone: u?.phoneE164 || null,
+        avatarUrl: u?.avatarUrl || null,
+        batchName: e.batch?.name || assignment.batch?.name || 'General Batch',
+        submissionId: sub?.id || null,
+        status: sub ? sub.status : 'PENDING',
+        submittedAt: sub ? sub.submittedAt.toISOString() : null,
+        isLate,
+        answerText: sub?.answerText || null,
+        fileUrl: sub?.fileUrl || null,
+        marksAwarded: sub?.marksAwarded ?? null,
+        maxMarks: assignment.maxMarks,
+        feedback: sub?.feedback || null,
+      };
+    });
+
+    const totalStudents = submissionsRoster.length;
+    const submittedCount = submissionsRoster.filter((r) => r.status !== 'PENDING').length;
+    const gradedCount = submissionsRoster.filter((r) => r.status === 'GRADED').length;
+    const pendingCount = submissionsRoster.filter((r) => r.status === 'PENDING').length;
+    const lateCount = submissionsRoster.filter((r) => r.isLate).length;
+
+    return {
+      success: true,
+      assignment: {
+        id: assignment.id,
+        title: assignment.title,
+        instructions: assignment.instructions,
+        dueAt: assignment.dueAt.toISOString(),
+        maxMarks: assignment.maxMarks,
+        status: assignment.status,
+        courseId: assignment.courseId,
+        courseTitle: assignment.course?.title || 'Unknown Course',
+        batchId: assignment.batchId || null,
+        batchName: assignment.batch?.name || 'All Cohorts',
+        createdAt: assignment.createdAt.toISOString(),
+        updatedAt: assignment.updatedAt.toISOString(),
+        summary: {
+          totalStudents,
+          submittedCount,
+          gradedCount,
+          pendingCount,
+          lateCount,
+        },
+        submissions: submissionsRoster,
+      },
+    };
+  }
+
+  /**
+   * Requirement: Create Teacher Assignment
+   */
+  async createTeacherAssignment(
+    user: any,
+    payload: {
+      courseId: string;
+      batchId?: string;
+      title: string;
+      instructions: string;
+      dueAt: string;
+      maxMarks?: number | string;
+      status?: string;
+    }
+  ) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    if (!payload.courseId || !payload.title?.trim() || !payload.instructions?.trim() || !payload.dueAt) {
+      throw new BadRequestException('courseId, title, instructions, and dueAt are required');
+    }
+
+    const maxMarks = Math.max(1, parseInt(String(payload.maxMarks || 100), 10));
+    const dueAtDate = new Date(payload.dueAt);
+    if (isNaN(dueAtDate.getTime())) {
+      throw new BadRequestException('Invalid due date');
+    }
+
+    // Verify teacher is assigned to this course
+    const isDirectCourse = await this.prisma.courseInstructor.findFirst({
+      where: { courseId: payload.courseId, teacherProfileId, instituteId },
+    });
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: {
+        teacherProfileId,
+        instituteId,
+        ...(payload.batchId
+          ? { batchId: payload.batchId }
+          : { batch: { courseId: payload.courseId } }),
+      },
+    });
+
+    if (!isDirectCourse && !isBatchTeacher) {
+      throw new ForbiddenException(
+        'You are not authorized to create assignments for this course or cohort.'
+      );
+    }
+
+    if (payload.batchId) {
+      const batch = await this.prisma.batch.findFirst({
+        where: { id: payload.batchId, courseId: payload.courseId, instituteId },
+      });
+      if (!batch) {
+        throw new BadRequestException('Selected batch does not belong to this course or institute');
+      }
+    }
+
+    const assignmentStatus = payload.status === 'DRAFT' ? 'DRAFT' : 'PUBLISHED';
+
+    const assignment = await this.prisma.assignment.create({
+      data: {
+        instituteId,
+        courseId: payload.courseId,
+        batchId: payload.batchId || null,
+        title: payload.title.trim(),
+        instructions: payload.instructions.trim(),
+        dueAt: dueAtDate,
+        maxMarks,
+        status: assignmentStatus,
+      },
+      include: {
+        course: { select: { id: true, title: true } },
+        batch: { select: { id: true, name: true } },
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'CREATE_ASSIGNMENT',
+        entityType: 'Assignment',
+        entityId: assignment.id,
+        metadata: {
+          title: assignment.title,
+          courseId: assignment.courseId,
+          batchId: assignment.batchId,
+          dueAt: assignment.dueAt.toISOString(),
+          maxMarks: assignment.maxMarks,
+          status: assignment.status,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Assignment created successfully',
+      data: {
+        id: assignment.id,
+        title: assignment.title,
+        instructions: assignment.instructions,
+        dueAt: assignment.dueAt.toISOString(),
+        maxMarks: assignment.maxMarks,
+        status: assignment.status,
+        courseId: assignment.courseId,
+        courseTitle: assignment.course?.title,
+        batchId: assignment.batchId,
+        batchName: assignment.batch?.name || 'All Cohorts',
+        createdAt: assignment.createdAt.toISOString(),
+      },
+    };
+  }
+
+  /**
+   * Requirement: Update Teacher Assignment
+   */
+  async updateTeacherAssignment(
+    user: any,
+    assignmentId: string,
+    payload: {
+      title?: string;
+      instructions?: string;
+      dueAt?: string;
+      maxMarks?: number | string;
+      status?: string;
+    }
+  ) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const assignment = await this.prisma.assignment.findFirst({
+      where: { id: assignmentId, instituteId },
+    });
+
+    if (!assignment) {
+      throw new NotFoundException('Assignment not found in your institute');
+    }
+
+    // Verify teacher assignment
+    const isDirectCourse = await this.prisma.courseInstructor.findFirst({
+      where: { courseId: assignment.courseId, teacherProfileId, instituteId },
+    });
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: {
+        teacherProfileId,
+        instituteId,
+        ...(assignment.batchId
+          ? { batchId: assignment.batchId }
+          : { batch: { courseId: assignment.courseId } }),
+      },
+    });
+
+    if (!isDirectCourse && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to edit this assignment.');
+    }
+
+    if (payload.maxMarks !== undefined) {
+      const newMax = parseInt(String(payload.maxMarks), 10);
+      if (isNaN(newMax) || newMax <= 0) {
+        throw new BadRequestException('Maximum marks must be greater than 0');
+      }
+
+      // Check existing awarded marks
+      const highestAwarded = await this.prisma.submission.findFirst({
+        where: { assignmentId, marksAwarded: { not: null } },
+        orderBy: { marksAwarded: 'desc' },
+        select: { marksAwarded: true },
+      });
+
+      if (highestAwarded && highestAwarded.marksAwarded !== null && highestAwarded.marksAwarded > newMax) {
+        throw new BadRequestException(
+          `Cannot reduce max marks to ${newMax} because a student has already been awarded ${highestAwarded.marksAwarded} marks.`
+        );
+      }
+    }
+
+    let parsedDueAt: Date | undefined;
+    if (payload.dueAt) {
+      parsedDueAt = new Date(payload.dueAt);
+      if (isNaN(parsedDueAt.getTime())) {
+        throw new BadRequestException('Invalid due date');
+      }
+    }
+
+    const updated = await this.prisma.assignment.update({
+      where: { id: assignmentId },
+      data: {
+        ...(payload.title ? { title: payload.title.trim() } : {}),
+        ...(payload.instructions ? { instructions: payload.instructions.trim() } : {}),
+        ...(parsedDueAt ? { dueAt: parsedDueAt } : {}),
+        ...(payload.maxMarks !== undefined ? { maxMarks: parseInt(String(payload.maxMarks), 10) } : {}),
+        ...(payload.status ? { status: payload.status } : {}),
+      },
+      include: {
+        course: { select: { id: true, title: true } },
+        batch: { select: { id: true, name: true } },
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'UPDATE_ASSIGNMENT',
+        entityType: 'Assignment',
+        entityId: updated.id,
+        metadata: {
+          previousTitle: assignment.title,
+          newTitle: updated.title,
+          previousStatus: assignment.status,
+          newStatus: updated.status,
+          previousDueAt: assignment.dueAt.toISOString(),
+          newDueAt: updated.dueAt.toISOString(),
+          previousMaxMarks: assignment.maxMarks,
+          newMaxMarks: updated.maxMarks,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Assignment updated successfully',
+      data: {
+        id: updated.id,
+        title: updated.title,
+        instructions: updated.instructions,
+        dueAt: updated.dueAt.toISOString(),
+        maxMarks: updated.maxMarks,
+        status: updated.status,
+        courseId: updated.courseId,
+        courseTitle: updated.course?.title,
+        batchId: updated.batchId,
+        batchName: updated.batch?.name || 'All Cohorts',
+        updatedAt: updated.updatedAt.toISOString(),
+      },
+    };
+  }
+
+  /**
+   * Requirement: Grade Teacher Submission
+   */
+  async gradeTeacherSubmission(
+    user: any,
+    assignmentId: string,
+    submissionId: string,
+    payload: {
+      marksAwarded: number | string;
+      feedback?: string;
+    }
+  ) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const assignment = await this.prisma.assignment.findFirst({
+      where: { id: assignmentId, instituteId },
+    });
+
+    if (!assignment) {
+      throw new NotFoundException('Assignment not found');
+    }
+
+    // Verify teacher assignment
+    const isDirectCourse = await this.prisma.courseInstructor.findFirst({
+      where: { courseId: assignment.courseId, teacherProfileId, instituteId },
+    });
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: {
+        teacherProfileId,
+        instituteId,
+        ...(assignment.batchId
+          ? { batchId: assignment.batchId }
+          : { batch: { courseId: assignment.courseId } }),
+      },
+    });
+
+    if (!isDirectCourse && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to grade submissions for this assignment.');
+    }
+
+    const marks = Number(payload.marksAwarded);
+    if (isNaN(marks) || marks < 0 || marks > assignment.maxMarks) {
+      throw new BadRequestException(
+        `Marks awarded must be an integer between 0 and ${assignment.maxMarks}`
+      );
+    }
+
+    const existingSubmission = await this.prisma.submission.findFirst({
+      where: { id: submissionId, assignmentId, instituteId },
+      include: {
+        studentProfile: {
+          include: {
+            membership: {
+              include: {
+                user: { select: { fullName: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!existingSubmission) {
+      throw new NotFoundException('Submission not found for this assignment');
+    }
+
+    const updated = await this.prisma.submission.update({
+      where: { id: submissionId },
+      data: {
+        marksAwarded: Math.round(marks),
+        feedback: payload.feedback !== undefined ? payload.feedback.trim() : existingSubmission.feedback,
+        status: 'GRADED',
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        instituteId,
+        actorUserId: authUser.id,
+        action: 'GRADE_SUBMISSION',
+        entityType: 'Submission',
+        entityId: submissionId,
+        metadata: {
+          assignmentId,
+          studentProfileId: existingSubmission.studentProfileId,
+          studentName: existingSubmission.studentProfile?.membership?.user?.fullName,
+          previousMarks: existingSubmission.marksAwarded,
+          marksAwarded: updated.marksAwarded,
+          previousFeedback: existingSubmission.feedback,
+          feedback: updated.feedback,
+          maxMarks: assignment.maxMarks,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Submission graded successfully',
+      data: {
+        id: updated.id,
+        assignmentId: updated.assignmentId,
+        studentProfileId: updated.studentProfileId,
+        marksAwarded: updated.marksAwarded,
+        maxMarks: assignment.maxMarks,
+        feedback: updated.feedback,
+        status: updated.status,
+      },
+    };
+  }
 }
