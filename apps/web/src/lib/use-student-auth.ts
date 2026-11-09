@@ -63,7 +63,7 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem('token');
@@ -71,6 +71,7 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
         localStorage.removeItem('auth_token');
         localStorage.removeItem('current_user_role');
         localStorage.removeItem('current_student_profile_id');
+        localStorage.removeItem('current_teacher_profile_id');
         localStorage.removeItem('current_institute_id');
         sessionStorage.clear();
       } catch (e) {
@@ -78,9 +79,13 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
       }
 
       try {
-        // Clear authentication cookies across domain
-        document.cookie = 'auth_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-        document.cookie = 'token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+        // Clear authentication cookies across domain and security flags
+        const cookieKeys = ['auth_token', 'token', 'access_token'];
+        cookieKeys.forEach((key) => {
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
+        });
       } catch (e) {
         console.warn('cookie clear note:', e);
       }
@@ -89,9 +94,14 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
         clearCache();
       } catch (e) {}
 
+      // Server-side cookie clear request
+      try {
+        fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+      } catch {}
+
       // Always perform hard navigation to /login to flush React state and unmount portals
       const target = options.redirectTo || '/login';
-      window.location.replace(target);
+      window.location.href = target;
     }
   }, [options.redirectTo]);
 
@@ -99,6 +109,18 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     setIsLoading(true);
     setError(null);
     try {
+      if (typeof window !== 'undefined') {
+        const hasToken =
+          localStorage.getItem('token') ||
+          localStorage.getItem('access_token') ||
+          localStorage.getItem('auth_token') ||
+          document.cookie.includes('auth_token=');
+
+        if (!hasToken && options.requireAuth) {
+          throw new Error('401 Unauthorized: Session terminated');
+        }
+      }
+
       const res = await apiFetch<StudentAuthContext>('/students/me', {
         ttlMs: 60000, // 1 min safe cache
       });
@@ -115,15 +137,16 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     } catch (err: any) {
       const errMsg = err?.message || 'Authentication error';
       setError(errMsg);
-      // For preview / demo purposes, fallback gracefully to Shaik Shafiulla
-      setData(DEFAULT_SHAFIULLA_AUTH);
 
-      // If unauthorized and requireAuth is active, redirect to login
+      // If unauthorized and requireAuth is active, immediately redirect to login
       if (options.requireAuth) {
-        if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Unauthorized') || errMsg.includes('Access denied')) {
-          logout();
-        }
+        setData(null);
+        logout();
+        return;
       }
+
+      // For preview / demo purposes, only fallback gracefully when requireAuth is false
+      setData(DEFAULT_SHAFIULLA_AUTH);
     } finally {
       setIsLoading(false);
     }

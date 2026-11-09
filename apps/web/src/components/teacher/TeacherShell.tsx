@@ -64,7 +64,7 @@ export function TeacherShell({
 }: TeacherShellProps) {
   const pathname = usePathname();
   const { teacher, institute, isLoading, error, logout, refresh } = useTeacherAuth({
-    requireAuth: false,
+    requireAuth: true,
     redirectTo: '/login',
   });
 
@@ -262,7 +262,11 @@ export function TeacherShell({
             {!sidebarCollapsed && (
               <button
                 type="button"
-                onClick={logout}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  logout();
+                }}
                 className="p-2 text-blue-200 hover:text-white hover:bg-white/10 rounded-xl transition cursor-pointer"
                 title="Sign out"
               >
@@ -369,7 +373,9 @@ export function TeacherShell({
 
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         setUserDropdownOpen(false);
                         logout();
                       }}

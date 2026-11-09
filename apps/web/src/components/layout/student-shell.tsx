@@ -62,7 +62,7 @@ export function StudentShell({
 }: StudentShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: false, redirectTo: '/login' });
+  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -249,7 +249,11 @@ export function StudentShell({
             {!sidebarCollapsed && (
               <button
                 type="button"
-                onClick={logout}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  logout();
+                }}
                 className="p-2 text-blue-200 hover:text-white hover:bg-white/10 rounded-xl transition cursor-pointer"
                 title="Sign out"
               >
@@ -348,7 +352,9 @@ export function StudentShell({
 
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         setUserDropdownOpen(false);
                         logout();
                       }}

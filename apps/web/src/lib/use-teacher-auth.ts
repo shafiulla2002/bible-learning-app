@@ -44,7 +44,7 @@ export function useTeacherAuth(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem('token');
@@ -52,6 +52,7 @@ export function useTeacherAuth(
         localStorage.removeItem('auth_token');
         localStorage.removeItem('current_user_role');
         localStorage.removeItem('current_teacher_profile_id');
+        localStorage.removeItem('current_student_profile_id');
         localStorage.removeItem('current_institute_id');
         sessionStorage.clear();
       } catch (e) {
@@ -59,8 +60,13 @@ export function useTeacherAuth(
       }
 
       try {
-        document.cookie = 'auth_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-        document.cookie = 'token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+        // Clear authentication cookies across domain and security flags
+        const cookieKeys = ['auth_token', 'token', 'access_token'];
+        cookieKeys.forEach((key) => {
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
+        });
       } catch (e) {
         console.warn('cookie clear note:', e);
       }
@@ -69,8 +75,13 @@ export function useTeacherAuth(
         clearCache();
       } catch (e) {}
 
+      // Server-side cookie clear request
+      try {
+        fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+      } catch {}
+
       const target = options.redirectTo || '/login';
-      window.location.replace(target);
+      window.location.href = target;
     }
   }, [options.redirectTo]);
 
@@ -82,10 +93,18 @@ export function useTeacherAuth(
         'Content-Type': 'application/json',
       };
 
+      let hasToken = false;
       if (typeof window !== 'undefined') {
         const storedToken = localStorage.getItem('token') || localStorage.getItem('auth_token') || localStorage.getItem('access_token');
         if (storedToken) {
           headers['Authorization'] = `Bearer ${storedToken}`;
+          hasToken = true;
+        } else if (document.cookie.includes('auth_token=')) {
+          hasToken = true;
+        }
+
+        if (!hasToken && options.requireAuth) {
+          throw new Error('401 Unauthorized: Session terminated');
         }
       }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -52,17 +52,50 @@ export function PortalShell({
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const handleLogout = () => {
+  // Enforce session presence on mount and history navigation (Browser Back)
+  useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('token');
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('current_user_role');
-      localStorage.removeItem('current_institute_id');
-      localStorage.removeItem('current_student_profile_id');
-      sessionStorage.clear();
-      document.cookie = 'auth_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-      document.cookie = 'token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      const hasToken =
+        localStorage.getItem('token') ||
+        localStorage.getItem('access_token') ||
+        localStorage.getItem('auth_token') ||
+        document.cookie.includes('auth_token=');
+      if (!hasToken) {
+        window.location.href = '/login';
+      }
+    }
+  }, [pathname]);
+
+  const handleLogout = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('token');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('current_user_role');
+        localStorage.removeItem('current_institute_id');
+        localStorage.removeItem('current_student_profile_id');
+        localStorage.removeItem('current_teacher_profile_id');
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn('localStorage clear note:', e);
+      }
+
+      try {
+        const cookieKeys = ['auth_token', 'token', 'access_token'];
+        cookieKeys.forEach((key) => {
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+          document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
+        });
+      } catch (e) {
+        console.warn('cookie clear note:', e);
+      }
+
+      try {
+        fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+      } catch {}
+
       window.location.href = '/login';
     }
   };
