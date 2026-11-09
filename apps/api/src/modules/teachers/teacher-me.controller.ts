@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Query,
   Body,
+  Param,
 } from '@nestjs/common';
 import { TeachersService } from './teachers.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
@@ -56,5 +57,38 @@ export class TeacherMeController {
   async markTeacherAttendance(@CurrentUser() user: any, @Body() body: any) {
     return this.teachersService.markTeacherAttendance(user, body);
   }
+
+  @Get('courses')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherCourses(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherCourses(user, query);
+  }
+
+  @Get('courses/:courseId')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherCourseDetail(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.teachersService.getTeacherCourseDetail(user, courseId);
+  }
+
+  @Get('materials')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherMaterials(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherMaterials(user, query);
+  }
+
+  @Post('courses/:courseId/lessons/:lessonId/resources')
+  @HttpCode(HttpStatus.CREATED)
+  async uploadTeacherResource(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+    @Param('lessonId') lessonId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.uploadTeacherResource(user, courseId, lessonId, body);
+  }
 }
+
 

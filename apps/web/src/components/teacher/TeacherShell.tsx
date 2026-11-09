@@ -25,6 +25,7 @@ import {
   AlertCircle,
   RefreshCw,
   Library,
+  FileText,
 } from 'lucide-react';
 import { useTeacherAuth } from '@/lib/use-teacher-auth';
 
@@ -38,6 +39,7 @@ export interface TeacherNavItem {
 
 const defaultTeacherNavItems: TeacherNavItem[] = [
   { label: 'Dashboard', href: '/teacher', icon: <LayoutDashboard size={18} /> },
+  { label: 'My Courses', href: '/teacher/courses', icon: <BookOpen size={18} /> },
   { label: 'My Batches', href: '/teacher/batches', icon: <Library size={18} /> },
   { label: 'My Students', href: '/teacher/students', icon: <Users size={18} /> },
   { label: 'Attendance', href: '/teacher/attendance', icon: <CalendarCheck size={18} /> },
@@ -45,7 +47,7 @@ const defaultTeacherNavItems: TeacherNavItem[] = [
   { label: 'Examinations', href: '/teacher/exams', icon: <GraduationCap size={18} /> },
   { label: 'Live Classes', href: '/teacher/classes', icon: <Radio size={18} />, badge: 'LIVE', badgeColor: 'bg-rose-500' },
   { label: 'Timetable', href: '/teacher/timetable', icon: <Clock size={18} /> },
-  { label: 'Study Materials', href: '/teacher/materials', icon: <BookOpen size={18} /> },
+  { label: 'Study Materials', href: '/teacher/materials', icon: <FileText size={18} /> },
   { label: 'Notifications', href: '/teacher/notifications', icon: <Bell size={18} /> },
   { label: 'My Profile', href: '/teacher/profile', icon: <User size={18} /> },
   { label: 'Settings', href: '/teacher/settings', icon: <Settings size={18} /> },

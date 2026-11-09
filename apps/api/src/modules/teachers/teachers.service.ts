@@ -1860,4 +1860,657 @@ export class TeachersService {
       recordsUpdated: result.markedCount,
     };
   }
+
+  /**
+   * Requirement: Teacher Assigned Courses
+   * Retrieves all courses assigned to the authenticated teacher directly (CourseInstructor)
+   * or via batch assignments (BatchTeacher).
+   */
+  async getTeacherCourses(
+    user: any,
+    options: {
+      search?: string;
+      status?: string;
+      page?: number | string;
+      limit?: number | string;
+    } = {}
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    // 1. Fetch directly assigned courses (CourseInstructor)
+    const directInstructors = await this.prisma.courseInstructor.findMany({
+      where: { teacherProfileId, instituteId },
+      select: { courseId: true, role: true },
+    });
+    const directRoleMap = new Map<string, string>();
+    for (const ci of directInstructors) {
+      directRoleMap.set(ci.courseId, ci.role || 'LEAD');
+    }
+
+    // 2. Fetch courses assigned via batches (BatchTeacher)
+    const batchTeachers = await this.prisma.batchTeacher.findMany({
+      where: { teacherProfileId, instituteId },
+      include: {
+        batch: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            courseId: true,
+            status: true,
+            _count: {
+              select: {
+                enrolments: {
+                  where: { status: 'ACTIVE' },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const batchRoleMap = new Map<string, string>();
+    const teacherBatchesByCourse = new Map<string, any[]>();
+    for (const bt of batchTeachers) {
+      if (bt.batch?.courseId) {
+        if (!batchRoleMap.has(bt.batch.courseId)) {
+          batchRoleMap.set(bt.batch.courseId, bt.role || 'INSTRUCTOR');
+        }
+        const existing = teacherBatchesByCourse.get(bt.batch.courseId) || [];
+        existing.push({
+          id: bt.batch.id,
+          name: bt.batch.name,
+          code: bt.batch.code,
+          status: bt.batch.status,
+          studentCount: bt.batch._count.enrolments,
+        });
+        teacherBatchesByCourse.set(bt.batch.courseId, existing);
+      }
+    }
+
+    const assignedCourseIds = Array.from(
+      new Set([...Array.from(directRoleMap.keys()), ...Array.from(teacherBatchesByCourse.keys())])
+    );
+
+    if (assignedCourseIds.length === 0) {
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page: Number(options.page) || 1,
+          limit: Number(options.limit) || 10,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      };
+    }
+
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 10));
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      id: { in: assignedCourseIds },
+      instituteId,
+      deletedAt: null,
+    };
+
+    if (options.status && options.status !== 'ALL') {
+      where.status = options.status;
+    }
+
+    if (options.search?.trim()) {
+      const s = options.search.trim();
+      where.OR = [
+        { title: { contains: s, mode: 'insensitive' } },
+        { description: { contains: s, mode: 'insensitive' } },
+        { slug: { contains: s, mode: 'insensitive' } },
+      ];
+    }
+
+    const total = await this.prisma.course.count({ where });
+
+    const courses = await this.prisma.course.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        category: { select: { id: true, name: true } },
+        modules: {
+          orderBy: { position: 'asc' },
+          include: {
+            chapters: {
+              orderBy: { position: 'asc' },
+              include: {
+                lessons: {
+                  orderBy: { position: 'asc' },
+                  include: {
+                    resources: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const data = courses.map((course) => {
+      let lessonCount = 0;
+      let resourceCount = 0;
+      let totalDurationSec = 0;
+      let chapterCount = 0;
+
+      for (const m of course.modules) {
+        chapterCount += m.chapters.length;
+        for (const ch of m.chapters) {
+          lessonCount += ch.lessons.length;
+          for (const l of ch.lessons) {
+            totalDurationSec += l.durationSec || 0;
+            resourceCount += l.resources.length;
+          }
+        }
+      }
+
+      const assignedBatches = teacherBatchesByCourse.get(course.id) || [];
+      const studentCount = assignedBatches.reduce((acc, b) => acc + b.studentCount, 0);
+
+      const role = directRoleMap.get(course.id) || batchRoleMap.get(course.id) || 'INSTRUCTOR';
+
+      return {
+        id: course.id,
+        title: course.title,
+        slug: course.slug,
+        description: course.description,
+        coverImage: course.coverImage,
+        level: course.level,
+        language: course.language,
+        status: course.status,
+        category: course.category?.name || 'Uncategorized',
+        categoryId: course.categoryId,
+        role,
+        batchCount: assignedBatches.length,
+        studentCount,
+        assignedBatches,
+        curriculumStats: {
+          moduleCount: course.modules.length,
+          chapterCount,
+          lessonCount,
+          resourceCount,
+          totalDurationMinutes: Math.round(totalDurationSec / 60),
+        },
+        updatedAt: course.updatedAt.toISOString(),
+      };
+    });
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
+  /**
+   * Requirement: Teacher Course Detail & Full Curriculum Hierarchy
+   * Validates teacher assignment and returns complete Modules -> Chapters -> Lessons -> Resources
+   */
+  async getTeacherCourseDetail(user: any, courseId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    // Verify teacher assignment
+    const isDirect = await this.prisma.courseInstructor.findFirst({
+      where: { courseId, teacherProfileId, instituteId },
+    });
+    const isBatch = await this.prisma.batchTeacher.findFirst({
+      where: {
+        teacherProfileId,
+        instituteId,
+        batch: { courseId },
+      },
+    });
+
+    if (!isDirect && !isBatch) {
+      throw new ForbiddenException(
+        'You are not assigned to instruct or teach this course.'
+      );
+    }
+
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: courseId,
+        instituteId,
+        deletedAt: null,
+      },
+      include: {
+        category: true,
+        instructors: {
+          include: {
+            teacherProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: {
+                      select: { id: true, fullName: true, email: true, avatarUrl: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        batches: {
+          where: {
+            teachers: { some: { teacherProfileId } },
+          },
+          include: {
+            _count: {
+              select: {
+                enrolments: { where: { status: 'ACTIVE' } },
+              },
+            },
+          },
+        },
+        modules: {
+          orderBy: { position: 'asc' },
+          include: {
+            chapters: {
+              orderBy: { position: 'asc' },
+              include: {
+                lessons: {
+                  orderBy: { position: 'asc' },
+                  include: {
+                    resources: {
+                      include: {
+                        mediaAsset: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found in this institute');
+    }
+
+    let lessonCount = 0;
+    let resourceCount = 0;
+    let totalDurationSec = 0;
+    let chapterCount = 0;
+
+    const modules = course.modules.map((m) => {
+      chapterCount += m.chapters.length;
+      const chapters = m.chapters.map((ch) => {
+        lessonCount += ch.lessons.length;
+        const lessons = ch.lessons.map((l) => {
+          totalDurationSec += l.durationSec || 0;
+          resourceCount += l.resources.length;
+
+          const resources = l.resources.map((r) => ({
+            id: r.id,
+            lessonId: r.lessonId,
+            mediaAssetId: r.mediaAssetId,
+            storageKey: r.mediaAsset?.storageKey || '',
+            kind: r.mediaAsset?.kind || 'FILE',
+            mimeType: r.mediaAsset?.mimeType || '',
+            sizeBytes: r.mediaAsset?.sizeBytes ? r.mediaAsset.sizeBytes.toString() : '0',
+            downloadable: r.downloadable,
+            createdAt: r.createdAt.toISOString(),
+          }));
+
+          return {
+            id: l.id,
+            title: l.title,
+            type: l.type,
+            body: l.body,
+            durationSec: l.durationSec,
+            isPreview: l.isPreview,
+            isMandatory: l.isMandatory,
+            position: l.position,
+            resources,
+            createdAt: l.createdAt.toISOString(),
+            updatedAt: l.updatedAt.toISOString(),
+          };
+        });
+
+        return {
+          id: ch.id,
+          title: ch.title,
+          position: ch.position,
+          lessons,
+          createdAt: ch.createdAt.toISOString(),
+          updatedAt: ch.updatedAt.toISOString(),
+        };
+      });
+
+      return {
+        id: m.id,
+        title: m.title,
+        position: m.position,
+        chapters,
+        createdAt: m.createdAt.toISOString(),
+        updatedAt: m.updatedAt.toISOString(),
+      };
+    });
+
+    const assignedBatches = course.batches.map((b) => ({
+      id: b.id,
+      name: b.name,
+      code: b.code,
+      studentCount: b._count.enrolments,
+    }));
+
+    const role = isDirect ? isDirect.role : (isBatch ? isBatch.role : 'INSTRUCTOR');
+
+    return {
+      id: course.id,
+      title: course.title,
+      slug: course.slug,
+      description: course.description,
+      coverImage: course.coverImage,
+      level: course.level,
+      language: course.language,
+      pricing: course.pricing,
+      price: course.price,
+      salePrice: course.salePrice,
+      status: course.status,
+      category: course.category?.name || 'Uncategorized',
+      categoryId: course.categoryId,
+      role,
+      instructors: course.instructors.map((ci) => ({
+        id: ci.id,
+        role: ci.role,
+        teacherProfileId: ci.teacherProfileId,
+        fullName: ci.teacherProfile?.membership?.user?.fullName || 'Instructor',
+        email: ci.teacherProfile?.membership?.user?.email || null,
+        avatarUrl: ci.teacherProfile?.membership?.user?.avatarUrl || null,
+      })),
+      assignedBatches,
+      summary: {
+        moduleCount: course.modules.length,
+        chapterCount,
+        lessonCount,
+        resourceCount,
+        totalDurationMinutes: Math.round(totalDurationSec / 60),
+      },
+      modules,
+      createdAt: course.createdAt.toISOString(),
+      updatedAt: course.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Requirement: Teacher Learning Materials Directory
+   * Returns all lesson resources across courses assigned to the teacher, with filtering.
+   */
+  async getTeacherMaterials(
+    user: any,
+    options: {
+      courseId?: string;
+      kind?: string;
+      search?: string;
+      page?: number | string;
+      limit?: number | string;
+    } = {}
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    // 1. Get all assigned course IDs
+    const directInstructors = await this.prisma.courseInstructor.findMany({
+      where: { teacherProfileId, instituteId },
+      select: { courseId: true },
+    });
+    const batchTeachers = await this.prisma.batchTeacher.findMany({
+      where: { teacherProfileId, instituteId },
+      select: { batch: { select: { courseId: true } } },
+    });
+
+    const directCourseIds = directInstructors.map((ci) => ci.courseId);
+    const batchCourseIds = batchTeachers
+      .map((bt) => bt.batch?.courseId)
+      .filter((id): id is string => Boolean(id));
+    const assignedCourseIds = Array.from(new Set([...directCourseIds, ...batchCourseIds]));
+
+    if (assignedCourseIds.length === 0) {
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page: Number(options.page) || 1,
+          limit: Number(options.limit) || 20,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      };
+    }
+
+    if (options.courseId && !assignedCourseIds.includes(options.courseId)) {
+      throw new ForbiddenException('You do not have access to materials for this course.');
+    }
+
+    const targetCourseIds = options.courseId ? [options.courseId] : assignedCourseIds;
+
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      instituteId,
+      lesson: {
+        chapter: {
+          module: {
+            courseId: { in: targetCourseIds },
+          },
+        },
+      },
+    };
+
+    if (options.kind && options.kind !== 'ALL') {
+      where.mediaAsset = { kind: options.kind };
+    }
+
+    if (options.search?.trim()) {
+      const s = options.search.trim();
+      where.OR = [
+        { mediaAsset: { storageKey: { contains: s, mode: 'insensitive' } } },
+        { lesson: { title: { contains: s, mode: 'insensitive' } } },
+      ];
+    }
+
+    const total = await this.prisma.lessonResource.count({ where });
+
+    const resources = await this.prisma.lessonResource.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        mediaAsset: true,
+        lesson: {
+          select: {
+            id: true,
+            title: true,
+            type: true,
+            chapter: {
+              select: {
+                id: true,
+                title: true,
+                module: {
+                  select: {
+                    id: true,
+                    title: true,
+                    course: {
+                      select: {
+                        id: true,
+                        title: true,
+                        slug: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const data = resources.map((r) => {
+      const fileName = r.mediaAsset?.storageKey
+        ? r.mediaAsset.storageKey.split('/').pop() || r.mediaAsset.storageKey
+        : r.lesson.title;
+
+      return {
+        id: r.id,
+        lessonId: r.lessonId,
+        lessonTitle: r.lesson.title,
+        lessonType: r.lesson.type,
+        chapterTitle: r.lesson.chapter?.title || 'Unknown Chapter',
+        moduleTitle: r.lesson.chapter?.module?.title || 'Unknown Module',
+        courseId: r.lesson.chapter?.module?.course?.id || '',
+        courseTitle: r.lesson.chapter?.module?.course?.title || 'Unknown Course',
+        mediaAssetId: r.mediaAssetId,
+        title: fileName,
+        storageKey: r.mediaAsset?.storageKey || '',
+        kind: r.mediaAsset?.kind || 'FILE',
+        mimeType: r.mediaAsset?.mimeType || '',
+        sizeBytes: r.mediaAsset?.sizeBytes ? r.mediaAsset.sizeBytes.toString() : '0',
+        downloadable: r.downloadable,
+        createdAt: r.createdAt.toISOString(),
+      };
+    });
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
+  /**
+   * Requirement: Authorized Study Material Upload
+   * Validates teacher assignment to the course and attaches MediaAsset/LessonResource.
+   */
+  async uploadTeacherResource(
+    user: any,
+    courseId: string,
+    lessonId: string,
+    payload: {
+      kind: string;
+      storageKey: string;
+      mimeType: string;
+      sizeBytes?: string | number;
+      downloadable?: boolean;
+    }
+  ) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    if (!payload.storageKey || !payload.kind) {
+      throw new BadRequestException('storageKey and kind are required');
+    }
+
+    // Verify teacher assignment to this course
+    const isDirect = await this.prisma.courseInstructor.findFirst({
+      where: { courseId, teacherProfileId, instituteId },
+    });
+    const isBatch = await this.prisma.batchTeacher.findFirst({
+      where: {
+        teacherProfileId,
+        instituteId,
+        batch: { courseId },
+      },
+    });
+
+    if (!isDirect && !isBatch) {
+      throw new ForbiddenException(
+        'You are not assigned to instruct or teach this course, cannot upload materials.'
+      );
+    }
+
+    // Verify lesson belongs to this course
+    const lesson = await this.prisma.lesson.findFirst({
+      where: {
+        id: lessonId,
+        instituteId,
+        chapter: {
+          module: {
+            courseId,
+            instituteId,
+          },
+        },
+      },
+    });
+
+    if (!lesson) {
+      throw new NotFoundException('Lesson not found in this course');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      let asset = await tx.mediaAsset.findUnique({
+        where: { storageKey: payload.storageKey },
+      });
+
+      if (!asset) {
+        asset = await tx.mediaAsset.create({
+          data: {
+            instituteId,
+            ownerUserId: authUser.id,
+            kind: payload.kind,
+            storageKey: payload.storageKey,
+            mimeType: payload.mimeType || 'application/octet-stream',
+            sizeBytes: BigInt(payload.sizeBytes || 1024000),
+          },
+        });
+      }
+
+      const resource = await tx.lessonResource.create({
+        data: {
+          instituteId,
+          lessonId,
+          mediaAssetId: asset.id,
+          downloadable: payload.downloadable !== undefined ? payload.downloadable : true,
+        },
+        include: {
+          mediaAsset: true,
+        },
+      });
+
+      return resource;
+    });
+
+    return {
+      success: true,
+      data: {
+        id: result.id,
+        lessonId: result.lessonId,
+        mediaAssetId: result.mediaAssetId,
+        kind: result.mediaAsset.kind,
+        storageKey: result.mediaAsset.storageKey,
+        mimeType: result.mediaAsset.mimeType,
+        sizeBytes: result.mediaAsset.sizeBytes.toString(),
+        downloadable: result.downloadable,
+        createdAt: result.createdAt.toISOString(),
+      },
+    };
+  }
 }
