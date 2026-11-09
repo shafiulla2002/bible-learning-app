@@ -98,8 +98,8 @@ export async function GET(
         AND m.status = 'ACTIVE'
         AND (
           CASE 
-            WHEN $3::text IS NOT NULL THEN e."batchId" = $3
-            ELSE e."courseId" = $4
+            WHEN $3::text IS NOT NULL THEN e."batchId" = $3::uuid
+            ELSE e."courseId" = $4::uuid
           END
         )
       ORDER BY sp."admissionNo" ASC
@@ -337,3 +337,4 @@ export async function PUT(
     );
   }
 }
+

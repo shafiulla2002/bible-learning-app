@@ -132,3 +132,4 @@ export function useTeacherAssignmentDetail(assignmentId: string) {
     gradeSubmission,
   };
 }
+

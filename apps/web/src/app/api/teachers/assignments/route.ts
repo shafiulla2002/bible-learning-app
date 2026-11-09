@@ -92,12 +92,12 @@ export async function GET(request: NextRequest) {
             WHEN a."batchId" IS NOT NULL THEN (
               SELECT COUNT(DISTINCT e."studentProfileId")::int
               FROM "Enrolment" e
-              WHERE e."batchId" = a."batchId" AND e."instituteId" = $1 AND e.status = 'ACTIVE'
+              WHERE e."batchId" = a."batchId" AND e."instituteId" = $2 AND e.status = 'ACTIVE'
             )
             ELSE (
               SELECT COUNT(DISTINCT e."studentProfileId")::int
               FROM "Enrolment" e
-              WHERE e."courseId" = a."courseId" AND e."instituteId" = $1 AND e.status = 'ACTIVE'
+              WHERE e."courseId" = a."courseId" AND e."instituteId" = $2 AND e.status = 'ACTIVE'
             )
           END,
           0
@@ -120,23 +120,23 @@ export async function GET(request: NextRequest) {
       FROM "Assignment" a
       JOIN "Course" c ON c.id = a."courseId"
       LEFT JOIN "Batch" b ON b.id = a."batchId"
-      WHERE a."instituteId" = $1
+      WHERE a."instituteId" = $2
         AND (
-          a."courseId"::text = ANY($2::text[])
-          OR a."batchId"::text = ANY($3::text[])
+          a."courseId"::text = ANY($3::text[])
+          OR a."batchId"::text = ANY($4::text[])
         )
-        AND ($4 = 'ALL' OR a."courseId" = $4)
-        AND ($5 = 'ALL' OR a."batchId" = $5)
-        AND ($6 = 'ALL' OR a.status = $6)
+        AND ($5 = 'ALL' OR a."courseId" = $5)
+        AND ($6 = 'ALL' OR a."batchId" = $6)
+        AND ($7 = 'ALL' OR a.status = $7)
         AND (
-          $7 = '' OR 
-          a.title ILIKE '%' || $7 || '%' OR 
-          a.instructions ILIKE '%' || $7 || '%' OR 
-          c.title ILIKE '%' || $7 || '%' OR 
-          b.name ILIKE '%' || $7 || '%'
+          $8 = '' OR 
+          a.title ILIKE '%' || $8 || '%' OR 
+          a.instructions ILIKE '%' || $8 || '%' OR 
+          c.title ILIKE '%' || $8 || '%' OR 
+          b.name ILIKE '%' || $8 || '%'
         )
       ORDER BY a."dueAt" DESC
-      LIMIT $8 OFFSET $9
+      LIMIT $9 OFFSET $10
     `;
 
     const countQuery = `
@@ -163,6 +163,7 @@ export async function GET(request: NextRequest) {
 
     const [rows, countRows] = await Promise.all([
       queryDb<any>(assignmentsQuery, [
+        teacherProfileId,
         instituteId,
         assignedCourseIds,
         assignedBatchIds,
@@ -372,3 +373,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
