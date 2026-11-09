@@ -4,6 +4,8 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -979,6 +981,363 @@ export class TeachersService {
         batchName: first.batch?.name,
       },
       message: `Teacher has an overlapping session "${first.title}" in batch "${first.batch?.name}" (${first.startsAt.toISOString().slice(11, 16)} - ${first.endsAt.toISOString().slice(11, 16)})`,
+    };
+  }
+
+  /**
+   * Self-service method to get authenticated teacher's profile and assignment stats
+   */
+  async getTeacherMe(user: any) {
+    if (!user || (!user.sub && !user.userId)) {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== Role.TEACHER) {
+      throw new ForbiddenException(
+        `Access denied: Current role '${user.role}' is not authorized to access Teacher Portal.`
+      );
+    }
+    const tokenUserId = user.sub || user.userId;
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: tokenUserId,
+        role: Role.TEACHER,
+        status: 'ACTIVE',
+        ...(user.instituteId ? { instituteId: user.instituteId } : {}),
+      },
+      include: {
+        user: true,
+        institute: true,
+        teacherProfile: true,
+      },
+    });
+
+    if (!membership || !membership.teacherProfile) {
+      throw new ForbiddenException('No active teacher profile found for this account');
+    }
+
+    const { teacherProfile, user: u, institute: i } = membership;
+    if (teacherProfile.status !== 'ACTIVE') {
+      throw new ForbiddenException('Teacher profile is inactive or pending review');
+    }
+
+    const [batchCount, courseCount, studentCount] = await Promise.all([
+      this.prisma.batchTeacher.count({
+        where: { teacherProfileId: teacherProfile.id, instituteId: i.id, batch: { status: 'ACTIVE' } },
+      }),
+      this.prisma.courseInstructor.count({
+        where: { teacherProfileId: teacherProfile.id, instituteId: i.id, course: { status: 'PUBLISHED' } },
+      }),
+      this.prisma.enrolment.count({
+        where: {
+          instituteId: i.id,
+          status: 'ACTIVE',
+          batch: { teachers: { some: { teacherProfileId: teacherProfile.id } } },
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      teacher: {
+        teacherProfileId: teacherProfile.id,
+        userId: u.id,
+        fullName: u.fullName,
+        email: u.email,
+        phone: u.phoneE164,
+        employeeCode: teacherProfile.employeeCode,
+        qualifications: teacherProfile.qualifications,
+        specialization: teacherProfile.specialization,
+        experienceYears: teacherProfile.experienceYears,
+        photoUrl: teacherProfile.photoUrl || u.avatarUrl,
+        status: teacherProfile.status,
+      },
+      institute: {
+        id: i.id,
+        name: i.name,
+        code: (i.slug || 'GBI').toUpperCase(),
+        logoUrl: i.logoUrl,
+      },
+      stats: {
+        assignedBatchesCount: batchCount,
+        assignedCoursesCount: courseCount,
+        assignedStudentsCount: studentCount,
+      },
+    };
+  }
+
+  /**
+   * Self-service method to get authenticated teacher's dynamic dashboard & analytics
+   */
+  async getTeacherDashboard(user: any) {
+    if (!user || (!user.sub && !user.userId)) {
+      throw new UnauthorizedException('Authentication token required');
+    }
+    if (user.role && user.role !== Role.TEACHER) {
+      throw new ForbiddenException(
+        `Access denied: Current role '${user.role}' is not authorized to access Teacher Portal.`
+      );
+    }
+    const tokenUserId = user.sub || user.userId;
+    const membership = await this.prisma.membership.findFirst({
+      where: {
+        userId: tokenUserId,
+        role: Role.TEACHER,
+        status: 'ACTIVE',
+        ...(user.instituteId ? { instituteId: user.instituteId } : {}),
+      },
+      include: {
+        user: true,
+        institute: true,
+        teacherProfile: true,
+      },
+    });
+
+    if (!membership || !membership.teacherProfile) {
+      throw new ForbiddenException('No active teacher profile found for this account');
+    }
+
+    const { teacherProfile, user: u, institute: i } = membership;
+    if (teacherProfile.status !== 'ACTIVE') {
+      throw new ForbiddenException('Teacher profile is inactive or pending review');
+    }
+
+    const teacherProfileId = teacherProfile.id;
+    const instituteId = i.id;
+
+    const [
+      batchesCount,
+      studentsCount,
+      coursesCount,
+      assignedBatchesRaw,
+      instructorCoursesRaw,
+      liveSessionsRaw,
+      attendanceRaw,
+      examsRaw,
+    ] = await Promise.all([
+      this.prisma.batchTeacher.count({
+        where: { teacherProfileId, instituteId, batch: { status: 'ACTIVE' } },
+      }),
+      this.prisma.enrolment.findMany({
+        where: {
+          instituteId,
+          status: 'ACTIVE',
+          batch: { teachers: { some: { teacherProfileId } } },
+        },
+        distinct: ['studentProfileId'],
+        select: { studentProfileId: true },
+      }),
+      this.prisma.courseInstructor.count({
+        where: { teacherProfileId, instituteId, course: { status: 'PUBLISHED' } },
+      }),
+      this.prisma.batchTeacher.findMany({
+        where: { teacherProfileId, instituteId, batch: { status: 'ACTIVE' } },
+        include: {
+          batch: {
+            include: {
+              course: true,
+              academicYear: true,
+              term: true,
+              _count: { select: { enrolments: { where: { status: 'ACTIVE' } } } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 6,
+      }),
+      this.prisma.courseInstructor.findMany({
+        where: { teacherProfileId, instituteId },
+        select: { courseId: true },
+      }),
+      this.prisma.liveSession.findMany({
+        where: { teacherProfileId, instituteId },
+        include: { batch: { include: { course: true } } },
+        orderBy: { startsAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.attendance.findMany({
+        where: {
+          instituteId,
+          batch: { teachers: { some: { teacherProfileId } } },
+        },
+        select: { status: true, date: true },
+      }),
+      this.prisma.exam.findMany({
+        where: {
+          instituteId,
+          course: { instructors: { some: { teacherProfileId } } },
+        },
+        include: { course: true },
+        take: 5,
+      }),
+    ]);
+
+    const teacherCourseIds = instructorCoursesRaw.map((c) => c.courseId);
+    const teacherBatchIds = assignedBatchesRaw.map((b) => b.batchId);
+
+    const assignmentsRaw = await this.prisma.assignment.findMany({
+      where: {
+        instituteId,
+        OR: [
+          { batchId: { in: teacherBatchIds } },
+          { courseId: { in: teacherCourseIds } },
+        ],
+      },
+      include: {
+        course: true,
+        batch: true,
+        submissions: { select: { id: true, status: true } },
+      },
+      orderBy: { dueAt: 'asc' },
+      take: 6,
+    });
+
+    // Calculate attendance summary
+    const totalRecords = attendanceRaw.length;
+    const presentCount = attendanceRaw.filter((a) => a.status === 'PRESENT').length;
+    const absentCount = attendanceRaw.filter((a) => a.status === 'ABSENT').length;
+    const lateCount = attendanceRaw.filter((a) => a.status === 'LATE').length;
+    const excusedCount = attendanceRaw.filter((a) => a.status === 'EXCUSED').length;
+    const uniqueDates = new Set(attendanceRaw.map((a) => a.date.toISOString().split('T')[0]));
+    const attendanceRatePct = totalRecords > 0 ? Number((((presentCount + lateCount) / totalRecords) * 100).toFixed(1)) : 0;
+
+    // Filter today's classes using institute timezone
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: i.timezone || 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+
+    const todaySchedule = liveSessionsRaw
+      .filter((ls) => {
+        const sessionDate = new Intl.DateTimeFormat('en-CA', {
+          timeZone: i.timezone || 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(ls.startsAt);
+        return sessionDate === todayStr;
+      })
+      .map((ls) => ({
+        id: ls.id,
+        title: ls.title,
+        courseTitle: ls.batch.course.title,
+        batchName: ls.batch.name,
+        batchCode: ls.batch.code,
+        startsAt: ls.startsAt.toISOString(),
+        endsAt: ls.endsAt.toISOString(),
+        status: ls.status,
+        room: ls.room,
+        joinUrl: ls.joinUrl,
+      }));
+
+    const assignedBatches = assignedBatchesRaw.map((bt) => ({
+      id: bt.batch.id,
+      name: bt.batch.name,
+      code: bt.batch.code,
+      courseId: bt.batch.course.id,
+      courseTitle: bt.batch.course.title,
+      courseSlug: bt.batch.course.slug,
+      courseLevel: bt.batch.course.level,
+      academicYear: bt.batch.academicYear?.name || null,
+      term: bt.batch.term?.name || null,
+      enrolledStudentsCount: bt.batch._count.enrolments,
+      teacherRole: bt.role,
+      status: bt.batch.status,
+    }));
+
+    const pendingAssignments = assignmentsRaw.map((a) => {
+      const pendingReviewCount = a.submissions.filter((s) => s.status === 'SUBMITTED').length;
+      return {
+        id: a.id,
+        title: a.title,
+        courseId: a.course.id,
+        courseTitle: a.course.title,
+        batchId: a.batch?.id || null,
+        batchName: a.batch?.name || null,
+        batchCode: a.batch?.code || null,
+        dueAt: a.dueAt.toISOString(),
+        status: a.status,
+        maxMarks: a.maxMarks,
+        submissionCount: a.submissions.length,
+        pendingReviewCount,
+      };
+    });
+
+    const pendingAssignmentsCount = pendingAssignments.reduce((acc, a) => acc + a.pendingReviewCount, 0);
+
+    const upcomingEvents = [
+      ...liveSessionsRaw.map((ls) => ({
+        id: ls.id,
+        title: ls.title,
+        eventType: 'LIVE_CLASS' as const,
+        courseTitle: ls.batch.course.title,
+        batchName: ls.batch.name,
+        eventDate: ls.startsAt.toISOString(),
+        endDate: ls.endsAt.toISOString(),
+        status: ls.status,
+        room: ls.room,
+        joinUrl: ls.joinUrl,
+      })),
+      ...examsRaw.map((ex) => ({
+        id: ex.id,
+        title: ex.title,
+        eventType: 'EXAMINATION' as const,
+        courseTitle: ex.course.title,
+        batchName: null,
+        eventDate: ex.createdAt.toISOString(),
+        endDate: null,
+        status: ex.type,
+        room: null,
+        joinUrl: null,
+        durationMin: ex.durationMin,
+      })),
+    ];
+
+    return {
+      success: true,
+      teacher: {
+        teacherProfileId: teacherProfile.id,
+        userId: u.id,
+        fullName: u.fullName,
+        email: u.email,
+        phone: u.phoneE164,
+        employeeCode: teacherProfile.employeeCode,
+        qualifications: teacherProfile.qualifications,
+        specialization: teacherProfile.specialization,
+        experienceYears: teacherProfile.experienceYears,
+        photoUrl: teacherProfile.photoUrl || u.avatarUrl,
+        status: teacherProfile.status,
+      },
+      institute: {
+        id: i.id,
+        name: i.name,
+        code: (i.slug || 'GBI').toUpperCase(),
+        logoUrl: i.logoUrl,
+        timezone: i.timezone || 'Asia/Kolkata',
+      },
+      statistics: {
+        assignedBatchesCount: batchesCount,
+        assignedStudentsCount: studentsCount.length,
+        instructingCoursesCount: coursesCount,
+        todayClassesCount: todaySchedule.length,
+        pendingAssignmentsCount,
+        attendanceRatePct,
+        totalAttendanceRecords: totalRecords,
+      },
+      todaySchedule,
+      assignedBatches,
+      pendingAssignments,
+      upcomingEvents,
+      attendanceSummary: {
+        totalRecords,
+        presentCount,
+        absentCount,
+        lateCount,
+        excusedCount,
+        totalSessionsMarked: uniqueDates.size,
+        attendanceRatePct,
+      },
     };
   }
 }
