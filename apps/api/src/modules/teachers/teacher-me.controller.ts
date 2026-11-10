@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   UseGuards,
   HttpCode,
@@ -302,6 +303,40 @@ export class TeacherMeController {
     @Body() body: any,
   ) {
     return this.teachersService.markTeacherLiveClassAttendance(user, sessionId, body);
+  }
+
+  // ==========================================
+  // PHASE 8: TEACHER NOTIFICATIONS
+  // ==========================================
+
+  @Get('notifications')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherNotifications(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherNotifications(user, query);
+  }
+
+  @Get('notifications/unread-count')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherNotificationsUnreadCount(@CurrentUser() user: any) {
+    return this.teachersService.getTeacherNotificationsUnreadCount(user);
+  }
+
+  @Patch('notifications/:notificationId/read')
+  @HttpCode(HttpStatus.OK)
+  async markTeacherNotificationRead(
+    @CurrentUser() user: any,
+    @Param('notificationId') notificationId: string,
+  ) {
+    return this.teachersService.markTeacherNotificationRead(user, notificationId);
+  }
+
+  @Post('notifications/mark-all-read')
+  @HttpCode(HttpStatus.OK)
+  async markAllTeacherNotificationsRead(
+    @CurrentUser() user: any,
+    @Body() body: any,
+  ) {
+    return this.teachersService.markAllTeacherNotificationsRead(user, body);
   }
 }
 

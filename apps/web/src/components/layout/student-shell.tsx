@@ -27,6 +27,7 @@ import {
   CalendarCheck,
 } from 'lucide-react';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 
 export interface StudentNavItem {
   label: string;
@@ -43,6 +44,7 @@ const defaultNavItems: StudentNavItem[] = [
   { label: 'Attendance', href: '/student/attendance', icon: <CalendarCheck size={18} /> },
   { label: 'Assignments', href: '/student/assignments', icon: <FileCheck2 size={18} /> },
   { label: 'Exams', href: '/student/exams', icon: <GraduationCap size={18} /> },
+  { label: 'Notifications', href: '/student/notifications', icon: <Bell size={18} /> },
   { label: 'Certificates', href: '/student/certificates', icon: <Award size={18} /> },
   { label: 'Payments', href: '/student/payments', icon: <CreditCard size={18} /> },
   { label: 'Messages', href: '/student/messages', icon: <MessageSquare size={18} /> },
@@ -291,15 +293,13 @@ export function StudentShell({
                 <Target size={16} />
               </button>
 
-              {/* Notification Bell with unread dot */}
-              <Link
-                href="/student/messages"
-                className="w-9 h-9 rounded-full bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 transition border border-slate-200 shadow-xs relative"
-                title="Notifications & Messages"
-              >
-                <Bell size={16} />
-                <span className="w-2 h-2 rounded-full bg-rose-500 absolute top-2 right-2 ring-2 ring-white" />
-              </Link>
+              {/* Notification Center Bell */}
+              <NotificationBell
+                role="STUDENT"
+                notificationsUrl="/student/notifications"
+                preferencesUrl="/student/settings"
+                apiPrefix="/api/students/notifications"
+              />
 
               {/* Student Profile Dropdown */}
               <div className="relative" ref={dropdownRef}>

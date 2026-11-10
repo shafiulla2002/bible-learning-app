@@ -4468,5 +4468,56 @@ export class StudentsService {
       },
     };
   }
+
+  // =========================================================================
+  // PHASE 8: STUDENT NOTIFICATIONS
+  // =========================================================================
+
+  async getStudentNotifications(user: any, query: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    if (!this.notificationsService) {
+      throw new BadRequestException('Notifications service unavailable');
+    }
+    return this.notificationsService.getNotifications(
+      studentProfile.instituteId,
+      studentProfile.membership.userId,
+      query,
+    );
+  }
+
+  async getStudentNotificationsUnreadCount(user: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    if (!this.notificationsService) {
+      return { unreadCount: 0, byCategory: { STUDENT: 0, TEACHER: 0, ATTENDANCE: 0, FEE: 0, ACADEMIC: 0, ADMIN: 0 } };
+    }
+    return this.notificationsService.getUnreadCount(
+      studentProfile.instituteId,
+      studentProfile.membership.userId,
+    );
+  }
+
+  async markStudentNotificationRead(user: any, notificationId: string) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    if (!this.notificationsService) {
+      throw new BadRequestException('Notifications service unavailable');
+    }
+    return this.notificationsService.markAsRead(
+      studentProfile.instituteId,
+      studentProfile.membership.userId,
+      notificationId,
+    );
+  }
+
+  async markAllStudentNotificationsRead(user: any, body?: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    if (!this.notificationsService) {
+      throw new BadRequestException('Notifications service unavailable');
+    }
+    return this.notificationsService.markAllAsRead(
+      studentProfile.instituteId,
+      studentProfile.membership.userId,
+      body?.category,
+    );
+  }
 }
 

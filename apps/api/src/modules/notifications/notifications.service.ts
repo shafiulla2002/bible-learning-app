@@ -451,15 +451,513 @@ export class NotificationsService {
   }
 
   /**
+   * Emit notifications to specific user IDs within an institute, with deduplication.
+   */
+  async notifyUsers(
+    instituteId: string,
+    userIds: string[],
+    input: EmitNotificationEventInput,
+  ): Promise<{ createdCount: number }> {
+    if (!userIds || userIds.length === 0) return { createdCount: 0 };
+
+    const encodedLink = this.encodeNotificationLink(
+      input.link,
+      input.category,
+      input.eventType,
+      input.referenceId,
+    );
+
+    const dedupeFragment = input.referenceId
+      ? `#cat=${input.category}&evt=${encodeURIComponent(input.eventType)}&ref=${encodeURIComponent(input.referenceId)}`
+      : null;
+
+    let createdCount = 0;
+    const uniqueUserIds = [...new Set(userIds)];
+
+    for (const userId of uniqueUserIds) {
+      if (dedupeFragment) {
+        const duplicate = await this.prisma.notification.findFirst({
+          where: {
+            instituteId,
+            userId,
+            link: { contains: dedupeFragment },
+          },
+          select: { id: true },
+        });
+        if (duplicate) {
+          continue;
+        }
+      }
+
+      await this.prisma.notification.create({
+        data: {
+          instituteId,
+          userId,
+          title: input.title,
+          body: input.body,
+          link: encodedLink,
+        },
+      });
+      createdCount++;
+    }
+
+    return { createdCount };
+  }
+
+  /**
+   * Notify all actively enrolled students in a batch.
+   */
+  async notifyBatchStudents(
+    instituteId: string,
+    batchId: string,
+    input: EmitNotificationEventInput,
+  ): Promise<{ createdCount: number }> {
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: {
+        batchId,
+        instituteId,
+        status: 'ACTIVE',
+      },
+      select: {
+        studentProfile: {
+          select: {
+            membership: {
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+
+    const userIds = enrolments
+      .map((e) => e.studentProfile?.membership?.userId)
+      .filter((id): id is string => !!id);
+
+    return this.notifyUsers(instituteId, userIds, input);
+  }
+
+  /**
+   * Notify all actively enrolled students in a course.
+   */
+  async notifyCourseStudents(
+    instituteId: string,
+    courseId: string,
+    input: EmitNotificationEventInput,
+  ): Promise<{ createdCount: number }> {
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: {
+        courseId,
+        instituteId,
+        status: 'ACTIVE',
+      },
+      select: {
+        studentProfile: {
+          select: {
+            membership: {
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+
+    const userIds = enrolments
+      .map((e) => e.studentProfile?.membership?.userId)
+      .filter((id): id is string => !!id);
+
+    return this.notifyUsers(instituteId, userIds, input);
+  }
+
+  /**
+   * Notify teachers assigned to a batch.
+   */
+  async notifyBatchTeachers(
+    instituteId: string,
+    batchId: string,
+    input: EmitNotificationEventInput,
+  ): Promise<{ createdCount: number }> {
+    const batchTeachers = await this.prisma.batchTeacher.findMany({
+      where: {
+        batchId,
+        instituteId,
+      },
+      select: {
+        teacherProfile: {
+          select: {
+            membership: {
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+
+    const userIds = batchTeachers
+      .map((bt) => bt.teacherProfile?.membership?.userId)
+      .filter((id): id is string => !!id);
+
+    return this.notifyUsers(instituteId, userIds, input);
+  }
+
+  /**
+   * Notify instructors assigned to a course.
+   */
+  async notifyCourseTeachers(
+    instituteId: string,
+    courseId: string,
+    input: EmitNotificationEventInput,
+  ): Promise<{ createdCount: number }> {
+    const instructors = await this.prisma.courseInstructor.findMany({
+      where: {
+        courseId,
+        instituteId,
+      },
+      select: {
+        teacherProfile: {
+          select: {
+            membership: {
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+
+    const userIds = instructors
+      .map((ci) => ci.teacherProfile?.membership?.userId)
+      .filter((id): id is string => !!id);
+
+    return this.notifyUsers(instituteId, userIds, input);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // PHASE 8: ACADEMIC & COLLABORATION EVENT HELPERS
+  // ───────────────────────────────────────────────────────────────────────────
+
+  async emitLiveClassScheduled(
+    instituteId: string,
+    params: {
+      sessionId: string;
+      title: string;
+      batchId: string;
+      batchName: string;
+      startsAt: string | Date;
+      joinUrl?: string | null;
+      teacherName?: string;
+    },
+  ) {
+    const formattedDate = new Date(params.startsAt).toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    return this.notifyBatchStudents(instituteId, params.batchId, {
+      category: 'ACADEMIC',
+      eventType: 'LIVE_CLASS_SCHEDULED',
+      title: `Live Class Scheduled: ${params.title}`,
+      body: `Live interactive lecture for ${params.batchName} scheduled for ${formattedDate}.${params.teacherName ? ` Faculty: ${params.teacherName}` : ''}`,
+      link: `/student/classes`,
+      referenceId: `${params.sessionId}:SCHEDULED`,
+    });
+  }
+
+  async emitLiveClassRescheduled(
+    instituteId: string,
+    params: {
+      sessionId: string;
+      title: string;
+      batchId: string;
+      batchName: string;
+      startsAt: string | Date;
+    },
+  ) {
+    const formattedDate = new Date(params.startsAt).toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    return this.notifyBatchStudents(instituteId, params.batchId, {
+      category: 'ACADEMIC',
+      eventType: 'LIVE_CLASS_RESCHEDULED',
+      title: `Class Rescheduled: ${params.title}`,
+      body: `The schedule for "${params.title}" (${params.batchName}) has been updated to ${formattedDate}.`,
+      link: `/student/classes`,
+      referenceId: `${params.sessionId}:RESCHEDULED:${new Date(params.startsAt).getTime()}`,
+    });
+  }
+
+  async emitLiveClassCancelled(
+    instituteId: string,
+    params: {
+      sessionId: string;
+      title: string;
+      batchId: string;
+      batchName: string;
+      reason?: string | null;
+    },
+  ) {
+    return this.notifyBatchStudents(instituteId, params.batchId, {
+      category: 'ACADEMIC',
+      eventType: 'LIVE_CLASS_CANCELLED',
+      title: `Class Cancelled: ${params.title}`,
+      body: `The lecture for ${params.batchName} was cancelled${params.reason ? `: ${params.reason}` : '.'}`,
+      link: `/student/classes`,
+      referenceId: `${params.sessionId}:CANCELLED`,
+    });
+  }
+
+  async emitAssignmentPublished(
+    instituteId: string,
+    params: {
+      assignmentId: string;
+      title: string;
+      courseTitle?: string;
+      batchId?: string | null;
+      courseId: string;
+      dueDate?: string | Date | null;
+    },
+  ) {
+    const dueStr = params.dueDate ? ` Due: ${new Date(params.dueDate).toLocaleDateString()}` : '';
+    const input: EmitNotificationEventInput = {
+      category: 'ACADEMIC',
+      eventType: 'ASSIGNMENT_PUBLISHED',
+      title: `New Assignment: ${params.title}`,
+      body: `New assignment posted in ${params.courseTitle || 'your course'}.${dueStr}`,
+      link: `/student/assignments`,
+      referenceId: `${params.assignmentId}:PUBLISHED`,
+    };
+
+    if (params.batchId) {
+      return this.notifyBatchStudents(instituteId, params.batchId, input);
+    }
+    return this.notifyCourseStudents(instituteId, params.courseId, input);
+  }
+
+  async emitSubmissionReceived(
+    instituteId: string,
+    params: {
+      assignmentId: string;
+      submissionId: string;
+      assignmentTitle: string;
+      studentName: string;
+      batchId?: string | null;
+      courseId: string;
+    },
+  ) {
+    const input: EmitNotificationEventInput = {
+      category: 'ACADEMIC',
+      eventType: 'SUBMISSION_RECEIVED',
+      title: `Assignment Submission: ${params.assignmentTitle}`,
+      body: `${params.studentName} has submitted assignment "${params.assignmentTitle}".`,
+      link: `/teacher/assignments/${params.assignmentId}`,
+      referenceId: `${params.submissionId}:SUBMITTED`,
+    };
+
+    if (params.batchId) {
+      return this.notifyBatchTeachers(instituteId, params.batchId, input);
+    }
+    return this.notifyCourseTeachers(instituteId, params.courseId, input);
+  }
+
+  async emitAssignmentGraded(
+    instituteId: string,
+    params: {
+      assignmentId: string;
+      assignmentTitle: string;
+      studentUserId: string;
+      score: number;
+      maxMarks: number;
+      feedback?: string | null;
+    },
+  ) {
+    return this.notifyUsers(instituteId, [params.studentUserId], {
+      category: 'ACADEMIC',
+      eventType: 'ASSIGNMENT_GRADED',
+      title: `Assignment Graded: ${params.assignmentTitle}`,
+      body: `Your assignment "${params.assignmentTitle}" was evaluated: ${params.score}/${params.maxMarks} marks.${params.feedback ? ` Feedback: ${params.feedback}` : ''}`,
+      link: `/student/assignments/${params.assignmentId}`,
+      referenceId: `${params.assignmentId}:${params.studentUserId}:GRADED`,
+    });
+  }
+
+  async emitExamPublished(
+    instituteId: string,
+    params: {
+      examId: string;
+      title: string;
+      courseTitle?: string;
+      batchId?: string | null;
+      courseId: string;
+      durationMin?: number;
+    },
+  ) {
+    const input: EmitNotificationEventInput = {
+      category: 'ACADEMIC',
+      eventType: 'EXAM_PUBLISHED',
+      title: `New Examination Published: ${params.title}`,
+      body: `Online examination "${params.title}" is available in ${params.courseTitle || 'your course'}.${params.durationMin ? ` Duration: ${params.durationMin} mins.` : ''}`,
+      link: `/student/exams`,
+      referenceId: `${params.examId}:PUBLISHED`,
+    };
+
+    if (params.batchId) {
+      return this.notifyBatchStudents(instituteId, params.batchId, input);
+    }
+    return this.notifyCourseStudents(instituteId, params.courseId, input);
+  }
+
+  async emitExamAttemptSubmitted(
+    instituteId: string,
+    params: {
+      examId: string;
+      attemptId: string;
+      examTitle: string;
+      studentName: string;
+      courseId: string;
+      batchId?: string | null;
+    },
+  ) {
+    const input: EmitNotificationEventInput = {
+      category: 'ACADEMIC',
+      eventType: 'EXAM_ATTEMPT_SUBMITTED',
+      title: `Exam Attempt Submitted: ${params.examTitle}`,
+      body: `${params.studentName} has finished and submitted their attempt for "${params.examTitle}".`,
+      link: `/teacher/exams/${params.examId}/results`,
+      referenceId: `${params.attemptId}:SUBMITTED`,
+    };
+
+    if (params.batchId) {
+      return this.notifyBatchTeachers(instituteId, params.batchId, input);
+    }
+    return this.notifyCourseTeachers(instituteId, params.courseId, input);
+  }
+
+  async emitExamEvaluated(
+    instituteId: string,
+    params: {
+      examId: string;
+      examTitle: string;
+      studentUserId: string;
+      score: number;
+      totalMarks: number;
+      feedback?: string | null;
+    },
+  ) {
+    return this.notifyUsers(instituteId, [params.studentUserId], {
+      category: 'ACADEMIC',
+      eventType: 'EXAM_EVALUATED',
+      title: `Exam Evaluated: ${params.examTitle}`,
+      body: `Your examination "${params.examTitle}" score is ${params.score}/${params.totalMarks} marks.${params.feedback ? ` Feedback: ${params.feedback}` : ''}`,
+      link: `/student/exams/${params.examId}/results`,
+      referenceId: `${params.examId}:${params.studentUserId}:EVALUATED`,
+    });
+  }
+
+  async emitAttendanceMarked(
+    instituteId: string,
+    params: {
+      batchId: string;
+      batchName: string;
+      studentUserId: string;
+      studentName: string;
+      date: string;
+      status: string;
+      remarks?: string | null;
+    },
+  ) {
+    if (params.status === 'ABSENT') {
+      return this.notifyUsers(instituteId, [params.studentUserId], {
+        category: 'ATTENDANCE',
+        eventType: 'ATTENDANCE_ABSENT',
+        title: `Absence Recorded: ${params.batchName}`,
+        body: `You were marked absent for ${params.batchName} on ${params.date}.${params.remarks ? ` Note: ${params.remarks}` : ''}`,
+        link: `/student/attendance`,
+        referenceId: `${params.batchId}:${params.studentUserId}:${params.date}:ABSENT`,
+      });
+    }
+    return { createdCount: 0 };
+  }
+
+  async emitAttendanceUpdated(
+    instituteId: string,
+    params: {
+      batchId: string;
+      batchName: string;
+      studentUserId: string;
+      date: string;
+      newStatus: string;
+      remarks?: string | null;
+    },
+  ) {
+    return this.notifyUsers(instituteId, [params.studentUserId], {
+      category: 'ATTENDANCE',
+      eventType: 'ATTENDANCE_UPDATED',
+      title: `Attendance Updated: ${params.batchName}`,
+      body: `Your attendance status for ${params.batchName} on ${params.date} was updated to ${params.newStatus}.`,
+      link: `/student/attendance`,
+      referenceId: `${params.batchId}:${params.studentUserId}:${params.date}:UPDATE:${Date.now()}`,
+    });
+  }
+
+  async emitAnnouncement(
+    instituteId: string,
+    params: {
+      announcementId: string;
+      title: string;
+      body: string;
+      audience: 'ALL' | 'STUDENTS' | 'TEACHERS';
+    },
+  ) {
+    let recipientMemberships: Array<{ userId: string }>;
+    if (params.audience === 'STUDENTS') {
+      recipientMemberships = await this.prisma.membership.findMany({
+        where: { instituteId, role: Role.STUDENT, status: MembershipStatus.ACTIVE },
+        select: { userId: true },
+      });
+    } else if (params.audience === 'TEACHERS') {
+      recipientMemberships = await this.prisma.membership.findMany({
+        where: { instituteId, role: Role.TEACHER, status: MembershipStatus.ACTIVE },
+        select: { userId: true },
+      });
+    } else {
+      recipientMemberships = await this.prisma.membership.findMany({
+        where: { instituteId, status: MembershipStatus.ACTIVE },
+        select: { userId: true },
+      });
+    }
+
+    const userIds: string[] = Array.from(new Set(recipientMemberships.map((m) => m.userId)));
+
+    return this.notifyUsers(instituteId, userIds, {
+      category: 'ADMIN',
+      eventType: 'ANNOUNCEMENT_POSTED',
+      title: `Announcement: ${params.title}`,
+      body: params.body,
+      link: params.audience === 'STUDENTS' ? '/student/notifications' : '/teacher/notifications',
+      referenceId: `${params.announcementId}:ANNOUNCEMENT`,
+    });
+  }
+
+  /**
    * Safe non-throwing wrapper for domain services so notification emission never breaks
    * primary business transactions if called fire-and-forget or post-transaction.
    */
   async safeEmit(
-    instituteId: string,
-    input: EmitNotificationEventInput,
+    fnOrInstituteId: (() => Promise<any>) | string,
+    input?: EmitNotificationEventInput,
   ): Promise<void> {
     try {
-      await this.notifyInstituteAdmins(instituteId, input);
+      if (typeof fnOrInstituteId === 'function') {
+        await fnOrInstituteId();
+      } else if (input) {
+        await this.notifyInstituteAdmins(fnOrInstituteId, input);
+      }
     } catch {
       // Preserve primary transaction stability
     }

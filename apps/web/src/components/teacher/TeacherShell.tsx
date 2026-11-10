@@ -28,6 +28,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { useTeacherAuth } from '@/lib/use-teacher-auth';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 
 export interface TeacherNavItem {
   label: string;
@@ -301,15 +302,13 @@ export function TeacherShell({
 
             {/* Top Right Actions */}
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-              {/* Notifications Link */}
-              <Link
-                href="/teacher/notifications"
-                className="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition relative cursor-pointer"
-                title="Notifications"
-              >
-                <Bell size={18} />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white" />
-              </Link>
+              {/* Notification Center Bell */}
+              <NotificationBell
+                role="TEACHER"
+                notificationsUrl="/teacher/notifications"
+                preferencesUrl="/teacher/settings"
+                apiPrefix="/api/teachers/notifications"
+              />
 
               {/* Institute Badge */}
               <span className="hidden xl:inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/60">

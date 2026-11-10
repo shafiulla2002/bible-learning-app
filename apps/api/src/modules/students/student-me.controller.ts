@@ -323,6 +323,40 @@ export class StudentMeController {
   ) {
     return this.studentsService.updateStudentSettings(user, body);
   }
+
+  // ==========================================
+  // PHASE 8: STUDENT NOTIFICATIONS
+  // ==========================================
+
+  @Get('notifications')
+  @HttpCode(HttpStatus.OK)
+  async getStudentNotifications(@CurrentUser() user: any, @Query() query: any) {
+    return this.studentsService.getStudentNotifications(user, query);
+  }
+
+  @Get('notifications/unread-count')
+  @HttpCode(HttpStatus.OK)
+  async getStudentNotificationsUnreadCount(@CurrentUser() user: any) {
+    return this.studentsService.getStudentNotificationsUnreadCount(user);
+  }
+
+  @Patch('notifications/:notificationId/read')
+  @HttpCode(HttpStatus.OK)
+  async markStudentNotificationRead(
+    @CurrentUser() user: any,
+    @Param('notificationId') notificationId: string,
+  ) {
+    return this.studentsService.markStudentNotificationRead(user, notificationId);
+  }
+
+  @Post('notifications/mark-all-read')
+  @HttpCode(HttpStatus.OK)
+  async markAllStudentNotificationsRead(
+    @CurrentUser() user: any,
+    @Body() body: any,
+  ) {
+    return this.studentsService.markAllStudentNotificationsRead(user, body);
+  }
 }
 
 

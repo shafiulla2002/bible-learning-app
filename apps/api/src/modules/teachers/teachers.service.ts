@@ -2964,6 +2964,18 @@ export class TeachersService {
       },
     });
 
+    if (this.notificationsService && assignmentStatus === 'PUBLISHED') {
+      await this.notificationsService.safeEmit(() =>
+        this.notificationsService!.emitAssignmentPublished(instituteId, {
+          assignmentId: assignment.id,
+          title: assignment.title,
+          courseId: assignment.courseId,
+          batchId: assignment.batchId || undefined,
+          dueDate: assignment.dueAt,
+        }),
+      );
+    }
+
     return {
       success: true,
       message: 'Assignment created successfully',
@@ -3201,6 +3213,22 @@ export class TeachersService {
         },
       },
     });
+
+    if (this.notificationsService) {
+      const studentUserId = existingSubmission.studentProfile?.membership?.userId;
+      if (studentUserId) {
+        await this.notificationsService.safeEmit(() =>
+          this.notificationsService!.emitAssignmentGraded(instituteId, {
+            assignmentId: assignment.id,
+            assignmentTitle: assignment.title,
+            studentUserId,
+            score: updated.marksAwarded ?? 0,
+            maxMarks: assignment.maxMarks,
+            feedback: updated.feedback || undefined,
+          }),
+        );
+      }
+    }
 
     return {
       success: true,
@@ -3722,6 +3750,18 @@ export class TeachersService {
       },
     });
 
+    if (this.notificationsService) {
+      await this.notificationsService.safeEmit(() =>
+        this.notificationsService!.emitExamPublished(instituteId, {
+          examId: updated.id,
+          title: updated.title,
+          courseId: updated.courseId,
+          batchId: updated.batchId || undefined,
+          durationMin: updated.durationMin || undefined,
+        }),
+      );
+    }
+
     return {
       success: true,
       message: 'Examination published successfully',
@@ -4171,6 +4211,26 @@ export class TeachersService {
         },
       },
     });
+
+    if (this.notificationsService) {
+      const studentProfile = await this.prisma.studentProfile.findUnique({
+        where: { id: attempt.studentProfileId },
+        select: { membership: { select: { userId: true } } },
+      });
+      const studentUserId = studentProfile?.membership?.userId;
+      if (studentUserId) {
+        await this.notificationsService.safeEmit(() =>
+          this.notificationsService!.emitExamEvaluated(instituteId, {
+            examId: exam.id,
+            examTitle: exam.title,
+            studentUserId,
+            score: updated.score ?? 0,
+            totalMarks: exam.totalMarks,
+            feedback: updated.feedback || undefined,
+          }),
+        );
+      }
+    }
 
     return {
       success: true,
@@ -4662,6 +4722,19 @@ export class TeachersService {
       },
     });
 
+    if (this.notificationsService) {
+      await this.notificationsService.safeEmit(() =>
+        this.notificationsService!.emitLiveClassScheduled(instituteId, {
+          sessionId: session.id,
+          title: session.title,
+          batchId: session.batchId,
+          batchName: session.batch?.name || 'Class Batch',
+          startsAt: session.startsAt,
+          joinUrl: session.joinUrl || undefined,
+        }),
+      );
+    }
+
     return {
       success: true,
       message: 'Live class scheduled successfully',
@@ -4779,6 +4852,18 @@ export class TeachersService {
       },
     });
 
+    if (this.notificationsService && timesChanged) {
+      await this.notificationsService.safeEmit(() =>
+        this.notificationsService!.emitLiveClassRescheduled(instituteId, {
+          sessionId: updated.id,
+          title: updated.title,
+          batchId: updated.batchId,
+          batchName: updated.batch?.name || 'Class Batch',
+          startsAt: updated.startsAt,
+        }),
+      );
+    }
+
     return {
       success: true,
       message: 'Live class updated successfully',
@@ -4830,6 +4915,18 @@ export class TeachersService {
         },
       },
     });
+
+    if (this.notificationsService) {
+      await this.notificationsService.safeEmit(() =>
+        this.notificationsService!.emitLiveClassCancelled(instituteId, {
+          sessionId: updated.id,
+          title: session.title,
+          batchId: session.batchId,
+          batchName: 'Class Batch',
+          reason: payload.reason?.trim() || undefined,
+        }),
+      );
+    }
 
     return {
       success: true,
@@ -5086,5 +5183,41 @@ export class TeachersService {
       success: true,
       message: `Successfully recorded attendance for ${markedCount} students`,
     };
+  }
+
+  // =========================================================================
+  // PHASE 8: TEACHER NOTIFICATIONS & NOTIFICATION CENTER
+  // =========================================================================
+
+  async getTeacherNotifications(user: any, query: any) {
+    const { instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+    if (!this.notificationsService) {
+      throw new BadRequestException('Notifications service unavailable');
+    }
+    return this.notificationsService.getNotifications(instituteId, authUser.id, query);
+  }
+
+  async getTeacherNotificationsUnreadCount(user: any) {
+    const { instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+    if (!this.notificationsService) {
+      return { unreadCount: 0, byCategory: { STUDENT: 0, TEACHER: 0, ATTENDANCE: 0, FEE: 0, ACADEMIC: 0, ADMIN: 0 } };
+    }
+    return this.notificationsService.getUnreadCount(instituteId, authUser.id);
+  }
+
+  async markTeacherNotificationRead(user: any, notificationId: string) {
+    const { instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+    if (!this.notificationsService) {
+      throw new BadRequestException('Notifications service unavailable');
+    }
+    return this.notificationsService.markAsRead(instituteId, authUser.id, notificationId);
+  }
+
+  async markAllTeacherNotificationsRead(user: any, body?: any) {
+    const { instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+    if (!this.notificationsService) {
+      throw new BadRequestException('Notifications service unavailable');
+    }
+    return this.notificationsService.markAllAsRead(instituteId, authUser.id, body?.category);
   }
 }

@@ -88,7 +88,19 @@ export function getCategoryMeta(category: NotificationCategory) {
   }
 }
 
-export function NotificationBell() {
+export interface NotificationBellProps {
+  role?: 'ADMIN' | 'TEACHER' | 'STUDENT';
+  notificationsUrl?: string;
+  preferencesUrl?: string;
+  apiPrefix?: string;
+}
+
+export function NotificationBell({
+  role = 'ADMIN',
+  notificationsUrl,
+  preferencesUrl,
+  apiPrefix,
+}: NotificationBellProps = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [instituteId, setInstituteId] = useState<string | null>(null);
@@ -98,8 +110,44 @@ export function NotificationBell() {
   const [filterUnreadOnly, setFilterUnreadOnly] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const effectiveNotificationsUrl =
+    notificationsUrl ||
+    (role === 'TEACHER'
+      ? '/teacher/notifications'
+      : role === 'STUDENT'
+      ? '/student/notifications'
+      : '/admin/notifications');
+
+  const effectivePreferencesUrl =
+    preferencesUrl ||
+    (role === 'TEACHER'
+      ? '/teacher/settings'
+      : role === 'STUDENT'
+      ? '/student/settings'
+      : '/admin/settings');
+
+  const effectiveApiPrefix =
+    apiPrefix ||
+    (role === 'TEACHER'
+      ? '/api/teachers/notifications'
+      : role === 'STUDENT'
+      ? '/api/students/notifications'
+      : '');
+
   const loadUnreadCount = useCallback(async (instId?: string) => {
     try {
+      if (role === 'TEACHER' || role === 'STUDENT') {
+        const res = await fetch(`${effectiveApiPrefix}/unread-count`, {
+          headers: { Accept: 'application/json' },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUnreadCount(data.unreadCount ?? 0);
+        }
+        return;
+      }
+
+      // Admin role handling
       let targetId = instId;
       if (!targetId) {
         const ctx = await resolveVerifiedAdminContext();
@@ -112,12 +160,29 @@ export function NotificationBell() {
     } catch {
       // Silently show 0 unread if API is unreachable or user unauthorized
     }
-  }, []);
+  }, [role, effectiveApiPrefix]);
 
   const loadDropdownItems = useCallback(
-    async (instId: string, unreadOnly: boolean) => {
+    async (instId: string | null, unreadOnly: boolean) => {
       setLoadingList(true);
       try {
+        if (role === 'TEACHER' || role === 'STUDENT') {
+          const res = await fetch(
+            `${effectiveApiPrefix}?page=1&limit=8&status=${unreadOnly ? 'UNREAD' : 'ALL'}`,
+            { headers: { Accept: 'application/json' } },
+          );
+          if (res.ok) {
+            const data = await res.json();
+            setItems(data.data || []);
+            setUnreadCount(data.unreadCount ?? 0);
+          } else {
+            setItems([]);
+          }
+          return;
+        }
+
+        // Admin
+        if (!instId) return;
         const res = await notificationsApi.getNotifications(instId, {
           page: 1,
           limit: 8,
@@ -131,7 +196,7 @@ export function NotificationBell() {
         setLoadingList(false);
       }
     },
-    [],
+    [role, effectiveApiPrefix],
   );
 
   useEffect(() => {
@@ -147,7 +212,7 @@ export function NotificationBell() {
   }, [loadUnreadCount, instituteId]);
 
   useEffect(() => {
-    if (open && instituteId) {
+    if (open) {
       loadDropdownItems(instituteId, filterUnreadOnly);
     }
   }, [open, instituteId, filterUnreadOnly, loadDropdownItems]);
@@ -172,23 +237,43 @@ export function NotificationBell() {
     notif: NotificationItemDto,
   ) => {
     e.stopPropagation();
-    if (!instituteId || notif.isRead) return;
+    if (notif.isRead) return;
     try {
-      await notificationsApi.markAsRead(instituteId, notif.id);
+      if (role === 'TEACHER' || role === 'STUDENT') {
+        await fetch(`${effectiveApiPrefix}/${notif.id}/read`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } else if (instituteId) {
+        await notificationsApi.markAsRead(instituteId, notif.id);
+      }
       setItems((prev) =>
         prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n)),
       );
       setUnreadCount((c) => Math.max(0, c - 1));
+      window.dispatchEvent(new CustomEvent('bible-lms:notifications-updated'));
     } catch {
       // Ignore transient failure
     }
   };
 
   const handleMarkAllRead = async () => {
-    if (!instituteId || unreadCount === 0) return;
+    if (unreadCount === 0) return;
     try {
-      const res = await notificationsApi.markAllAsRead(instituteId);
-      setUnreadCount(res.unreadCount);
+      if (role === 'TEACHER' || role === 'STUDENT') {
+        const res = await fetch(effectiveApiPrefix, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: 'ALL' }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setUnreadCount(data.unreadCount ?? 0);
+        }
+      } else if (instituteId) {
+        const res = await notificationsApi.markAllAsRead(instituteId);
+        setUnreadCount(res.unreadCount);
+      }
       setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
       window.dispatchEvent(new CustomEvent('bible-lms:notifications-updated'));
     } catch {
@@ -197,14 +282,23 @@ export function NotificationBell() {
   };
 
   const handleNotificationNavigate = async (notif: NotificationItemDto) => {
-    if (instituteId && !notif.isRead) {
+    if (!notif.isRead) {
       try {
-        await notificationsApi.markAsRead(instituteId, notif.id);
+        if (role === 'TEACHER' || role === 'STUDENT') {
+          await fetch(`${effectiveApiPrefix}/${notif.id}/read`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } else if (instituteId) {
+          await notificationsApi.markAsRead(instituteId, notif.id);
+        }
         setUnreadCount((c) => Math.max(0, c - 1));
+        window.dispatchEvent(new CustomEvent('bible-lms:notifications-updated'));
       } catch {}
     }
     setOpen(false);
-    router.push(notif.link || '/admin');
+    const destination = (notif.link || effectiveNotificationsUrl).split('#')[0];
+    router.push(destination);
   };
 
   return (
@@ -353,7 +447,7 @@ export function NotificationBell() {
           {/* Footer */}
           <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs">
             <Link
-              href="/admin/settings"
+              href={effectivePreferencesUrl}
               onClick={() => setOpen(false)}
               className="text-slate-500 hover:text-slate-800 flex items-center gap-1 font-medium transition"
             >
@@ -361,7 +455,7 @@ export function NotificationBell() {
               <span>Preferences</span>
             </Link>
             <Link
-              href="/admin/notifications"
+              href={effectiveNotificationsUrl}
               onClick={() => setOpen(false)}
               className="text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 transition"
             >
