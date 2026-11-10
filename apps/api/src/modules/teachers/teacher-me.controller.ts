@@ -338,6 +338,25 @@ export class TeacherMeController {
   ) {
     return this.teachersService.markAllTeacherNotificationsRead(user, body);
   }
+
+  // ==========================================
+  // PHASE 9: TEACHER BATCHES & BATCH DETAILS
+  // ==========================================
+
+  @Get('batches')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherBatches(@CurrentUser() user: any, @Query() query: any) {
+    return this.teachersService.getTeacherBatches(user, query);
+  }
+
+  @Get('batches/:batchId')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherBatchDetail(
+    @CurrentUser() user: any,
+    @Param('batchId') batchId: string,
+  ) {
+    return this.teachersService.getTeacherBatchDetail(user, batchId);
+  }
 }
 
 

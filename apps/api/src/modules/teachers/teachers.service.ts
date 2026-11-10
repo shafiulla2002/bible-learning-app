@@ -5220,4 +5220,296 @@ export class TeachersService {
     }
     return this.notificationsService.markAllAsRead(instituteId, authUser.id, body?.category);
   }
+
+  // =========================================================================
+  // PHASE 9: TEACHER MY BATCHES & BATCH DETAILS
+  // =========================================================================
+
+  async getTeacherBatches(
+    user: any,
+    query: { search?: string; status?: string; courseId?: string } = {},
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const where: any = {
+      instituteId,
+      teachers: {
+        some: { teacherProfileId },
+      },
+    };
+
+    if (query.status && query.status !== 'ALL') {
+      where.status = query.status;
+    }
+    if (query.courseId && query.courseId !== 'ALL') {
+      where.courseId = query.courseId;
+    }
+    if (query.search && query.search.trim()) {
+      const s = query.search.trim();
+      where.OR = [
+        { name: { contains: s, mode: 'insensitive' } },
+        { code: { contains: s, mode: 'insensitive' } },
+        { course: { title: { contains: s, mode: 'insensitive' } } },
+      ];
+    }
+
+    const batches = await this.prisma.batch.findMany({
+      where,
+      include: {
+        course: { select: { id: true, title: true, slug: true } },
+        term: { select: { id: true, name: true } },
+        academicYear: { select: { id: true, name: true } },
+        teachers: {
+          where: { instituteId },
+          include: {
+            teacherProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: { select: { fullName: true, email: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        enrolments: {
+          where: { status: 'ACTIVE', instituteId },
+          select: { id: true, studentProfileId: true },
+        },
+        liveSessions: {
+          where: { instituteId, startsAt: { gte: new Date() } },
+          select: { id: true, title: true, startsAt: true },
+          orderBy: { startsAt: 'asc' },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const items = batches.map((b) => {
+      const myAssignment = b.teachers.find((t) => t.teacherProfileId === teacherProfileId);
+      const activeStudentCount = b.enrolments.length;
+      const instructors = b.teachers.map((t) => ({
+        id: t.teacherProfileId,
+        name: t.teacherProfile?.membership?.user?.fullName || 'Faculty Member',
+        role: t.role,
+        isMe: t.teacherProfileId === teacherProfileId,
+      }));
+
+      return {
+        id: b.id,
+        name: b.name,
+        code: b.code,
+        status: b.status,
+        startDate: b.startDate,
+        endDate: b.endDate,
+        capacity: b.capacity,
+        courseId: b.courseId,
+        courseTitle: b.course.title,
+        courseSlug: b.course.slug,
+        termName: b.term?.name || null,
+        academicYearName: b.academicYear?.name || null,
+        assignedRole: myAssignment?.role || 'LEAD',
+        activeStudentsCount: activeStudentCount,
+        nextLiveSession: b.liveSessions[0] || null,
+        instructors,
+      };
+    });
+
+    const totalAssignedBatches = items.length;
+    const activeBatches = items.filter((b) => b.status === 'ACTIVE').length;
+    const uniqueStudents = new Set(
+      batches.flatMap((b) => b.enrolments.map((e) => e.studentProfileId)),
+    );
+    const uniqueCourses = new Set(items.map((b) => b.courseId));
+
+    return {
+      success: true,
+      metrics: {
+        totalAssignedBatches,
+        activeBatches,
+        totalStudents: uniqueStudents.size,
+        associatedCoursesCount: uniqueCourses.size,
+      },
+      data: items,
+    };
+  }
+
+  async getTeacherBatchDetail(user: any, batchId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const batch = await this.prisma.batch.findFirst({
+      where: { id: batchId, instituteId },
+      include: {
+        course: {
+          include: {
+            modules: {
+              include: {
+                chapters: {
+                  include: {
+                    lessons: { select: { id: true, title: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        term: true,
+        academicYear: true,
+        teachers: {
+          include: {
+            teacherProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: { select: { fullName: true, email: true, phoneE164: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        enrolments: {
+          where: { status: 'ACTIVE' },
+          include: {
+            studentProfile: {
+              include: {
+                membership: {
+                  include: {
+                    user: { select: { fullName: true, email: true, phoneE164: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        liveSessions: {
+          orderBy: { startsAt: 'desc' },
+          take: 5,
+        },
+        assignments: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          include: {
+            submissions: { select: { id: true, status: true } },
+          },
+        },
+        exams: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          include: {
+            attempts: { select: { id: true, status: true } },
+          },
+        },
+        attendances: {
+          select: { id: true, status: true, date: true, studentProfileId: true },
+        },
+      },
+    });
+
+    if (!batch) {
+      throw new NotFoundException('Batch not found');
+    }
+
+    const isAssigned = batch.teachers.some((t) => t.teacherProfileId === teacherProfileId);
+    const isCourseInstructor = await this.prisma.courseInstructor.findFirst({
+      where: { courseId: batch.courseId, teacherProfileId, instituteId },
+    });
+
+    if (!isAssigned && !isCourseInstructor) {
+      throw new ForbiddenException('You are not authorized to access this batch.');
+    }
+
+    const totalAttendanceRecords = batch.attendances.length;
+    const presentRecords = batch.attendances.filter(
+      (a) => a.status === 'PRESENT' || a.status === 'LATE',
+    ).length;
+    const attendanceRate =
+      totalAttendanceRecords > 0
+        ? Math.round((presentRecords / totalAttendanceRecords) * 100)
+        : 100;
+
+    const studentAttendanceMap = new Map<string, { present: number; total: number }>();
+    for (const a of batch.attendances) {
+      const cur = studentAttendanceMap.get(a.studentProfileId) || { present: 0, total: 0 };
+      cur.total++;
+      if (a.status === 'PRESENT' || a.status === 'LATE') cur.present++;
+      studentAttendanceMap.set(a.studentProfileId, cur);
+    }
+
+    const students = batch.enrolments.map((e) => {
+      const att = studentAttendanceMap.get(e.studentProfileId);
+      const rate = att && att.total > 0 ? Math.round((att.present / att.total) * 100) : null;
+      return {
+        id: e.studentProfileId,
+        enrolmentId: e.id,
+        admissionNo: e.studentProfile.admissionNo,
+        fullName: e.studentProfile.membership?.user?.fullName || 'Student',
+        email: e.studentProfile.membership?.user?.email,
+        phone: e.studentProfile.membership?.user?.phoneE164,
+        enrolledAt: e.createdAt,
+        attendanceRate: rate,
+      };
+    });
+
+    return {
+      success: true,
+      data: {
+        batch: {
+          id: batch.id,
+          name: batch.name,
+          code: batch.code,
+          status: batch.status,
+          startDate: batch.startDate,
+          endDate: batch.endDate,
+          capacity: batch.capacity,
+          term: batch.term?.name || null,
+          academicYear: batch.academicYear?.name || null,
+          course: {
+            id: batch.course.id,
+            title: batch.course.title,
+            slug: batch.course.slug,
+            description: batch.course.description,
+            modulesCount: batch.course.modules.length,
+            lessonsCount: batch.course.modules.reduce(
+              (acc, m) => acc + m.chapters.reduce((a2, c) => a2 + c.lessons.length, 0),
+              0,
+            ),
+          },
+          instructors: batch.teachers.map((t) => ({
+            id: t.teacherProfileId,
+            name: t.teacherProfile?.membership?.user?.fullName || 'Faculty',
+            role: t.role,
+            isMe: t.teacherProfileId === teacherProfileId,
+          })),
+          metrics: {
+            enrolledCount: students.length,
+            attendanceRate,
+            liveSessionsCount: batch.liveSessions.length,
+            assignmentsCount: batch.assignments.length,
+            examsCount: batch.exams.length,
+          },
+          students,
+          recentLiveSessions: batch.liveSessions,
+          recentAssignments: batch.assignments.map((a) => ({
+            id: a.id,
+            title: a.title,
+            dueAt: a.dueAt,
+            maxMarks: a.maxMarks,
+            status: a.status,
+            submissionsCount: a.submissions.length,
+          })),
+          recentExams: batch.exams.map((ex) => ({
+            id: ex.id,
+            title: ex.title,
+            status: ex.status,
+            type: ex.type,
+            totalMarks: ex.totalMarks,
+            attemptsCount: ex.attempts.length,
+          })),
+        },
+      },
+    };
+  }
 }
