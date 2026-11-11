@@ -1,3 +1,4 @@
-export * from './roles-permissions.js';
-export * from './types.js';
-export * from './validation.js';
+export * from './roles-permissions';
+export * from './types';
+export * from './validation';
+

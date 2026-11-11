@@ -78,7 +78,11 @@ async function bootstrap() {
   const defaultApprovedOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
     'https://bible-learning-app-bm4j.vercel.app',
+    'https://berea-bible-institute.vercel.app',
+    'https://biblelearninglms.covenantsynergy.in',
   ];
 
   const allowedOrigins = Array.from(new Set([...defaultApprovedOrigins, ...envOrigins]));
@@ -89,9 +93,10 @@ async function bootstrap() {
         return callback(null, true);
       }
       const isAllowedExplicit = allowedOrigins.includes(requestOrigin);
-      const isVercelPreview = /^https:\/\/bible-learning-app[a-zA-Z0-9-]*\.vercel\.app$/.test(
-        requestOrigin,
-      );
+      const isVercelPreview =
+        /^https:\/\/(bible-learning-app|berea-bible-institute)[a-zA-Z0-9-]*\.vercel\.app$/.test(
+          requestOrigin,
+        );
       if (isAllowedExplicit || isVercelPreview) {
         callback(null, true);
       } else {

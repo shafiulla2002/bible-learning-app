@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build",
+    "build": "npm --prefix ../.. run build:shared && npm --prefix ../.. run build:api && next build",
     "start": "next start -p 3000",
     "lint": "next lint"
   },
   "dependencies": {
+    "@bible-lms/api": "*",
     "@bible-lms/shared": "*",
     "clsx": "^2.1.1",
     "lucide-react": "^0.475.0",

@@ -1,4 +1,4 @@
-import type { RoleType } from './roles-permissions.js';
+import type { RoleType } from './roles-permissions';
 
 export interface UserSession {
   userId: string;

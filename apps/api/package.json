@@ -2,6 +2,7 @@
   "name": "@bible-lms/api",
   "version": "1.0.0",
   "private": true,
+  "main": "./dist/src/serverless.js",
   "scripts": {
     "dev": "nest start --watch",
     "build": "prisma generate && nest build",

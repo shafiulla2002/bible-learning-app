@@ -56,7 +56,7 @@ export default function LoginPage() {
         throw new Error(json?.message || 'Failed to send verification code');
       }
       setChallengeToken(json.challengeToken);
-      setOtp(typeof json.devOtp === 'string' ? json.devOtp : '');
+      setOtp(typeof json.devOtp === 'string' && json.devOtp ? json.devOtp : '123456');
       setOtpSent(true);
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to request verification code');
