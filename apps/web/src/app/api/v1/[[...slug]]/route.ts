@@ -1,4 +1,8 @@
 import { NextRequest } from 'next/server';
+import { PrismaClient } from '@prisma/client';
+
+// Reference PrismaClient so Next.js/Vercel file tracing bundles the Prisma Query Engine and schema.prisma
+void PrismaClient;
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

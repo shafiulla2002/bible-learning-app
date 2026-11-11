@@ -5,9 +5,19 @@ import { PrismaClient } from '@prisma/client';
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
     const omitUnmigratedColumns = process.env.PRISMA_MIGRATIONS_APPLIED !== 'true';
-    super(
-      omitUnmigratedColumns
-        ? ({
+    const defaultCloudDbUrl =
+      'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=3';
+    const rawEnvUrl = process.env.DATABASE_URL?.trim();
+    const effectiveDbUrl = rawEnvUrl ? rawEnvUrl : defaultCloudDbUrl;
+
+    super({
+      datasources: {
+        db: {
+          url: effectiveDbUrl,
+        },
+      },
+      ...(omitUnmigratedColumns
+        ? {
             omit: {
               course: {
                 courseType: true,
@@ -55,13 +65,17 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
                 feedback: true,
               },
             },
-          } as any)
-        : undefined,
-    );
+          }
+        : {}),
+    } as any);
   }
 
   async onModuleInit() {
-    await this.$connect();
+    try {
+      await this.$connect();
+    } catch (err: any) {
+      console.warn('PrismaService initial connect warning (will retry on query):', err?.message);
+    }
   }
 
   async onModuleDestroy() {

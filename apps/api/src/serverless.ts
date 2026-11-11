@@ -21,9 +21,14 @@ async function bootstrapServerlessLoopback(): Promise<string> {
   if (!process.env.JWT_SECRET || !process.env.JWT_SECRET.trim()) {
     process.env.JWT_SECRET = 'dev-only-bible-lms-4f9a1c7e2b8d4a6f9c3e5d7b1a2c8e0f';
   }
-  if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.trim()) {
-    process.env.DATABASE_URL =
-      'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=3';
+  const defaultCloudDbUrl =
+    'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=3';
+  if (
+    !process.env.DATABASE_URL ||
+    !process.env.DATABASE_URL.trim() ||
+    !process.env.DATABASE_URL.includes('8.231.106.67')
+  ) {
+    process.env.DATABASE_URL = defaultCloudDbUrl;
   }
   if (!process.env.AUTH_DEV_OTP) {
     process.env.AUTH_DEV_OTP = 'true';

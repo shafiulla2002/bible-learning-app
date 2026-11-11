@@ -11,6 +11,7 @@
   "dependencies": {
     "@bible-lms/api": "*",
     "@bible-lms/shared": "*",
+    "@prisma/client": "^6.3.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.475.0",
     "next": "^15.1.7",
