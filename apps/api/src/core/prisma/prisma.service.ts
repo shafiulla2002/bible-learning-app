@@ -1,14 +1,34 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 
+function withSingleConnectionPool(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.searchParams.set('connection_limit', '1');
+    if (!parsed.searchParams.has('pool_timeout')) {
+      parsed.searchParams.set('pool_timeout', '20');
+    }
+    return parsed.toString();
+  } catch {
+    const sep = rawUrl.includes('?') ? '&' : '?';
+    return `${rawUrl}${sep}connection_limit=1&pool_timeout=20`;
+  }
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  private static initPromise: Promise<void> | null = null;
+
   constructor() {
+    const existingSingleton = (globalThis as any).__bibleLmsPrismaService as
+      | PrismaService
+      | undefined;
+
     const omitUnmigratedColumns = process.env.PRISMA_MIGRATIONS_APPLIED !== 'true';
     const defaultCloudDbUrl =
-      'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=3';
+      'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=1&pool_timeout=20';
     const rawEnvUrl = process.env.DATABASE_URL?.trim();
-    const effectiveDbUrl = rawEnvUrl ? rawEnvUrl : defaultCloudDbUrl;
+    const effectiveDbUrl = withSingleConnectionPool(rawEnvUrl ? rawEnvUrl : defaultCloudDbUrl);
 
     super({
       datasources: {
@@ -68,17 +88,25 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
           }
         : {}),
     } as any);
+
+    if (existingSingleton) {
+      return existingSingleton;
+    }
+    (globalThis as any).__bibleLmsPrismaService = this;
   }
 
   async onModuleInit() {
-    try {
-      await this.$connect();
-    } catch (err: any) {
-      console.warn('PrismaService initial connect warning (will retry on query):', err?.message);
+    if (!PrismaService.initPromise) {
+      PrismaService.initPromise = this.$connect().catch((err: any) => {
+        PrismaService.initPromise = null;
+        console.warn('PrismaService initial connect warning (will retry on query):', err?.message);
+      });
     }
+    await PrismaService.initPromise;
   }
 
   async onModuleDestroy() {
+    PrismaService.initPromise = null;
     await this.$disconnect();
   }
 }
