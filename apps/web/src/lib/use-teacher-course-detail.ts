@@ -7,11 +7,26 @@ export interface LessonResourceItem {
   lessonId: string;
   mediaAssetId: string;
   storageKey: string;
+  videoStreamId?: string | null;
   kind: string;
   mimeType: string;
   sizeBytes: string;
   downloadable: boolean;
   createdAt: string;
+}
+
+export interface CourseLiveSessionItem {
+  id: string;
+  title: string;
+  description: string | null;
+  room: string | null;
+  startsAt: string;
+  endsAt: string;
+  joinUrl: string | null;
+  recordingUrl: string | null;
+  status: string;
+  batchId: string;
+  batchName: string;
 }
 
 export interface LessonItem {
@@ -75,6 +90,7 @@ export interface CourseDetailData {
     code: string | null;
     studentCount: number;
   }>;
+  liveSessions?: CourseLiveSessionItem[];
   summary: {
     moduleCount: number;
     chapterCount: number;

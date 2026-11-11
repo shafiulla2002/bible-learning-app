@@ -177,14 +177,24 @@ export default function StudentCourseDetailPage({
     <StudentShell pageTitle={data?.course.title || 'Course Details'}>
       <div className="space-y-6">
         
-        {/* Back navigation */}
-        <Link
-          href="/student/courses"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-600 transition"
-        >
-          <ArrowLeft size={14} />
-          <span>Back to My Courses</span>
-        </Link>
+        {/* Back navigation & Syllabus PDF Download */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href="/student/courses"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-blue-600 transition"
+          >
+            <ArrowLeft size={14} />
+            <span>Back to My Courses</span>
+          </Link>
+
+          <a
+            href={`/api/students/courses/${courseId}/syllabus`}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition"
+          >
+            <Download size={14} />
+            <span>Download Syllabus PDF</span>
+          </a>
+        </div>
 
         {isLoading ? (
           <div className="bg-white rounded-3xl p-8 border border-slate-200 animate-pulse space-y-6">

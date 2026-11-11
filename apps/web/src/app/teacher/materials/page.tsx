@@ -26,10 +26,13 @@ import {
   CheckCircle2,
   X,
   FilePlus,
+  PlayCircle,
+  Eye,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
 import { useTeacherMaterials, TeacherMaterialItem } from '@/lib/use-teacher-materials';
 import { useTeacherCourses } from '@/lib/use-teacher-courses';
+import { MediaPlayerModal } from '@/components/shared/MediaPlayerModal';
 
 function TeacherMaterialsContent() {
   const searchParams = useSearchParams();
@@ -74,6 +77,9 @@ function TeacherMaterialsContent() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+
+  // Stream / Video Player Modal state
+  const [activeVideoMaterial, setActiveVideoMaterial] = useState<TeacherMaterialItem | null>(null);
 
   useEffect(() => {
     if (initialCourseId && initialCourseId !== 'ALL') {
@@ -375,26 +381,30 @@ function TeacherMaterialsContent() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {items.map((mat) => (
+            {items.map((mat) => {
+              const isVideo = mat.kind?.toUpperCase() === 'VIDEO';
+              const isPdf = mat.kind?.toUpperCase() === 'PDF' || mat.mimeType?.toLowerCase().includes('pdf');
+              const contentUrl = `/api/teachers/materials/${mat.id}/content`;
+              return (
               <div
                 key={mat.id}
-                className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition-all p-5 flex flex-col justify-between space-y-4 group"
+                className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-md transition-all p-5 flex flex-col justify-between space-y-4 group overflow-hidden min-w-0"
               >
-                <div className="space-y-3">
+                <div className="space-y-3 min-w-0">
                   {/* Top file icon + DRM badge */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-start justify-between gap-2.5 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shrink-0 group-hover:bg-blue-50 transition-colors">
                         {getKindIcon(mat.kind)}
                       </div>
-                      <div className="overflow-hidden">
+                      <div className="min-w-0 flex-1">
                         <h4
                           className="text-sm font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors"
                           title={mat.title}
                         >
                           {mat.title}
                         </h4>
-                        <span className="text-[11px] text-slate-400 font-medium">
+                        <span className="text-[11px] text-slate-400 font-medium block truncate">
                           {formatFileSize(mat.sizeBytes)} • {mat.kind}
                         </span>
                       </div>
@@ -403,7 +413,7 @@ function TeacherMaterialsContent() {
                     {mat.downloadable ? (
                       <span
                         title="Download Allowed"
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 whitespace-nowrap"
                       >
                         <Download size={10} />
                         Downloadable
@@ -411,7 +421,7 @@ function TeacherMaterialsContent() {
                     ) : (
                       <span
                         title="DRM Protected (Stream Only)"
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0 whitespace-nowrap"
                       >
                         <Lock size={10} />
                         Stream Only
@@ -420,8 +430,8 @@ function TeacherMaterialsContent() {
                   </div>
 
                   {/* Course & Lesson Hierarchy Path */}
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs space-y-1">
-                    <div className="flex items-center gap-1.5 text-slate-700 font-semibold truncate">
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs space-y-1 min-w-0">
+                    <div className="flex items-center gap-1.5 text-slate-700 font-semibold min-w-0">
                       <BookOpen size={12} className="text-blue-600 shrink-0" />
                       <span className="truncate">{mat.courseTitle}</span>
                     </div>
@@ -431,22 +441,59 @@ function TeacherMaterialsContent() {
                   </div>
                 </div>
 
-                {/* Footer with Date & Action */}
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                  <span className="text-slate-400 text-[11px]">
+                {/* Footer with Date & Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 text-xs">
+                  <span className="text-slate-400 text-[11px] shrink-0">
                     {new Date(mat.createdAt).toLocaleDateString()}
                   </span>
 
-                  <Link
-                    href={`/teacher/courses/${mat.courseId}`}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700"
-                  >
-                    <span>View in Syllabus</span>
-                    <ExternalLink size={12} />
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isVideo ? (
+                      <button
+                        type="button"
+                        onClick={() => setActiveVideoMaterial(mat)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-[11px] font-semibold transition"
+                      >
+                        <PlayCircle size={12} />
+                        <span>Stream Video</span>
+                      </button>
+                    ) : (
+                      <>
+                        {isPdf && (
+                          <a
+                            href={`${contentUrl}?inline=1`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-[11px] font-semibold transition"
+                          >
+                            <Eye size={12} />
+                            <span>View</span>
+                          </a>
+                        )}
+                        {mat.downloadable && (
+                          <a
+                            href={`${contentUrl}?download=1`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold transition"
+                          >
+                            <Download size={12} />
+                            <span>Download</span>
+                          </a>
+                        )}
+                      </>
+                    )}
+
+                    <Link
+                      href={`/teacher/courses/${mat.courseId}`}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-700 whitespace-nowrap"
+                    >
+                      <span>Syllabus</span>
+                      <ExternalLink size={11} />
+                    </Link>
+                  </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -644,6 +691,44 @@ function TeacherMaterialsContent() {
             </div>
           </div>
         )}
+
+        {/* 7. Video Stream Player Modal */}
+        <MediaPlayerModal
+          open={Boolean(activeVideoMaterial)}
+          onClose={() => setActiveVideoMaterial(null)}
+          title={activeVideoMaterial?.title || 'Course Video'}
+          subtitle={
+            activeVideoMaterial
+              ? `${activeVideoMaterial.courseTitle} • ${activeVideoMaterial.lessonTitle}`
+              : undefined
+          }
+          sourceUrlOrKey={
+            activeVideoMaterial?.videoStreamId || activeVideoMaterial?.storageKey
+          }
+          downloadable={Boolean(activeVideoMaterial?.downloadable)}
+          canAttachUrl={true}
+          downloadHref={
+            activeVideoMaterial?.downloadable
+              ? `/api/teachers/materials/${activeVideoMaterial.id}/content?download=1`
+              : null
+          }
+          onSaveVideoUrl={async (newUrl) => {
+            if (!activeVideoMaterial) return;
+            const res = await fetch(
+              `/api/teachers/materials/${activeVideoMaterial.id}/content`,
+              {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoStreamId: newUrl }),
+              }
+            );
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new Error(json.error || 'Failed to save video link');
+            }
+            refresh();
+          }}
+        />
 
       </div>
     </TeacherShell>

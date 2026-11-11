@@ -30,6 +30,9 @@ import {
   Library,
   GraduationCap,
   ExternalLink,
+  PlayCircle,
+  Eye,
+  Calendar,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
 import {
@@ -38,7 +41,9 @@ import {
   ChapterItem,
   LessonItem,
   LessonResourceItem,
+  CourseLiveSessionItem,
 } from '@/lib/use-teacher-course-detail';
+import { MediaPlayerModal } from '@/components/shared/MediaPlayerModal';
 
 export default function TeacherCourseCurriculumPage() {
   const params = useParams();
@@ -69,7 +74,11 @@ export default function TeacherCourseCurriculumPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
-  // Auto-expand first module and chapter when course loads
+  // Media / Recorded Class Video Modal state
+  const [activeVideoResource, setActiveVideoResource] = useState<LessonResourceItem | null>(null);
+  const [activeRecordedSession, setActiveRecordedSession] = useState<CourseLiveSessionItem | null>(null);
+
+  // Auto-expand first module/chapter and keep selectedLesson synced on refresh
   React.useEffect(() => {
     if (course && course.modules.length > 0) {
       const firstMod = course.modules[0];
@@ -77,7 +86,17 @@ export default function TeacherCourseCurriculumPage() {
       if (firstMod.chapters.length > 0) {
         const firstChap = firstMod.chapters[0];
         setExpandedChapters((prev) => ({ ...prev, [firstChap.id]: true }));
-        if (firstChap.lessons.length > 0 && !selectedLesson) {
+        if (selectedLesson) {
+          for (const mod of course.modules) {
+            for (const chap of mod.chapters) {
+              const updated = chap.lessons.find((l) => l.id === selectedLesson.id);
+              if (updated) {
+                setSelectedLesson(updated);
+                return;
+              }
+            }
+          }
+        } else if (firstChap.lessons.length > 0) {
           setSelectedLesson(firstChap.lessons[0]);
         }
       }
@@ -188,7 +207,15 @@ export default function TeacherCourseCurriculumPage() {
             Back to Assigned Courses
           </Link>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={`/api/teachers/courses/${courseId}/syllabus`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold text-white shadow-xs transition"
+            >
+              <Download size={14} />
+              Download Syllabus PDF
+            </a>
+
             <Link
               href={`/teacher/materials?courseId=${courseId}`}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
@@ -403,13 +430,13 @@ export default function TeacherCourseCurriculumPage() {
                                                     : 'hover:bg-slate-50 text-slate-700'
                                                 }`}
                                               >
-                                                <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-3 min-w-0 flex-1">
                                                   <div className="p-1.5 rounded-lg bg-slate-100 shrink-0">
                                                     {getLessonTypeIcon(lesson.type)}
                                                   </div>
-                                                  <div>
-                                                    <div className="flex items-center gap-2">
-                                                      <span className="text-xs font-semibold">{lesson.title}</span>
+                                                  <div className="min-w-0 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                      <span className="text-xs font-semibold truncate">{lesson.title}</span>
                                                       {lesson.isPreview && (
                                                         <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
                                                           Preview
@@ -460,6 +487,84 @@ export default function TeacherCourseCurriculumPage() {
                     );
                   })
                 )}
+
+                {/* Recorded Class Videos & Live Sessions */}
+                <div className="pt-2 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Video size={18} className="text-indigo-600" />
+                      Recorded Class Videos & Live Sessions
+                    </h2>
+                    <span className="text-xs text-slate-500 font-medium">
+                      {course.liveSessions?.length || 0} Sessions
+                    </span>
+                  </div>
+
+                  {!course.liveSessions || course.liveSessions.length === 0 ? (
+                    <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center text-slate-500 space-y-2">
+                      <Video size={24} className="mx-auto text-slate-400" />
+                      <p className="text-xs font-semibold text-slate-700">No live or recorded class sessions for this course yet.</p>
+                      <Link
+                        href="/teacher/live-classes"
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700"
+                      >
+                        Go to Live Classes
+                        <ExternalLink size={12} />
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+                      {course.liveSessions.map((ls) => {
+                        const hasRec = Boolean(ls.recordingUrl);
+                        return (
+                          <div
+                            key={ls.id}
+                            className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/70 transition"
+                          >
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-bold text-slate-900 truncate">
+                                  {ls.title}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 whitespace-nowrap ${
+                                    hasRec
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                  }`}
+                                >
+                                  {hasRec ? 'Recording Ready' : 'No Recording URL'}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                                <span className="inline-flex items-center gap-1">
+                                  <Calendar size={11} />
+                                  {new Date(ls.startsAt).toLocaleDateString()}
+                                </span>
+                                <span>• {ls.batchName}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setActiveRecordedSession(ls)}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                                  hasRec
+                                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                    : 'border border-slate-200 text-slate-700 hover:bg-slate-100'
+                                }`}
+                              >
+                                <PlayCircle size={13} />
+                                <span>{hasRec ? 'Watch Recording' : 'Attach Recording'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Right Column: Selected Lesson Inspector Pane (5 cols) */}
@@ -548,21 +653,30 @@ export default function TeacherCourseCurriculumPage() {
                         <div className="space-y-2">
                           {selectedLesson.resources.map((res) => {
                             const fileName = res.storageKey.split('/').pop() || res.storageKey;
+                            const isVideo = res.kind?.toUpperCase() === 'VIDEO';
+                            const isPdf =
+                              res.kind?.toUpperCase() === 'PDF' ||
+                              res.mimeType?.toLowerCase().includes('pdf');
+                            const contentUrl = `/api/teachers/materials/${res.id}/content`;
                             return (
                               <div
                                 key={res.id}
-                                className="p-3 rounded-xl border border-slate-200/90 hover:border-slate-300 transition-all space-y-2 bg-slate-50/50"
+                                className="p-3 rounded-xl border border-slate-200/90 hover:border-slate-300 transition-all space-y-2.5 bg-slate-50/50 overflow-hidden"
                               >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex items-center gap-2.5">
+                                <div className="flex items-start justify-between gap-2.5 min-w-0">
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                                     <div className="p-2 rounded-lg bg-white border border-slate-200 text-slate-700 shrink-0">
-                                      <FileText size={16} className="text-indigo-600" />
+                                      {isVideo ? (
+                                        <Video size={16} className="text-blue-600" />
+                                      ) : (
+                                        <FileText size={16} className="text-indigo-600" />
+                                      )}
                                     </div>
-                                    <div className="overflow-hidden">
-                                      <div className="text-xs font-bold text-slate-900 truncate max-w-[200px]" title={fileName}>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-xs font-bold text-slate-900 truncate" title={fileName}>
                                         {fileName}
                                       </div>
-                                      <div className="text-[11px] text-slate-500">
+                                      <div className="text-[11px] text-slate-500 truncate">
                                         {formatFileSize(res.sizeBytes)} • {res.kind}
                                       </div>
                                     </div>
@@ -572,7 +686,7 @@ export default function TeacherCourseCurriculumPage() {
                                   {res.downloadable ? (
                                     <span
                                       title="Students may download this file"
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 whitespace-nowrap"
                                     >
                                       <Download size={10} />
                                       Downloadable
@@ -580,7 +694,7 @@ export default function TeacherCourseCurriculumPage() {
                                   ) : (
                                     <span
                                       title="DRM protected streaming view only"
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200"
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0 whitespace-nowrap"
                                     >
                                       <Lock size={10} />
                                       Stream Only
@@ -588,11 +702,49 @@ export default function TeacherCourseCurriculumPage() {
                                   )}
                                 </div>
 
-                                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-100">
-                                  <span>Added {new Date(res.createdAt).toLocaleDateString()}</span>
-                                  <span className="font-mono text-[10px] text-slate-500 truncate max-w-[150px]">
-                                    {res.mimeType}
-                                  </span>
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 pt-2 border-t border-slate-100">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="shrink-0">Added {new Date(res.createdAt).toLocaleDateString()}</span>
+                                    <span className="font-mono text-[10px] text-slate-500 truncate hidden sm:inline">
+                                      {res.mimeType}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {isVideo ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveVideoResource(res)}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-[11px] font-semibold transition"
+                                      >
+                                        <PlayCircle size={12} />
+                                        <span>Stream Video</span>
+                                      </button>
+                                    ) : (
+                                      <>
+                                        {isPdf && (
+                                          <a
+                                            href={`${contentUrl}?inline=1`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-[11px] font-semibold transition"
+                                          >
+                                            <Eye size={12} />
+                                            <span>View</span>
+                                          </a>
+                                        )}
+                                        {res.downloadable && (
+                                          <a
+                                            href={`${contentUrl}?download=1`}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold transition"
+                                          >
+                                            <Download size={12} />
+                                            <span>Download PDF</span>
+                                          </a>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -735,6 +887,81 @@ export default function TeacherCourseCurriculumPage() {
             </div>
           </div>
         )}
+
+        {/* 6. Lesson Video Stream Player Modal */}
+        <MediaPlayerModal
+          open={Boolean(activeVideoResource)}
+          onClose={() => setActiveVideoResource(null)}
+          title={
+            activeVideoResource
+              ? activeVideoResource.storageKey.split('/').pop() || 'Lesson Video'
+              : 'Lesson Video'
+          }
+          subtitle={
+            selectedLesson && course
+              ? `${course.title} • ${selectedLesson.title}`
+              : course?.title
+          }
+          sourceUrlOrKey={
+            activeVideoResource?.videoStreamId || activeVideoResource?.storageKey
+          }
+          lessonNotes={selectedLesson?.body}
+          downloadable={Boolean(activeVideoResource?.downloadable)}
+          canAttachUrl={true}
+          downloadHref={
+            activeVideoResource?.downloadable
+              ? `/api/teachers/materials/${activeVideoResource.id}/content?download=1`
+              : null
+          }
+          onSaveVideoUrl={async (newUrl) => {
+            if (!activeVideoResource) return;
+            const res = await fetch(
+              `/api/teachers/materials/${activeVideoResource.id}/content`,
+              {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoStreamId: newUrl }),
+              }
+            );
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new Error(json.error || 'Failed to save video link');
+            }
+            refresh();
+          }}
+        />
+
+        {/* 7. Recorded Live Class Player Modal */}
+        <MediaPlayerModal
+          open={Boolean(activeRecordedSession)}
+          onClose={() => setActiveRecordedSession(null)}
+          title={activeRecordedSession?.title || 'Recorded Class Video'}
+          subtitle={
+            activeRecordedSession
+              ? `${course?.title || ''} • ${activeRecordedSession.batchName}`
+              : undefined
+          }
+          sourceUrlOrKey={activeRecordedSession?.recordingUrl}
+          lessonNotes={activeRecordedSession?.description}
+          downloadable={false}
+          canAttachUrl={true}
+          onSaveVideoUrl={async (newUrl) => {
+            if (!activeRecordedSession) return;
+            const res = await fetch(
+              `/api/teachers/live-classes/${activeRecordedSession.id}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recordingUrl: newUrl }),
+              }
+            );
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new Error(json.message || json.error || 'Failed to save recording URL');
+            }
+            refresh();
+          }}
+        />
 
       </div>
     </TeacherShell>

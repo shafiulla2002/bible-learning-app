@@ -24,9 +24,11 @@ import {
   Table as TableIcon,
   X,
   Sparkles,
+  PlayCircle,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
 import { useTeacherLiveClasses, TeacherLiveClassItem } from '@/lib/use-teacher-live-classes';
+import { MediaPlayerModal } from '@/components/shared/MediaPlayerModal';
 
 export default function TeacherLiveClassesPage() {
   const {
@@ -61,6 +63,7 @@ export default function TeacherLiveClassesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [activeRecordingSession, setActiveRecordingSession] = useState<TeacherLiveClassItem | null>(null);
 
   // New Class Form State
   const [newTitle, setNewTitle] = useState('');
@@ -603,7 +606,21 @@ export default function TeacherLiveClassesPage() {
                       <ChevronRight size={14} />
                     </Link>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveRecordingSession(session)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+                          session.recordingUrl
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                            : 'border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                        title={session.recordingUrl ? 'Watch class recording' : 'Attach class recording URL'}
+                      >
+                        <PlayCircle size={13} />
+                        <span>{session.recordingUrl ? 'Recording' : 'Add Recording'}</span>
+                      </button>
+
                       {session.joinUrl && !isCancelled && (
                         <a
                           href={session.joinUrl}
@@ -1049,6 +1066,37 @@ export default function TeacherLiveClassesPage() {
             </div>
           </div>
         )}
+
+        <MediaPlayerModal
+          open={Boolean(activeRecordingSession)}
+          onClose={() => setActiveRecordingSession(null)}
+          title={activeRecordingSession?.title || 'Class Recording'}
+          subtitle={
+            activeRecordingSession
+              ? `${activeRecordingSession.courseTitle} • ${activeRecordingSession.batchName}`
+              : undefined
+          }
+          sourceUrlOrKey={activeRecordingSession?.recordingUrl}
+          lessonNotes={activeRecordingSession?.description}
+          downloadable={false}
+          canAttachUrl={true}
+          onSaveVideoUrl={async (newUrl) => {
+            if (!activeRecordingSession) return;
+            const res = await fetch(
+              `/api/teachers/live-classes/${activeRecordingSession.id}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recordingUrl: newUrl }),
+              }
+            );
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new Error(json.message || json.error || 'Failed to save recording URL');
+            }
+            refresh();
+          }}
+        />
       </div>
     </TeacherShell>
   );

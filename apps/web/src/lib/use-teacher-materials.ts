@@ -14,6 +14,7 @@ export interface TeacherMaterialItem {
   mediaAssetId: string;
   title: string;
   storageKey: string;
+  videoStreamId?: string | null;
   kind: string;
   mimeType: string;
   sizeBytes: string;

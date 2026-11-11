@@ -26,7 +26,10 @@ import {
   Award,
   Layers,
   AlertCircle,
+  PlayCircle,
+  Lock,
 } from 'lucide-react';
+import { MediaPlayerModal } from '@/components/shared/MediaPlayerModal';
 
 interface LessonDetailResponse {
   lesson: {
@@ -58,6 +61,8 @@ interface LessonDetailResponse {
   resources: Array<{
     id: string;
     title: string;
+    storageKey?: string;
+    videoStreamId?: string | null;
     kind: string;
     mimeType: string;
     sizeBytes: number;
@@ -88,6 +93,7 @@ export default function StudentLessonPlayerPage({
 
   // Quiz State
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
+  const [activeVideoRes, setActiveVideoRes] = useState<LessonDetailResponse['resources'][number] | null>(null);
   const [quizResult, setQuizResult] = useState<{
     score: number;
     total: number;
@@ -390,13 +396,13 @@ export default function StudentLessonPlayerPage({
                         <p className="text-xs text-slate-400">PDF Study Syllabus Document</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => alert('Downloading official lesson PDF study guide...')}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition"
+                    <a
+                      href={`/api/students/courses/${courseId}/syllabus`}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition"
                     >
                       <Download size={14} />
-                      <span>Download PDF</span>
-                    </button>
+                      <span>Download Syllabus PDF</span>
+                    </a>
                   </div>
 
                   {/* Embedded Document Reading Pane */}
@@ -649,27 +655,58 @@ export default function StudentLessonPlayerPage({
 
               {data?.resources && data.resources.length > 0 ? (
                 <div className="space-y-2.5">
-                  {data.resources.map((res) => (
-                    <div
-                      key={res.id}
-                      className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 hover:bg-blue-50/50 transition"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <FileText size={16} className="text-slate-500" />
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">{res.title}</p>
-                          <p className="text-[10px] text-slate-400">PDF • Study Guide</p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => alert(`Downloading resource: ${res.title}`)}
-                        className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-100/60 transition"
-                        title="Download"
+                  {data.resources.map((res) => {
+                    const isVideo = res.kind?.toUpperCase() === 'VIDEO';
+                    return (
+                      <div
+                        key={res.id}
+                        className="flex items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 border border-slate-100 hover:bg-blue-50/50 transition overflow-hidden"
                       >
-                        <Download size={15} />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          {isVideo ? (
+                            <Video size={16} className="text-blue-600 shrink-0" />
+                          ) : (
+                            <FileText size={16} className="text-slate-500 shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-900 truncate" title={res.title}>
+                              {res.title}
+                            </p>
+                            <p className="text-[10px] text-slate-400 truncate">
+                              {res.kind} • {res.downloadable ? 'Downloadable' : 'Stream Only'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {isVideo ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveVideoRes(res)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-[11px] font-semibold transition shrink-0"
+                            title="Stream Video"
+                          >
+                            <PlayCircle size={13} />
+                            <span>Watch</span>
+                          </button>
+                        ) : res.downloadable ? (
+                          <a
+                            href={`/api/students/materials/${res.id}/content?download=1`}
+                            className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-100/60 transition shrink-0"
+                            title="Download PDF"
+                          >
+                            <Download size={15} />
+                          </a>
+                        ) : (
+                          <span
+                            className="p-1.5 rounded-lg text-amber-600 shrink-0"
+                            title="Stream Only (DRM Protected)"
+                          >
+                            <Lock size={14} />
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="p-4 rounded-xl bg-slate-50 text-center text-xs text-slate-400">
@@ -698,6 +735,22 @@ export default function StudentLessonPlayerPage({
           </div>
 
         </div>
+
+        <MediaPlayerModal
+          open={Boolean(activeVideoRes)}
+          onClose={() => setActiveVideoRes(null)}
+          title={activeVideoRes?.title || 'Recorded Lesson Video'}
+          subtitle={data ? `${data.course.title} • ${data.lesson.title}` : undefined}
+          sourceUrlOrKey={activeVideoRes?.videoStreamId || activeVideoRes?.storageKey}
+          lessonNotes={data?.lesson.body}
+          downloadable={Boolean(activeVideoRes?.downloadable)}
+          canAttachUrl={false}
+          downloadHref={
+            activeVideoRes?.downloadable
+              ? `/api/students/materials/${activeVideoRes.id}/content?download=1`
+              : null
+          }
+        />
 
       </div>
     </StudentShell>

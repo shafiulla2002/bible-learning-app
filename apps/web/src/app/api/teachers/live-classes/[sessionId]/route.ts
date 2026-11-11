@@ -138,13 +138,6 @@ export async function PUT(
       }
     }
 
-    if (existing.status === 'COMPLETED') {
-      return NextResponse.json(
-        { success: false, message: 'Cannot modify a completed live class session' },
-        { status: 400 }
-      );
-    }
-
     const body = await request.json();
     const {
       title,
@@ -156,6 +149,23 @@ export async function PUT(
       recordingUrl,
       status,
     } = body;
+
+    const isRecordingOnlyUpdate =
+      recordingUrl !== undefined &&
+      title === undefined &&
+      description === undefined &&
+      room === undefined &&
+      startsAt === undefined &&
+      endsAt === undefined &&
+      joinUrl === undefined &&
+      status === undefined;
+
+    if (existing.status === 'COMPLETED' && !isRecordingOnlyUpdate) {
+      return NextResponse.json(
+        { success: false, message: 'Cannot modify a completed live class session' },
+        { status: 400 }
+      );
+    }
 
     const updatedTitle = title !== undefined ? title.trim() : existing.title;
     if (!updatedTitle) {

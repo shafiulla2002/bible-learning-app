@@ -168,7 +168,8 @@ export async function GET(
           ma."storageKey",
           ma.kind,
           ma."mimeType",
-          ma."sizeBytes"::text as "sizeBytes"
+          ma."sizeBytes"::text as "sizeBytes",
+          ma."videoStreamId"
         FROM "LessonResource" lr
         JOIN "MediaAsset" ma ON ma.id = lr."mediaAssetId"
         WHERE lr."lessonId"::text = ANY($1::text[]) AND lr."instituteId" = $2
@@ -176,6 +177,28 @@ export async function GET(
         [lessonIds, instituteId]
       );
     }
+
+    // 8b. Fetch Live & Recorded Class Sessions for this course
+    const courseLiveSessions = await queryDb<any>(
+      `SELECT
+         ls.id,
+         ls.title,
+         ls.description,
+         ls.room,
+         ls."startsAt",
+         ls."endsAt",
+         ls."joinUrl",
+         ls."recordingUrl",
+         ls.status,
+         b.id as "batchId",
+         b.name as "batchName"
+       FROM "LiveSession" ls
+       JOIN "Batch" b ON b.id = ls."batchId"
+       WHERE b."courseId" = $1 AND ls."instituteId" = $2
+       ORDER BY ls."startsAt" DESC
+       LIMIT 30`,
+      [courseId, instituteId]
+    );
 
     // Assemble the complete tree
     const resourcesByLesson = new Map<string, any[]>();
@@ -186,6 +209,7 @@ export async function GET(
         lessonId: r.lessonId,
         mediaAssetId: r.mediaAssetId,
         storageKey: r.storageKey,
+        videoStreamId: r.videoStreamId || null,
         kind: r.kind,
         mimeType: r.mimeType,
         sizeBytes: r.sizeBytes || '0',
@@ -265,6 +289,19 @@ export async function GET(
           avatarUrl: ci.avatarUrl,
         })),
         assignedBatches,
+        liveSessions: courseLiveSessions.map((ls) => ({
+          id: ls.id,
+          title: ls.title,
+          description: ls.description,
+          room: ls.room,
+          startsAt: new Date(ls.startsAt).toISOString(),
+          endsAt: new Date(ls.endsAt).toISOString(),
+          joinUrl: ls.joinUrl,
+          recordingUrl: ls.recordingUrl,
+          status: ls.status,
+          batchId: ls.batchId,
+          batchName: ls.batchName,
+        })),
         summary: {
           moduleCount: modules.length,
           chapterCount: chapters.length,
