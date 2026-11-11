@@ -22,6 +22,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { NotificationBell } from '@/components/notifications/notification-bell';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface NavItem {
   label: string;
@@ -51,20 +52,92 @@ export function PortalShell({
 }: PortalShellProps) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authorized' | 'unauthorized'>('checking');
 
-  // Enforce session presence on mount and history navigation (Browser Back)
+  const clearClientSession = () => {
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('current_user_role');
+      localStorage.removeItem('current_institute_id');
+      localStorage.removeItem('current_student_profile_id');
+      localStorage.removeItem('current_teacher_profile_id');
+      sessionStorage.clear();
+    } catch {}
+    try {
+      const cookieKeys = ['auth_token', 'token', 'access_token'];
+      cookieKeys.forEach((key) => {
+        document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+        document.cookie = `${key}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure`;
+      });
+    } catch {}
+  };
+
+  // Enforce server-verified session and portal role on mount and route navigation
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const hasToken =
-        localStorage.getItem('token') ||
-        localStorage.getItem('access_token') ||
-        localStorage.getItem('auth_token') ||
-        document.cookie.includes('auth_token=');
-      if (!hasToken) {
-        window.location.href = '/login';
+    let cancelled = false;
+
+    const verifyPortalAccess = async () => {
+      if (typeof window === 'undefined') return;
+      setAuthStatus('checking');
+
+      try {
+        const res = await apiFetchResponse('/dashboard/context', {
+          method: 'GET',
+          cache: 'no-store',
+        });
+
+        if (!res.ok) {
+          clearClientSession();
+          if (!cancelled) {
+            setAuthStatus('unauthorized');
+            window.location.href = '/login';
+          }
+          return;
+        }
+
+        const ctx = await res.json().catch(() => null);
+        const verifiedRole = String(ctx?.user?.role || '').toUpperCase();
+
+        const isAllowedForPortal =
+          portalRole === 'SUPER_ADMIN'
+            ? verifiedRole === 'SUPER_ADMIN' || verifiedRole === 'PLATFORM_SUPPORT'
+            : portalRole === 'ADMIN'
+              ? ['SUPER_ADMIN', 'INSTITUTE_ADMIN', 'ACADEMIC_COORDINATOR', 'FINANCE_OFFICER'].includes(verifiedRole)
+              : false;
+
+        if (!isAllowedForPortal) {
+          if (!cancelled) {
+            setAuthStatus('unauthorized');
+            if (['INSTITUTE_ADMIN', 'ACADEMIC_COORDINATOR', 'FINANCE_OFFICER'].includes(verifiedRole)) {
+              window.location.href = '/admin';
+            } else {
+              clearClientSession();
+              window.location.href = '/login';
+            }
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setAuthStatus('authorized');
+        }
+      } catch {
+        clearClientSession();
+        if (!cancelled) {
+          setAuthStatus('unauthorized');
+          window.location.href = '/login';
+        }
       }
-    }
-  }, [pathname]);
+    };
+
+    verifyPortalAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, portalRole]);
 
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
@@ -93,7 +166,7 @@ export function PortalShell({
       }
 
       try {
-        fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+        apiFetchResponse('/auth/logout', { method: 'POST' }).catch(() => null);
       } catch {}
 
       window.location.href = '/login';
@@ -149,44 +222,6 @@ export function PortalShell({
             <p className="text-[11px] text-slate-400 font-medium tracking-wide uppercase mt-0.5">
               {portalTitle}
             </p>
-          </div>
-        </div>
-
-        {/* Portal Switcher Test Banner */}
-        <div className="px-4 py-3 bg-white/5 mx-3 mt-3 rounded-xl border border-white/10">
-          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-1.5">
-            Switch Portal (Demo)
-          </p>
-          <div className="grid grid-cols-2 gap-1.5 text-xs font-medium">
-            <Link href="/student" prefetch={true}
-              className={`px-2 py-1 rounded text-center transition ${
-                portalRole === 'STUDENT' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-slate-300'
-              }`}
-            >
-              Student
-            </Link>
-            <Link href="/teacher" prefetch={true}
-              className={`px-2 py-1 rounded text-center transition ${
-                portalRole === 'TEACHER' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-slate-300'
-              }`}
-            >
-              Teacher
-            </Link>
-            <Link href="/admin" prefetch={true}
-              className={`px-2 py-1 rounded text-center transition ${
-                portalRole === 'ADMIN' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-slate-300'
-              }`}
-            >
-              Admin
-            </Link>
-            <Link
-              href="/super-admin"
-              className={`px-2 py-1 rounded text-center transition ${
-                portalRole === 'SUPER_ADMIN' ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-slate-300'
-              }`}
-            >
-              Super Admin
-            </Link>
           </div>
         </div>
 
@@ -287,7 +322,15 @@ export function PortalShell({
         </header>
 
         {/* Page Children */}
-        <main className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">{children}</main>
+        <main className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full">
+          {authStatus === 'authorized' ? (
+            children
+          ) : (
+            <div className="flex items-center justify-center min-h-[50vh] text-sm font-medium text-slate-500">
+              Verifying portal access...
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );

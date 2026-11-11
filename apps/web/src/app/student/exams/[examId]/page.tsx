@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   ArrowLeft,
   GraduationCap,
@@ -39,7 +40,7 @@ export default function StudentExamInstructionsPage({
 }) {
   const { examId } = use(params);
   const router = useRouter();
-  const { student, profile, institute } = useStudentAuth();
+  const { logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
 
   const [exam, setExam] = useState<ExamDetailData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -53,69 +54,31 @@ export default function StudentExamInstructionsPage({
         setIsLoading(true);
         setError(null);
 
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await apiFetchResponse(`/students/exams/${examId}`);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
         }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
-        const res = await fetch(`/api/students/exams/${examId}`, { headers });
         if (!res.ok) throw new Error(`Failed to load examination (${res.status})`);
         const json = await res.json();
         setExam(json.exam);
       } catch (err: any) {
-        console.warn('Exam detail fallback:', err.message);
-        setExam({
-          id: examId,
-          title: 'Mid-Term Examination: Biblical Hermeneutics & Exegesis',
-          type: 'EXAM',
-          courseId: 'c1',
-          courseTitle: 'Building Biblical Theology',
-          instructorName: 'Dr. Mary Thomas',
-          durationMin: 45,
-          totalMarks: 100,
-          passMarks: 70,
-          totalQuestions: 20,
-          activeAttemptId: null,
-        });
+        console.error('Failed to load exam details:', err?.message || err);
+        setExam(null);
+        setError(err?.message || 'Unable to load examination');
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchDetail();
-  }, [examId, profile?.studentProfileId, student?.id, institute?.id]);
+  }, [examId]);
 
   const handleStartExam = async () => {
     try {
       setIsStarting(true);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (typeof window !== 'undefined') {
-        const token =
-          localStorage.getItem('token') ||
-          localStorage.getItem('access_token') ||
-          localStorage.getItem('auth_token');
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      if (profile?.studentProfileId) {
-        headers['x-dev-user-id'] = student?.id || '';
-        headers['x-dev-role'] = 'STUDENT';
-        headers['x-dev-institute-id'] = institute?.id || '';
-      }
-
-      const res = await fetch(`/api/students/exams/${examId}/start`, {
+      const res = await apiFetchResponse(`/students/exams/${examId}/start`, {
         method: 'POST',
-        headers,
       });
 
       if (!res.ok) {

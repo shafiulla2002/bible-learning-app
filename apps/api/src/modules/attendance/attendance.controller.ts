@@ -12,10 +12,13 @@ import {
   Header,
   Res,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { Response } from 'express';
 import { AttendanceService } from './attendance.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import {
   MarkBulkAttendanceSchema,
@@ -24,7 +27,8 @@ import {
 } from '@bible-lms/shared';
 
 @Controller('institutes/:instituteId/attendance')
-@UseGuards(JwtAuthGuard, InstituteTenantGuard)
+@UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
+@Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
@@ -41,11 +45,26 @@ export class AttendanceController {
     return this.attendanceService.getOverview(instituteId, validated);
   }
 
+  @Get('records')
+  async getRecords(
+    @Param('instituteId') instituteId: string,
+    @Query() query: any,
+  ) {
+    const validated = AttendanceFilterQuerySchema.parse(query);
+    return this.attendanceService.getRecords(instituteId, validated);
+  }
+
   // ---------------------------------------------------------------------------
   // 2. BATCH STUDENTS ROSTER FOR ATTENDANCE
   // ---------------------------------------------------------------------------
 
   @Get('batches/:batchId/roster')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.TEACHER,
+  )
   async getBatchRoster(
     @Param('instituteId') instituteId: string,
     @Param('batchId') batchId: string,
@@ -68,6 +87,12 @@ export class AttendanceController {
   // ---------------------------------------------------------------------------
 
   @Post('batches/:batchId/bulk')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.TEACHER,
+  )
   @HttpCode(HttpStatus.OK)
   async markBulkAttendance(
     @Param('instituteId') instituteId: string,
@@ -87,6 +112,12 @@ export class AttendanceController {
   // ---------------------------------------------------------------------------
 
   @Patch(':attendanceId')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.TEACHER,
+  )
   async updateIndividualAttendance(
     @Param('instituteId') instituteId: string,
     @Param('attendanceId') attendanceId: string,
@@ -107,6 +138,12 @@ export class AttendanceController {
   // ---------------------------------------------------------------------------
 
   @Get('batches/:batchId/history')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.TEACHER,
+  )
   async getBatchAttendanceHistory(
     @Param('instituteId') instituteId: string,
     @Param('batchId') batchId: string,
@@ -127,6 +164,12 @@ export class AttendanceController {
   // ---------------------------------------------------------------------------
 
   @Get('students/:studentProfileId')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.STUDENT,
+  )
   async getStudentAttendanceHistory(
     @Param('instituteId') instituteId: string,
     @Param('studentProfileId') studentProfileId: string,
@@ -147,6 +190,12 @@ export class AttendanceController {
   // ---------------------------------------------------------------------------
 
   @Get('export')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.TEACHER,
+  )
   @Header('Content-Type', 'text/csv')
   @Header('Content-Disposition', 'attachment; filename="attendance-report.csv"')
   async exportAttendanceReport(

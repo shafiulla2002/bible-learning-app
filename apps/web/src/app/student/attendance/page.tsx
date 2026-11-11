@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   CalendarCheck,
   CheckCircle2,
@@ -80,7 +81,7 @@ interface AttendanceResponse {
 }
 
 export default function StudentAttendancePage() {
-  const { student, profile, institute } = useStudentAuth();
+  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const [data, setData] = useState<AttendanceResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,101 +98,26 @@ export default function StudentAttendancePage() {
         setIsLoading(true);
         setError(null);
 
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
         const params = new URLSearchParams();
         if (selectedBatch !== 'ALL') params.append('batchId', selectedBatch);
         if (selectedCourse !== 'ALL') params.append('courseId', selectedCourse);
         if (selectedStatus !== 'ALL') params.append('status', selectedStatus);
         if (selectedMonth !== 'ALL') params.append('month', selectedMonth);
 
-        const res = await fetch(`/api/students/attendance?${params.toString()}`, { headers });
+        const res = await apiFetchResponse(`/students/attendance?${params.toString()}`);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
+        }
         if (!res.ok) {
           throw new Error(`Failed to load attendance records (${res.status})`);
         }
         const json = await res.json();
         setData(json);
       } catch (err: any) {
-        console.warn('Attendance load notice:', err.message);
-        // Fallback default structure
-        setData({
-          student: {
-            id: profile?.studentProfileId || 'sp-demo',
-            admissionNo: profile?.admissionNo || 'ADM-2026-001',
-            fullName: student?.fullName || 'Enrolled Student',
-          },
-          summary: {
-            totalSessions: 24,
-            presentCount: 22,
-            lateCount: 1,
-            absentCount: 1,
-            excusedCount: 0,
-            attendancePercentage: 96,
-            thresholdPercentage: 75,
-            isWarning: false,
-          },
-          monthlySummary: [
-            { month: '2026-10', present: 14, late: 1, absent: 0, excused: 0, percentage: 100 },
-            { month: '2026-09', present: 8, late: 0, absent: 1, excused: 0, percentage: 89 },
-          ],
-          courseSummary: [
-            {
-              courseId: 'c1',
-              courseTitle: 'Building Biblical Theology',
-              present: 22,
-              late: 1,
-              absent: 1,
-              excused: 0,
-              total: 24,
-              percentage: 96,
-            },
-          ],
-          records: [
-            {
-              id: 'att-1',
-              date: '2026-10-30',
-              courseId: 'c1',
-              courseTitle: 'Building Biblical Theology',
-              batchId: 'b1',
-              batchName: 'Batch 2026-A Diploma',
-              sessionTitle: 'Biblical Exegesis Seminar',
-              instructorName: 'Dr. Mary Thomas',
-              mode: 'LIVE_SESSION',
-              status: 'PRESENT',
-              remarks: 'Active participation in Q&A session',
-            },
-            {
-              id: 'att-2',
-              date: '2026-10-28',
-              courseId: 'c1',
-              courseTitle: 'Building Biblical Theology',
-              batchId: 'b1',
-              batchName: 'Batch 2026-A Diploma',
-              sessionTitle: 'Covenant Hermeneutics Workshop',
-              instructorName: 'Rev. Jason David',
-              mode: 'LIVE_SESSION',
-              status: 'LATE',
-              remarks: 'Joined 10 mins late due to connectivity',
-            },
-          ],
-          filterOptions: {
-            batches: [{ id: 'b1', name: 'Batch 2026-A Diploma', courseTitle: 'Building Biblical Theology' }],
-            courses: [{ id: 'c1', title: 'Building Biblical Theology' }],
-          },
-        });
+        console.error('Failed to load attendance:', err?.message || err);
+        setData(null);
+        setError(err?.message || 'Unable to load attendance records');
       } finally {
         setIsLoading(false);
       }

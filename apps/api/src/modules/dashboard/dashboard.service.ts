@@ -343,67 +343,10 @@ export class DashboardService {
     const rawUserId: string = user.userId || user.sub || '';
     const rawRole = user.role as Role;
 
-    if (!rawRole || !ADMIN_DASHBOARD_ROLES.includes(rawRole)) {
+    if (!rawUserId || !rawRole || !ADMIN_DASHBOARD_ROLES.includes(rawRole)) {
       throw new ForbiddenException(
         'Access denied: Administrative role required for dashboard context',
       );
-    }
-
-    // Local unauthenticated dev fallback (non-production only)
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      rawUserId === 'dev-admin-user'
-    ) {
-      const adminMem = await this.prisma.membership.findFirst({
-        where: {
-          status: MembershipStatus.ACTIVE,
-          role: { in: ADMIN_DASHBOARD_ROLES },
-        },
-        include: {
-          user: { select: { id: true, fullName: true, email: true } },
-          institute: { include: { settings: true } },
-        },
-        orderBy: { createdAt: 'asc' },
-      });
-
-      if (adminMem) {
-        const branding = ((adminMem.institute.settings?.branding as any) || {});
-        return {
-          instituteId: adminMem.instituteId,
-          instituteName: adminMem.institute.name,
-          displayName: branding.displayName || adminMem.institute.name,
-          code: adminMem.institute.slug,
-          currency: adminMem.institute.currency,
-          timezone: adminMem.institute.timezone,
-          user: {
-            id: adminMem.user.id,
-            fullName: adminMem.user.fullName,
-            email: adminMem.user.email,
-            role: adminMem.role,
-          },
-        };
-      }
-
-      const fallbackInst = await this.prisma.institute.findFirst({
-        orderBy: { createdAt: 'asc' },
-      });
-      if (!fallbackInst) {
-        throw new NotFoundException('No active institute registered');
-      }
-      return {
-        instituteId: fallbackInst.id,
-        instituteName: fallbackInst.name,
-        displayName: fallbackInst.name,
-        code: fallbackInst.slug,
-        currency: fallbackInst.currency,
-        timezone: fallbackInst.timezone,
-        user: {
-          id: rawUserId,
-          fullName: 'Institute Administrator',
-          email: null,
-          role: Role.INSTITUTE_ADMIN,
-        },
-      };
     }
 
     const membership = await this.prisma.membership.findFirst({
@@ -426,14 +369,23 @@ export class DashboardService {
       );
     }
 
-    const branding = ((membership.institute.settings?.branding as any) || {});
+    let resolvedInstitute = membership.institute;
+    if (!resolvedInstitute && membership.role === Role.SUPER_ADMIN) {
+      resolvedInstitute = await this.prisma.institute.findFirst({
+        where: { status: 'ACTIVE', deletedAt: null },
+        include: { settings: true },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
+
+    const branding = ((resolvedInstitute?.settings?.branding as any) || {});
     return {
-      instituteId: membership.instituteId,
-      instituteName: membership.institute.name,
-      displayName: branding.displayName || membership.institute.name,
-      code: membership.institute.slug,
-      currency: membership.institute.currency,
-      timezone: membership.institute.timezone,
+      instituteId: membership.instituteId ?? resolvedInstitute?.id ?? null,
+      instituteName: resolvedInstitute?.name ?? 'Platform Administration',
+      displayName: branding.displayName || resolvedInstitute?.name || 'Platform Administration',
+      code: resolvedInstitute?.slug ?? 'platform',
+      currency: resolvedInstitute?.currency ?? 'INR',
+      timezone: resolvedInstitute?.timezone ?? 'Asia/Kolkata',
       user: {
         id: membership.user.id,
         fullName: membership.user.fullName,
@@ -477,28 +429,6 @@ export class DashboardService {
     });
     if (!institute) {
       throw new NotFoundException('Institute not found');
-    }
-
-    // Local unauthenticated dev fallback (non-production only)
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      rawUserId === 'dev-admin-user'
-    ) {
-      const firstAdmin = await this.prisma.membership.findFirst({
-        where: {
-          instituteId: requestedInstituteId,
-          status: MembershipStatus.ACTIVE,
-          role: { in: ADMIN_DASHBOARD_ROLES },
-        },
-        include: { user: { select: { fullName: true } } },
-        orderBy: { createdAt: 'asc' },
-      });
-      return {
-        instituteId: requestedInstituteId,
-        userId: firstAdmin?.userId || rawUserId,
-        fullName: firstAdmin?.user.fullName || 'Institute Administrator',
-        role: firstAdmin?.role || Role.INSTITUTE_ADMIN,
-      };
     }
 
     // SUPER_ADMIN cross-tenant verification

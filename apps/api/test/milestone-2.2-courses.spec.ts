@@ -20,6 +20,15 @@ describe('Milestone 2.2 — Course & Curriculum Management Audit', () => {
         findFirst: jest.fn(),
         upsert: jest.fn(),
         findMany: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
+      },
+      completionRule: {
+        upsert: jest.fn(),
+      },
+      enrolment: {
+        findMany: jest.fn(),
       },
       teacherProfile: {
         findFirst: jest.fn(),
@@ -57,6 +66,7 @@ describe('Milestone 2.2 — Course & Curriculum Management Audit', () => {
       lessonResource: {
         findFirst: jest.fn(),
         create: jest.fn(),
+        update: jest.fn(),
         delete: jest.fn(),
       },
       $transaction: jest.fn(async (cb) => cb(mockPrisma)),
@@ -390,6 +400,50 @@ describe('Milestone 2.2 — Course & Curriculum Management Audit', () => {
 
       expect(result.accessMode).toBe('ATTACHMENT_DOWNLOAD');
       expect(result.signedAccessToken).toBeDefined();
+      expect(result.signedAccessToken.split('.').length).toBe(2); // HMAC payload.signature
+    });
+
+    it('should create/delete category safely and upsert completion rule', async () => {
+      mockPrisma.courseCategory.findFirst.mockResolvedValueOnce(null);
+      mockPrisma.courseCategory.create.mockResolvedValue({
+        id: 'cat-1',
+        instituteId: 'inst-berean',
+        name: 'Church History',
+        slug: 'church-history',
+      });
+      const cat = await service.createCategory('inst-berean', { name: 'Church History' });
+      expect(cat.slug).toBe('church-history');
+
+      mockPrisma.courseCategory.findFirst.mockResolvedValueOnce({
+        id: 'cat-1',
+        instituteId: 'inst-berean',
+        _count: { courses: 1 },
+      });
+      await expect(service.deleteCategory('inst-berean', 'cat-1')).rejects.toThrow(
+        'Cannot delete category while courses are assigned',
+      );
+
+      mockPrisma.course.findFirst.mockResolvedValueOnce({ id: 'crs-1', instituteId: 'inst-berean' });
+      mockPrisma.completionRule.upsert.mockResolvedValue({
+        courseId: 'crs-1',
+        instituteId: 'inst-berean',
+        minProgressPct: 90,
+        allMandatory: true,
+        minExamPct: 70,
+        minAttendancePct: 80,
+      });
+      const rule = await service.upsertCompletionRule('inst-berean', 'crs-1', {
+        minProgressPct: 90,
+        allMandatory: true,
+        minExamPct: 70,
+        minAttendancePct: 80,
+      });
+      expect(rule.minExamPct).toBe(70);
+
+      mockPrisma.course.findFirst.mockResolvedValueOnce({ id: 'crs-1', instituteId: 'inst-berean' });
+      mockPrisma.course.update.mockResolvedValueOnce({ id: 'crs-1', deletedAt: new Date(), status: CourseStatus.ARCHIVED });
+      const deleted = await service.softDelete('inst-berean', 'crs-1');
+      expect(deleted.success).toBe(true);
     });
 
     it('should BLOCK unassigned teacher from accessing course materials with 403 Forbidden', async () => {

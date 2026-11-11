@@ -363,10 +363,10 @@ export default function AdminDashboardPage() {
       const stored = localStorage.getItem('current_institute_id');
       if (stored) return stored;
     }
-    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+    return '';
   });
-  const [viewerName, setViewerName] = useState<string>('Samuel Admin');
-  const [instituteDisplayName, setInstituteDisplayName] = useState<string>('Grace Bible Institute');
+  const [viewerName, setViewerName] = useState<string>('Institute Admin');
+  const [instituteDisplayName, setInstituteDisplayName] = useState<string>('Bible Institute');
 
   // Explicit Demo Mode Toggle (Default: strictly false in production unless explicit query/env)
   const [demoMode, setDemoMode] = useState<boolean>(() => {
@@ -415,12 +415,8 @@ export default function AdminDashboardPage() {
       .catch(() => {
         if (!active) return;
         const stored = typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : null;
-        const effectiveId = stored || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-        setInstituteId(effectiveId);
-        setInstituteDisplayName('Grace Bible Institute');
-        setViewerName('Samuel Admin');
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('current_institute_id', effectiveId);
+        if (stored) {
+          setInstituteId(stored);
         }
       });
     return () => {
@@ -597,12 +593,13 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Archive action audit logger (Never deletes financial records)
+  // Archive action audit notice (Never deletes financial records)
   const handleArchiveTransaction = (tx: TransactionItemDto) => {
     const ref = tx.receiptNumber || tx.paymentNumber;
-    alert(
-      `Transaction view reference "${ref}" archived for this session.\n\nNote: In accordance with financial compliance rules, all underlying database payments, invoices, and audit logs remain permanently preserved in PostgreSQL.`
+    setExportNotice(
+      `View reference "${ref}" archived. All database payments, invoices, and audit logs remain preserved.`,
     );
+    setTimeout(() => setExportNotice(null), 5000);
   };
 
   // Derive genuine data for Graphical Reports from real DB aggregations
@@ -1481,9 +1478,15 @@ export default function AdminDashboardPage() {
                   variant="primary"
                   size="sm"
                   onClick={() => {
-                    alert(
-                      `Receipt document #${selectedTx.receiptNumber || selectedTx.paymentNumber} printed for ${selectedTx.studentName}.`
-                    );
+                    const num = selectedTx.receiptNumber || selectedTx.paymentNumber;
+                    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${num}</title><style>body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px}h1{font-size:20px;margin:0 0 8px}p{color:#475569;font-size:13px}.row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:14px}</style></head><body><h1>Verified Institute Payment Receipt</h1><p>Receipt / Payment #: ${num}</p><div class="row"><span>Student</span><strong>${selectedTx.studentName} (${selectedTx.admissionNo || 'N/A'})</strong></div><div class="row"><span>Invoice #</span><strong>${selectedTx.invoiceNumber || 'N/A'}</strong></div><div class="row"><span>Mode</span><strong>${selectedTx.paymentMode}</strong></div><div class="row"><span>Status</span><strong>${selectedTx.status}</strong></div><div class="row"><span>Amount</span><strong>${formatINR(selectedTx.amount)}</strong></div></body></html>`;
+                    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `receipt-${num}.html`;
+                    link.click();
+                    URL.revokeObjectURL(url);
                     setSelectedTx(null);
                   }}
                   className="text-xs gap-1.5"

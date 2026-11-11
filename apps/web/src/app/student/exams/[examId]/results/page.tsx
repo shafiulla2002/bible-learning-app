@@ -4,6 +4,7 @@ import React, { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   ArrowLeft,
   Award,
@@ -48,7 +49,7 @@ export default function StudentExamResultsPage({
   params: Promise<{ examId: string }>;
 }) {
   const { examId } = use(params);
-  const { student, profile, institute } = useStudentAuth();
+  const { logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
 
   const [results, setResults] = useState<ResultsData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -57,69 +58,24 @@ export default function StudentExamResultsPage({
     async function fetchResults() {
       try {
         setIsLoading(true);
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await apiFetchResponse(`/students/exams/${examId}/results`);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
         }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
-        const res = await fetch(`/api/students/exams/${examId}/results`, { headers });
         if (!res.ok) throw new Error('Results not found');
         const json = await res.json();
         setResults(json.results);
       } catch (err: any) {
-        console.warn('Results fallback:', err.message);
-        setResults({
-          examId,
-          examTitle: 'Mid-Term Examination: Biblical Hermeneutics & Exegesis',
-          courseTitle: 'Building Biblical Theology',
-          attemptId: 'att-demo-1',
-          startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-          submittedAt: new Date().toISOString(),
-          score: 85,
-          totalMarks: 100,
-          passMarks: 70,
-          scorePct: 85,
-          passed: true,
-          questions: [
-            {
-              id: 'q1',
-              prompt: 'Which biblical genre requires distinguishing between normative narrative and descriptive history?',
-              type: 'MCQ_SINGLE',
-              marks: 5,
-              scoreAwarded: 5,
-              studentAnswer: 'Historical Narrative',
-              correctAnswer: 'Historical Narrative',
-              isCorrect: true,
-            },
-            {
-              id: 'q2',
-              prompt: 'The grammatical-historical method prioritizes the author original intended meaning over modern reader interpretations.',
-              type: 'TRUE_FALSE',
-              marks: 5,
-              scoreAwarded: 5,
-              studentAnswer: 'True',
-              correctAnswer: 'True',
-              isCorrect: true,
-            },
-          ],
-        });
+        console.error('Failed to load exam results:', err?.message || err);
+        setResults(null);
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchResults();
-  }, [examId, profile?.studentProfileId, student?.id, institute?.id]);
+  }, [examId]);
 
   if (isLoading) {
     return (

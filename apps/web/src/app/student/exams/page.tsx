@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   GraduationCap,
   Clock,
@@ -52,46 +53,8 @@ interface ExamsResponse {
   courses: Array<{ id: string; title: string }>;
 }
 
-const fallbackExams: ExamItem[] = [
-  {
-    id: 'demo-exam-1',
-    title: 'Mid-Term Examination: Biblical Hermeneutics & Exegesis',
-    type: 'EXAM',
-    courseId: 'c1',
-    courseTitle: 'Building Biblical Theology',
-    instructorName: 'Dr. Mary Thomas',
-    durationMin: 45,
-    totalMarks: 100,
-    passMarks: 70,
-    totalQuestions: 20,
-    status: 'AVAILABLE',
-    latestAttempt: null,
-  },
-  {
-    id: 'demo-exam-2',
-    title: 'Unit Quiz: Historical Theology & Patristic Era',
-    type: 'QUIZ',
-    courseId: 'c1',
-    courseTitle: 'Building Biblical Theology',
-    instructorName: 'Rev. Jason David',
-    durationMin: 20,
-    totalMarks: 50,
-    passMarks: 35,
-    totalQuestions: 10,
-    status: 'COMPLETED',
-    latestAttempt: {
-      id: 'att-demo-1',
-      startedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      submittedAt: new Date(Date.now() - 23.6 * 60 * 60 * 1000).toISOString(),
-      score: 46,
-      status: 'EVALUATED',
-      passed: true,
-    },
-  },
-];
-
 export default function StudentExamsPage() {
-  const { student, profile, institute } = useStudentAuth();
+  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const [data, setData] = useState<ExamsResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -104,36 +67,25 @@ export default function StudentExamsPage() {
     async function fetchExams() {
       try {
         setIsLoading(true);
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
         const params = new URLSearchParams();
         if (selectedCourse !== 'ALL') params.append('courseId', selectedCourse);
         if (searchQuery.trim()) params.append('q', searchQuery.trim());
         if (activeTab !== 'ALL') params.append('status', activeTab);
 
-        const res = await fetch(`/api/students/exams?${params.toString()}`, { headers });
+        const res = await apiFetchResponse(`/students/exams?${params.toString()}`);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
+        }
         if (!res.ok) throw new Error('Failed to load examinations');
         const json = await res.json();
         setData(json);
       } catch (err: any) {
-        console.warn('Exams fallback notice:', err.message);
+        console.error('Failed to load exams:', err?.message || err);
         setData({
-          exams: fallbackExams,
-          summary: { total: 2, available: 1, inProgress: 0, completed: 1 },
-          courses: [{ id: 'c1', title: 'Building Biblical Theology' }],
+          exams: [],
+          summary: { total: 0, available: 0, inProgress: 0, completed: 0 },
+          courses: [],
         });
       } finally {
         setIsLoading(false);

@@ -11,13 +11,23 @@ import {
   Query,
   Body,
   Param,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { Role } from '@prisma/client';
 import { TeachersService } from './teachers.service';
+import {
+  resolveResourceDelivery,
+  resolveVideoSource,
+} from '../courses/pdf-syllabus.util';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 
 @Controller('teachers')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.TEACHER)
 export class TeacherMeController {
   constructor(private readonly teachersService: TeachersService) {}
 
@@ -25,6 +35,24 @@ export class TeacherMeController {
   @HttpCode(HttpStatus.OK)
   async getTeacherMe(@CurrentUser() user: any) {
     return this.teachersService.getTeacherMe(user);
+  }
+
+  @Patch('me')
+  @HttpCode(HttpStatus.OK)
+  async updateTeacherMe(@CurrentUser() user: any, @Body() body: any) {
+    return this.teachersService.updateTeacherMe(user, body);
+  }
+
+  @Get('settings')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherSettings(@CurrentUser() user: any) {
+    return this.teachersService.getTeacherSettings(user);
+  }
+
+  @Patch('settings')
+  @HttpCode(HttpStatus.OK)
+  async updateTeacherSettings(@CurrentUser() user: any, @Body() body: any) {
+    return this.teachersService.updateTeacherSettings(user, body);
   }
 
   @Get('dashboard')
@@ -76,10 +104,95 @@ export class TeacherMeController {
     return this.teachersService.getTeacherCourseDetail(user, courseId);
   }
 
+  @Get('courses/:courseId/syllabus')
+  @HttpCode(HttpStatus.OK)
+  async getTeacherCourseSyllabus(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, fileName } = await this.teachersService.getTeacherCourseSyllabusPdf(user, courseId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  }
+
   @Get('materials')
   @HttpCode(HttpStatus.OK)
   async getTeacherMaterials(@CurrentUser() user: any, @Query() query: any) {
     return this.teachersService.getTeacherMaterials(user, query);
+  }
+
+  @Post('materials')
+  @HttpCode(HttpStatus.CREATED)
+  async createTeacherMaterial(@CurrentUser() user: any, @Body() body: any) {
+    return this.teachersService.createTeacherMaterial(user, body);
+  }
+
+  @Get('materials/:resourceId/content')
+  async getTeacherMaterialContent(
+    @CurrentUser() user: any,
+    @Param('resourceId') resourceId: string,
+    @Query('meta') meta: string | undefined,
+    @Query('download') download: string | undefined,
+    @Query('inline') inline: string | undefined,
+    @Res() res: Response,
+  ) {
+    const info = await this.teachersService.getTeacherMaterialContent(user, resourceId);
+
+    if (meta === '1' || meta === 'true') {
+      const video = resolveVideoSource(info.storageKey);
+      return res.status(HttpStatus.OK).json({
+        success: true,
+        data: {
+          id: info.id,
+          title: info.title,
+          kind: info.kind,
+          mimeType: info.mimeType,
+          storageKey: info.storageKey,
+          downloadable: info.downloadable,
+          lessonId: info.lessonId,
+          lessonTitle: info.lessonTitle,
+          lessonBody: info.lessonBody,
+          courseId: info.courseId,
+          courseTitle: info.courseTitle,
+          videoStreamId: info.videoStreamId,
+          video,
+        },
+      });
+    }
+
+    const mode = inline === '1' || inline === 'true' ? 'inline' : download === '1' || download === 'true' ? 'download' : 'inline';
+    const delivery = resolveResourceDelivery({
+      title: info.title,
+      resourceType: info.kind,
+      url: info.storageKey,
+      content: info.lessonBody,
+      courseTitle: info.courseTitle,
+      lessonTitle: info.lessonTitle,
+      instituteName: info.instituteName,
+      mode,
+    });
+
+    if (delivery.kind === 'redirect') {
+      return res.redirect(delivery.url);
+    }
+
+    res.setHeader('Content-Type', delivery.mimeType);
+    res.setHeader('Content-Disposition', `${delivery.disposition}; filename="${delivery.fileName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(delivery.buffer);
+  }
+
+  @Patch('materials/:resourceId/content')
+  @HttpCode(HttpStatus.OK)
+  async updateTeacherMaterialContent(
+    @CurrentUser() user: any,
+    @Param('resourceId') resourceId: string,
+    @Body() body: any,
+  ) {
+    return this.teachersService.updateTeacherMaterialContent(user, resourceId, body);
   }
 
   @Post('courses/:courseId/lessons/:lessonId/resources')
@@ -328,6 +441,24 @@ export class TeacherMeController {
     @Param('notificationId') notificationId: string,
   ) {
     return this.teachersService.markTeacherNotificationRead(user, notificationId);
+  }
+
+  @Post('notifications/:notificationId/read')
+  @HttpCode(HttpStatus.OK)
+  async markTeacherNotificationReadPost(
+    @CurrentUser() user: any,
+    @Param('notificationId') notificationId: string,
+  ) {
+    return this.teachersService.markTeacherNotificationRead(user, notificationId);
+  }
+
+  @Post('notifications')
+  @HttpCode(HttpStatus.OK)
+  async markAllTeacherNotificationsReadAlias(
+    @CurrentUser() user: any,
+    @Body() body: any,
+  ) {
+    return this.teachersService.markAllTeacherNotificationsRead(user, body);
   }
 
   @Post('notifications/mark-all-read')

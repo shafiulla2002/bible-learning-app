@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
+import { apiFetchResponse } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -81,12 +82,7 @@ export default function StudentProfilePage() {
     setFetchError(null);
     setStatusMessage(null);
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      else headers['x-dev-role'] = 'STUDENT';
-
-      const res = await fetch('/api/students/profile', { headers });
+      const res = await apiFetchResponse('/students/profile');
       if (res.ok) {
         const data = await res.json();
         const p = data.profile?.personal;
@@ -131,14 +127,8 @@ export default function StudentProfilePage() {
     setStatusMessage(null);
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      else headers['x-dev-role'] = 'STUDENT';
-
-      const res = await fetch('/api/students/profile', {
+      const res = await apiFetchResponse('/students/profile', {
         method: 'PATCH',
-        headers,
         body: JSON.stringify({
           phone,
           church,
@@ -288,9 +278,9 @@ export default function StudentProfilePage() {
                   )}
                   <button
                     type="button"
-                    onClick={() => alert('Photo update dialog is accessible in settings.')}
+                    onClick={() => window.location.assign('/student/settings')}
                     className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 shadow-sm"
-                    title="Upload New Photo"
+                    title="Manage Photo & Security in Settings"
                   >
                     <Camera size={14} />
                   </button>

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse, resolveApiUrl } from '@/lib/api';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -112,23 +113,7 @@ export default function StudentLessonPlayerPage({
         setError(null);
 
         const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
-        const res = await fetch(`/api/students/courses/${courseId}/lessons/${lessonId}`, {
-          headers,
-        });
+        const res = await apiFetchResponse(`/students/courses/${courseId}/lessons/${lessonId}`);
 
         if (!res.ok) {
           const errJson = await res.json().catch(() => ({}));
@@ -158,28 +143,10 @@ export default function StudentLessonPlayerPage({
     async (posSec: number, markComplete = false) => {
       try {
         setSavingProgress(true);
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-        };
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
-        const res = await fetch(
-          `/api/students/courses/${courseId}/lessons/${lessonId}/progress`,
+        const res = await apiFetchResponse(
+          `/students/courses/${courseId}/lessons/${lessonId}/progress`,
           {
             method: 'POST',
-            headers,
             body: JSON.stringify({
               lastPosSec: Math.floor(posSec),
               isCompleted: markComplete,
@@ -397,7 +364,7 @@ export default function StudentLessonPlayerPage({
                       </div>
                     </div>
                     <a
-                      href={`/api/students/courses/${courseId}/syllabus`}
+                      href={resolveApiUrl(`/students/courses/${courseId}/syllabus`)}
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition"
                     >
                       <Download size={14} />
@@ -690,7 +657,7 @@ export default function StudentLessonPlayerPage({
                           </button>
                         ) : res.downloadable ? (
                           <a
-                            href={`/api/students/materials/${res.id}/content?download=1`}
+                            href={resolveApiUrl(`/students/materials/${res.id}/content?download=1`)}
                             className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-100/60 transition shrink-0"
                             title="Download PDF"
                           >
@@ -747,7 +714,7 @@ export default function StudentLessonPlayerPage({
           canAttachUrl={false}
           downloadHref={
             activeVideoRes?.downloadable
-              ? `/api/students/materials/${activeVideoRes.id}/content?download=1`
+              ? resolveApiUrl(`/students/materials/${activeVideoRes.id}/content?download=1`)
               : null
           }
         />

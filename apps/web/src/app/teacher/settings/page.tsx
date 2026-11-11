@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Bell,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
 import { useTeacherAuth } from '@/lib/use-teacher-auth';
+import { teacherMeApi } from '@/lib/api';
 
 export default function TeacherSettingsPage() {
   const { teacher, institute, logout } = useTeacherAuth({
@@ -31,15 +32,45 @@ export default function TeacherSettingsPage() {
 
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    teacherMeApi
+      .getSettings()
+      .then((res) => {
+        if (res?.settings) {
+          setEmailNotifications(res.settings.emailNotifications);
+          setSubmissionAlerts(res.settings.submissionAlerts);
+          setLiveSessionReminders(res.settings.liveSessionReminders);
+          setExamDeadlineAlerts(res.settings.examDeadlineAlerts);
+          setPreferredLanguage(res.settings.preferredLanguage);
+          setTimezone(res.settings.timezone);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    setSaveError(null);
+    setSavedSuccess(false);
+    try {
+      await teacherMeApi.updateSettings({
+        emailNotifications,
+        submissionAlerts,
+        liveSessionReminders,
+        examDeadlineAlerts,
+        preferredLanguage,
+        timezone,
+      });
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
-    }, 500);
+    } catch (err: any) {
+      setSaveError(err?.message || 'Failed to save portal preferences.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -53,10 +84,16 @@ export default function TeacherSettingsPage() {
           </p>
         </div>
 
+        {saveError && (
+          <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800">
+            {saveError}
+          </div>
+        )}
+
         {savedSuccess && (
           <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2 text-xs font-semibold text-emerald-800">
             <CheckCircle2 size={16} className="text-emerald-600" />
-            Your portal preferences have been updated successfully.
+            Your portal preferences have been persisted to PostgreSQL.
           </div>
         )}
 

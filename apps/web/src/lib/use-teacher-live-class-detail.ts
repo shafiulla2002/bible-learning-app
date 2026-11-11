@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 import { TeacherLiveClassItem } from './use-teacher-live-classes';
 
 export interface RosterStudentItem {
@@ -46,8 +47,8 @@ export function useTeacherLiveClassDetail(sessionId: string) {
 
     try {
       const [detailRes, attendanceRes] = await Promise.all([
-        fetch(`/api/teachers/live-classes/${sessionId}`, { cache: 'no-store' }),
-        fetch(`/api/teachers/live-classes/${sessionId}/attendance`, { cache: 'no-store' }),
+        apiFetchResponse(`/teachers/live-classes/${sessionId}`, { cache: 'no-store' }),
+        apiFetchResponse(`/teachers/live-classes/${sessionId}/attendance`, { cache: 'no-store' }),
       ]);
 
       if (!detailRes.ok) {
@@ -94,9 +95,8 @@ export function useTeacherLiveClassDetail(sessionId: string) {
     status?: string;
   }) => {
     try {
-      const res = await fetch(`/api/teachers/live-classes/${sessionId}`, {
+      const res = await apiFetchResponse(`/teachers/live-classes/${sessionId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -114,9 +114,8 @@ export function useTeacherLiveClassDetail(sessionId: string) {
 
   const cancelClass = async (reason?: string) => {
     try {
-      const res = await fetch(`/api/teachers/live-classes/${sessionId}/cancel`, {
+      const res = await apiFetchResponse(`/teachers/live-classes/${sessionId}/cancel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
 
@@ -138,9 +137,8 @@ export function useTeacherLiveClassDetail(sessionId: string) {
     remarks?: string;
   }>) => {
     try {
-      const res = await fetch(`/api/teachers/live-classes/${sessionId}/attendance`, {
+      const res = await apiFetchResponse(`/teachers/live-classes/${sessionId}/attendance`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ records }),
       });
 

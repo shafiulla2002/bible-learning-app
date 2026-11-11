@@ -13,7 +13,7 @@ export class InstituteTenantGuard implements CanActivate {
     const user = request.user;
     const targetInstituteId = request.params?.instituteId;
 
-    if (!user) {
+    if (!user || !user.sub || !user.role) {
       throw new UnauthorizedException('Authentication required');
     }
 
@@ -22,13 +22,15 @@ export class InstituteTenantGuard implements CanActivate {
       return true;
     }
 
+    if (!user.instituteId) {
+      throw new ForbiddenException('Access denied: Institute membership context required');
+    }
+
     // If an instituteId is specified in the route, verify user's institute matches
-    if (targetInstituteId) {
-      if (user.instituteId !== targetInstituteId) {
-        throw new ForbiddenException(
-          'Access denied: You do not have permission to access resources in another institute',
-        );
-      }
+    if (targetInstituteId && user.instituteId !== targetInstituteId) {
+      throw new ForbiddenException(
+        'Access denied: You do not have permission to access resources in another institute',
+      );
     }
 
     return true;

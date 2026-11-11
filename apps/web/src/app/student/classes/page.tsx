@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetch, apiFetchResponse } from '@/lib/api';
 import {
   Video,
   Radio,
@@ -62,80 +63,42 @@ interface LiveSessionsResponse {
   }>;
 }
 
-const fallbackSessions: LiveSessionItem[] = [
-  {
-    id: 'demo-s1',
-    title: 'Biblical Interpretation Q&A Seminar',
-    description: 'Weekly interactive questions and hermeneutics case studies with faculty mentors.',
-    courseId: 'c-theology-1',
-    courseTitle: 'Building Biblical Theology',
-    batchId: 'b-2026-a',
-    batchName: 'Batch 2026-A Diploma',
-    teacherName: 'Dr. Mary Thomas',
-    teacherPhoto: null,
-    room: 'Virtual Room Alpha',
-    startsAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    endsAt: new Date(Date.now() + 50 * 60 * 1000).toISOString(),
-    status: 'LIVE_NOW',
-    rawStatus: 'LIVE',
-    platform: 'GOOGLE_MEET',
-    canJoin: true,
-    joinUrl: 'https://meet.google.com/demo-biblical-qa',
-    hasRecording: false,
-    recordingUrl: null,
-    attendanceStatus: null,
-  },
-  {
-    id: 'demo-s2',
-    title: 'Covenant Theology & Reformation History',
-    description: 'In-depth historical overview of the Scottish & Continental Reformers.',
-    courseId: 'c-theology-1',
-    courseTitle: 'Building Biblical Theology',
-    batchId: 'b-2026-a',
-    batchName: 'Batch 2026-A Diploma',
-    teacherName: 'Rev. Jason David',
-    teacherPhoto: null,
-    room: 'Main Chapel Stream',
-    startsAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-    endsAt: new Date(Date.now() + 3.5 * 60 * 60 * 1000).toISOString(),
-    status: 'UPCOMING',
-    rawStatus: 'SCHEDULED',
-    platform: 'ZOOM',
-    canJoin: false,
-    joinUrl: 'https://zoom.us/j/demo-reformation',
-    hasRecording: false,
-    recordingUrl: null,
-    attendanceStatus: null,
-  },
-  {
-    id: 'demo-s3',
-    title: 'Old Testament Canon & Manuscript Traditions',
-    description: 'Archived lecture on the Masoretic Text and Dead Sea Scrolls evidence.',
-    courseId: 'c-theology-1',
-    courseTitle: 'Building Biblical Theology',
-    batchId: 'b-2026-a',
-    batchName: 'Batch 2026-A Diploma',
-    teacherName: 'Dr. Samuel Mathew',
-    teacherPhoto: null,
-    room: 'Studio Hall 1',
-    startsAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-    endsAt: new Date(Date.now() - 46.5 * 60 * 60 * 1000).toISOString(),
-    status: 'COMPLETED',
-    rawStatus: 'COMPLETED',
-    platform: 'GOOGLE_MEET',
-    canJoin: false,
-    joinUrl: null,
-    hasRecording: true,
-    recordingUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    attendanceStatus: 'PRESENT',
-  },
-];
-
 export default function StudentClassesPage() {
-  const { student, profile, institute } = useStudentAuth();
+  const { logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const [data, setData] = useState<LiveSessionsResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+
+  const handleJoinClass = async (session: LiveSessionItem) => {
+    setJoiningId(session.id);
+    setActionNotice(null);
+    try {
+      const res = await apiFetch<{ joinUrl?: string; attendanceStatus?: string }>(
+        `/students/live-sessions/${session.id}/join`,
+        { method: 'POST' },
+      );
+      const targetUrl = res.joinUrl || session.joinUrl;
+      if (targetUrl) {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              sessions: prev.sessions.map((item) =>
+                item.id === session.id ? { ...item, attendanceStatus: 'PRESENT' } : item,
+              ),
+            }
+          : prev,
+      );
+    } catch (err: any) {
+      setActionNotice(err?.message || 'Unable to join live class right now.');
+    } finally {
+      setJoiningId(null);
+    }
+  };
 
   // Filters
   const [activeTab, setActiveTab] = useState<'ALL' | 'LIVE_NOW' | 'UPCOMING' | 'RECORDED' | 'COMPLETED'>('ALL');
@@ -148,55 +111,31 @@ export default function StudentClassesPage() {
         setIsLoading(true);
         setError(null);
 
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
         const params = new URLSearchParams();
         if (selectedBatch !== 'ALL') params.append('batchId', selectedBatch);
         if (searchQuery.trim()) params.append('q', searchQuery.trim());
         if (activeTab !== 'ALL') params.append('status', activeTab);
 
-        const res = await fetch(`/api/students/live-sessions?${params.toString()}`, { headers });
+        const res = await apiFetchResponse(`/students/live-sessions?${params.toString()}`);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
+        }
         if (!res.ok) {
           throw new Error(`Failed to load live sessions (${res.status})`);
         }
         const json = await res.json();
         setData(json);
       } catch (err: any) {
-        console.warn('Falling back to local session data:', err.message);
-        setData({
-          sessions: fallbackSessions,
-          summary: {
-            total: fallbackSessions.length,
-            upcoming: 1,
-            liveNow: 1,
-            completed: 1,
-            recorded: 1,
-            cancelled: 0,
-          },
-          batches: [
-            { id: 'b-2026-a', name: 'Batch 2026-A Diploma', courseTitle: 'Building Biblical Theology' },
-          ],
-        });
+        setError(err?.message || 'Unable to load live sessions');
+        setData(null);
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchSessions();
-  }, [selectedBatch, searchQuery, activeTab, profile?.studentProfileId, student?.id, institute?.id]);
+  }, [selectedBatch, searchQuery, activeTab, logout]);
 
   const sessions = data?.sessions || [];
   const summary = data?.summary || { total: 0, upcoming: 0, liveNow: 0, completed: 0, recorded: 0, cancelled: 0 };
@@ -236,6 +175,19 @@ export default function StudentClassesPage() {
             </div>
           </div>
         </div>
+
+        {actionNotice && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-900 flex items-center justify-between gap-3">
+            <span>{actionNotice}</span>
+            <button
+              type="button"
+              onClick={() => setActionNotice(null)}
+              className="font-semibold text-blue-700 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Filter Toolbar */}
         <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -487,16 +439,16 @@ export default function StudentClassesPage() {
                     )}
 
                     {s.canJoin && s.joinUrl ? (
-                      <a
-                        href={s.joinUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
+                      <button
+                        type="button"
+                        disabled={joiningId === s.id}
+                        onClick={() => handleJoinClass(s)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
                       >
                         <Video size={14} />
-                        Join Class
+                        {joiningId === s.id ? 'Joining...' : 'Join Class'}
                         <ExternalLink size={12} />
-                      </a>
+                      </button>
                     ) : s.hasRecording && s.recordingUrl ? (
                       <a
                         href={s.recordingUrl}
@@ -514,11 +466,16 @@ export default function StudentClassesPage() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => alert(`This session starts on ${dateFormatted} at ${starts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. The join link will activate 15 minutes before class.`)}
+                        type="button"
+                        onClick={() =>
+                          setActionNotice(
+                            `${s.title} starts on ${dateFormatted} at ${starts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. The join link activates 15 minutes before class.`,
+                          )
+                        }
                         className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-medium transition-all"
                       >
                         <Clock size={12} />
-                        Set Reminder
+                        Session Info
                       </button>
                     )}
                   </div>

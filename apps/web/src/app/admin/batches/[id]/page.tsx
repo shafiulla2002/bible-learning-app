@@ -1,8 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, use } from 'react';
+import React, { useState, useEffect, useCallback, use } from 'react';
 import Link from 'next/link';
-import { batchApi } from '@/lib/api';
+import {
+  batchApi,
+  studentApi,
+  teacherApi,
+  resolveActiveInstituteId,
+  resolveVerifiedAdminContext,
+} from '@/lib/api';
 import {
   Calendar,
   ArrowLeft,
@@ -56,16 +62,29 @@ export default function BatchDetailPage({
 }) {
   const unwrappedParams = use(params);
   const batchId = unwrappedParams.id;
-  const instituteId = typeof window !== 'undefined'
-    ? localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5'
-    : 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+  const [instituteId, setInstituteId] = useState<string>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') || '' : '',
+  );
+
+  useEffect(() => {
+    if (!instituteId) {
+      resolveActiveInstituteId().then((id) => {
+        if (id) setInstituteId(id);
+      });
+    }
+  }, [instituteId]);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'faculty' | 'timetable'>('overview');
   const [isLiveApi, setIsLiveApi] = useState(false);
+  const [adminName, setAdminName] = useState('Institute Administrator');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [submittingAction, setSubmittingAction] = useState(false);
 
   // Batch Details State
   const [batch, setBatch] = useState({
     id: batchId,
+    courseId: '',
     name: 'Loading Cohort...',
     code: '—',
     courseTitle: '—',
@@ -87,6 +106,28 @@ export default function BatchDetailPage({
     phone: string;
     enrolledAt: string;
     status: string;
+  }>>([]);
+
+  const [instituteStudents, setInstituteStudents] = useState<Array<{
+    id: string;
+    admissionNo: string;
+    fullName: string;
+    email: string;
+  }>>([]);
+
+  const [instituteTeachers, setInstituteTeachers] = useState<Array<{
+    id: string;
+    name: string;
+    email: string;
+    specialization: string;
+  }>>([]);
+
+  const [eligibleTargetBatches, setEligibleTargetBatches] = useState<Array<{
+    id: string;
+    name: string;
+    code: string;
+    capacity: number;
+    enrolledCount: number;
   }>>([]);
 
   const [transferLogs, setTransferLogs] = useState<Array<{
@@ -123,7 +164,7 @@ export default function BatchDetailPage({
   const [showEnrolModal, setShowEnrolModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [selectedStudentForTransfer, setSelectedStudentForTransfer] = useState<any>(null);
-  const [transferTargetBatch, setTransferTargetBatch] = useState('Evening Diploma Cohort 2026');
+  const [transferTargetBatchId, setTransferTargetBatchId] = useState('');
   const [transferReason, setTransferReason] = useState('');
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -133,197 +174,266 @@ export default function BatchDetailPage({
   // New Single Class Form
   const [newClass, setNewClass] = useState({
     title: '',
-    teacherName: 'Dr. Timothy Keller',
+    teacherProfileId: '',
     room: 'Lecture Hall A',
-    startsAt: '2026-09-10T10:00',
-    endsAt: '2026-09-10T11:30',
+    startsAt: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
+    endsAt: new Date(Date.now() + 86400000 + 5400000).toISOString().slice(0, 16),
   });
   const [conflictWarning, setConflictWarning] = useState<string | null>(null);
 
   // Recurring Schedule Form
   const [recurringForm, setRecurringForm] = useState({
-    title: 'Weekly Exegesis Practicum',
-    teacherName: 'Dr. Timothy Keller',
+    title: 'Weekly Practicum Session',
+    teacherProfileId: '',
     room: 'Lecture Hall A',
     daysOfWeek: [1, 3], // Mon, Wed
     startTime: '10:00',
     endTime: '11:30',
-    startDate: '2026-09-01',
-    endDate: '2026-11-30',
-    exceptions: '2026-10-02, 2026-11-14',
+    startDate: new Date().toISOString().slice(0, 10),
+    endDate: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10),
+    exceptions: '',
   });
   const [recurringPreview, setRecurringPreview] = useState<string | null>(null);
 
-  // New Student Enrolment Form
-  const [newStudent, setNewStudent] = useState({
-    admissionNo: 'ADM-2026-088',
-    fullName: '',
-    email: '',
-    phone: '',
+  // Selected Student Enrolment Form
+  const [selectedEnrollStudentId, setSelectedEnrollStudentId] = useState('');
+
+  // Assign Teacher Modal Form
+  const [assignTeacherForm, setAssignTeacherForm] = useState<{
+    teacherProfileId: string;
+    role: 'LEAD' | 'ASSISTANT';
+  }>({
+    teacherProfileId: '',
+    role: 'ASSISTANT',
   });
 
-  // Load live batch details on mount
   useEffect(() => {
-    let isMounted = true;
-    async function loadBatchDetail() {
-      try {
-        const live = await batchApi.getBatch(instituteId, batchId);
-        if (!isMounted || !live) return;
-
-        setBatch({
-          id: live.id,
-          name: live.name,
-          code: live.code,
-          courseTitle: live.courseTitle || 'Diploma in Biblical Studies',
-          courseSlug: 'diploma-biblical-studies',
-          academicYear: live.academicYearName || '2026-2027',
-          term: live.termName || 'Fall Semester 2026',
-          startDate: live.startDate?.slice(0, 10) || '2026-07-01',
-          endDate: live.endDate?.slice(0, 10) || '2026-12-20',
-          capacity: live.capacity || 40,
-          status: live.status || 'ACTIVE',
-        });
-
-        if (Array.isArray(live.enrolments)) {
-          setStudents(
-            live.enrolments.map((enr: any) => ({
-              id: enr.studentProfileId || enr.id,
-              admissionNo: enr.studentProfile?.admissionNo || `ADM-${enr.id.slice(0, 4)}`,
-              fullName: enr.studentProfile?.membership?.user?.fullName || 'Student',
-              email: enr.studentProfile?.membership?.user?.email || '',
-              phone: enr.studentProfile?.membership?.user?.phoneE164 || '',
-              enrolledAt: enr.enrolledAt ? String(enr.enrolledAt).slice(0, 10) : '',
-              status: enr.status || 'ACTIVE',
-            })),
-          );
+    let active = true;
+    resolveVerifiedAdminContext()
+      .then((ctx) => {
+        if (active && ctx?.user?.fullName) {
+          setAdminName(ctx.user.fullName);
         }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
-        if (Array.isArray(live.teachers)) {
-          setTeachers(
-            live.teachers.map((t: any) => ({
-              id: t.teacherProfileId || t.id,
-              name: t.fullName || t.name || 'Faculty',
-              email: t.email || '',
-              role: (t.role === 'LEAD' ? 'LEAD' : 'ASSISTANT') as 'LEAD' | 'ASSISTANT',
-              specialization: t.specialization || 'Theological Studies',
-            })),
-          );
-        }
+  const loadBatchDetail = useCallback(async () => {
+    if (!instituteId || !batchId) return;
+    try {
+      const [live, studRes, teachRes, allBatches] = await Promise.all([
+        batchApi.getBatch(instituteId, batchId),
+        studentApi.getStudents(instituteId, { limit: 100 }).catch(() => ({ data: [] as any[] })),
+        teacherApi.getTeachers(instituteId, { limit: 100 }).catch(() => ({ data: [] as any[] })),
+        batchApi.getBatches(instituteId).catch(() => []),
+      ]);
+      if (!live) return;
 
-        if (Array.isArray(live.timetable)) {
-          setSessions(
-            live.timetable.map((s: any) => ({
-              id: s.id,
-              title: s.title,
-              teacherName: s.teacherName || 'Faculty',
-              room: s.room || 'Lecture Hall A',
-              startsAt: s.startsAt ? String(s.startsAt).replace('Z', '') : '',
-              endsAt: s.endsAt ? String(s.endsAt).replace('Z', '') : '',
-              isRecurring: Boolean(s.isRecurring),
-              status: s.status || 'SCHEDULED',
-            })),
-          );
-        }
+      setBatch({
+        id: live.id,
+        courseId: live.courseId || '',
+        name: live.name,
+        code: live.code,
+        courseTitle: live.courseTitle || 'Course Program',
+        courseSlug: live.courseSlug || '',
+        academicYear: live.academicYearName || 'Current Year',
+        term: live.termName || 'Current Term',
+        startDate: live.startDate?.slice(0, 10) || '—',
+        endDate: live.endDate?.slice(0, 10) || '—',
+        capacity: live.capacity || 40,
+        status: live.status || 'ACTIVE',
+      });
 
-        if (Array.isArray(live.transferLogs)) {
-          setTransferLogs(
-            live.transferLogs.map((tl: any) => ({
-              id: tl.id,
-              studentName: tl.studentName,
-              admissionNo: tl.admissionNo,
-              sourceBatch: tl.sourceBatch,
-              targetBatch: tl.targetBatch,
-              reason: tl.reason || 'Administrative Transfer',
-              transferredBy: tl.transferredBy || 'Administrator',
-              transferredAt: tl.transferredAt ? new Date(tl.transferredAt).toISOString().replace('T', ' ').slice(0, 16) : '',
-            })),
-          );
-        }
+      const enrolledList = Array.isArray(live.enrolments)
+        ? live.enrolments.map((enr: any) => ({
+            id: enr.studentProfileId || enr.id,
+            admissionNo: enr.studentProfile?.admissionNo || `ADM-${enr.id.slice(0, 4)}`,
+            fullName: enr.studentProfile?.membership?.user?.fullName || 'Student',
+            email: enr.studentProfile?.membership?.user?.email || '',
+            phone: enr.studentProfile?.membership?.user?.phoneE164 || '',
+            enrolledAt: enr.enrolledAt ? String(enr.enrolledAt).slice(0, 10) : '',
+            status: enr.status || 'ACTIVE',
+          }))
+        : [];
+      setStudents(enrolledList);
 
-        setIsLiveApi(true);
-      } catch (err: any) {
-        console.error('Failed to load batch detail from PostgreSQL:', err.message);
+      const batchTeachersList = Array.isArray(live.teachers)
+        ? live.teachers.map((t: any) => ({
+            id: t.teacherProfileId || t.id,
+            name: t.fullName || t.name || 'Faculty',
+            email: t.email || '',
+            role: (t.role === 'LEAD' ? 'LEAD' : 'ASSISTANT') as 'LEAD' | 'ASSISTANT',
+            specialization: t.specialization || 'Theological Studies',
+          }))
+        : [];
+      setTeachers(batchTeachersList);
+
+      const mappedTeachers = (teachRes?.data || []).map((t: any) => ({
+        id: t.id,
+        name: t.fullName || t.user?.fullName || 'Faculty Member',
+        email: t.email || t.user?.email || '',
+        specialization: t.specialization || 'Bible & Theology',
+      }));
+      setInstituteTeachers(mappedTeachers);
+
+      const defaultTeacherId = batchTeachersList[0]?.id || mappedTeachers[0]?.id || '';
+      setNewClass((prev) =>
+        prev.teacherProfileId ? prev : { ...prev, teacherProfileId: defaultTeacherId },
+      );
+      setRecurringForm((prev) =>
+        prev.teacherProfileId ? prev : { ...prev, teacherProfileId: defaultTeacherId },
+      );
+      setAssignTeacherForm((prev) =>
+        prev.teacherProfileId ? prev : { ...prev, teacherProfileId: mappedTeachers[0]?.id || '' },
+      );
+
+      const enrolledIds = new Set(enrolledList.map((s: any) => s.id));
+      const availableStudents = (studRes?.data || [])
+        .map((s: any) => ({
+          id: s.id,
+          admissionNo: s.admissionNo || 'N/A',
+          fullName: s.fullName || s.membership?.user?.fullName || 'Student',
+          email: s.email || s.membership?.user?.email || '',
+        }))
+        .filter((s: any) => !enrolledIds.has(s.id));
+      setInstituteStudents(availableStudents);
+      setSelectedEnrollStudentId((prev) =>
+        prev && availableStudents.some((s: any) => s.id === prev)
+          ? prev
+          : availableStudents[0]?.id || '',
+      );
+
+      const transferTargets = (Array.isArray(allBatches) ? allBatches : [])
+        .filter((b: any) => b.id !== batchId && (!live.courseId || b.courseId === live.courseId))
+        .map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          code: b.code,
+          capacity: b.capacity || 40,
+          enrolledCount: b.enrolledCount ?? b._count?.enrolments ?? 0,
+        }));
+      setEligibleTargetBatches(transferTargets);
+      setTransferTargetBatchId((prev) =>
+        prev && transferTargets.some((b: any) => b.id === prev)
+          ? prev
+          : transferTargets[0]?.id || '',
+      );
+
+      if (Array.isArray(live.timetable)) {
+        setSessions(
+          live.timetable.map((s: any) => ({
+            id: s.id,
+            title: s.title,
+            teacherName: s.teacherName || 'Faculty',
+            room: s.room || 'Lecture Hall A',
+            startsAt: s.startsAt ? String(s.startsAt).replace('Z', '') : '',
+            endsAt: s.endsAt ? String(s.endsAt).replace('Z', '') : '',
+            isRecurring: Boolean(s.isRecurring),
+            status: s.status || 'SCHEDULED',
+          })),
+        );
       }
+
+      if (Array.isArray(live.transferLogs)) {
+        setTransferLogs(
+          live.transferLogs.map((tl: any) => ({
+            id: tl.id,
+            studentName: tl.studentName,
+            admissionNo: tl.admissionNo,
+            sourceBatch: tl.sourceBatch,
+            targetBatch: tl.targetBatch,
+            reason: tl.reason || 'Administrative Transfer',
+            transferredBy: tl.transferredBy || 'Administrator',
+            transferredAt: tl.transferredAt ? new Date(tl.transferredAt).toISOString().replace('T', ' ').slice(0, 16) : '',
+          })),
+        );
+      }
+
+      setIsLiveApi(true);
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to load batch detail from PostgreSQL.');
     }
-    loadBatchDetail();
-    return () => { isMounted = false; };
   }, [instituteId, batchId]);
 
-  // Check Conflict via API or local rules
-  const handleCheckConflict = async () => {
+  useEffect(() => {
+    loadBatchDetail();
+  }, [loadBatchDetail]);
+
+  const showNotice = (msg: string) => {
+    setActionNotice(msg);
+    setTimeout(() => setActionNotice(null), 4000);
+  };
+
+  // Real API Scheduling Conflict Check
+  const handleCheckConflict = async (overrides?: Partial<typeof newClass>) => {
+    const candidate = { ...newClass, ...overrides };
+    if (!candidate.startsAt || !candidate.endsAt) return;
     try {
       const res = await batchApi.checkConflict(instituteId, {
         batchId,
-        room: newClass.room,
-        startsAt: new Date(newClass.startsAt).toISOString(),
-        endsAt: new Date(newClass.endsAt).toISOString(),
+        teacherProfileId: candidate.teacherProfileId || undefined,
+        room: candidate.room || undefined,
+        startsAt: new Date(candidate.startsAt).toISOString(),
+        endsAt: new Date(candidate.endsAt).toISOString(),
       });
       if (res.hasConflict) {
         setConflictWarning(
-          `Conflict detected: Room "${newClass.room}" or faculty already has an overlapping session during this slot.`,
-        );
-        return;
-      }
-      setConflictWarning(null);
-    } catch {
-      if (newClass.room === 'Lecture Hall A' && newClass.startsAt.includes('10:00')) {
-        setConflictWarning(
-          'Conflict detected: Dr. Timothy Keller is already booked in Lecture Hall A during this time slot for "Hermeneutics & Exegesis Principles".',
+          `Conflict detected: Room "${candidate.room}" or selected faculty already has an overlapping session during this slot.`,
         );
       } else {
         setConflictWarning(null);
       }
+    } catch (err: any) {
+      setActionError(err?.message || 'Unable to verify scheduling conflict.');
     }
   };
 
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (conflictWarning) return;
+    if (!newClass.teacherProfileId) {
+      setActionError('Assign or select a faculty instructor before scheduling a class.');
+      return;
+    }
 
+    setSubmittingAction(true);
+    setActionError(null);
     try {
       await batchApi.createSchedule(instituteId, {
         batchId,
-        teacherProfileId: 't1',
+        teacherProfileId: newClass.teacherProfileId,
         title: newClass.title,
         room: newClass.room,
         startsAt: new Date(newClass.startsAt).toISOString(),
         endsAt: new Date(newClass.endsAt).toISOString(),
       });
-      setIsLiveApi(true);
+      await loadBatchDetail();
+      setShowScheduleModal(false);
+      setNewClass((prev) => ({ ...prev, title: '' }));
+      showNotice('Class session scheduled and saved.');
     } catch (err: any) {
-      console.warn('API schedule creation failed or running standalone:', err.message);
+      setActionError(err?.message || 'Failed to create class schedule.');
+    } finally {
+      setSubmittingAction(false);
     }
-
-    setSessions([
-      ...sessions,
-      {
-        id: `sess-${Date.now()}`,
-        title: newClass.title,
-        teacherName: newClass.teacherName,
-        room: newClass.room,
-        startsAt: newClass.startsAt,
-        endsAt: newClass.endsAt,
-        isRecurring: false,
-        status: 'SCHEDULED',
-      },
-    ]);
-    setShowScheduleModal(false);
-    setNewClass({
-      title: '',
-      teacherName: 'Dr. Timothy Keller',
-      room: 'Lecture Hall A',
-      startsAt: '2026-09-10T10:00',
-      endsAt: '2026-09-10T11:30',
-    });
   };
 
   const handleGenerateRecurring = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!recurringForm.teacherProfileId) {
+      setActionError('Select an instructor before generating recurring sessions.');
+      return;
+    }
 
+    setSubmittingAction(true);
+    setActionError(null);
     try {
       const res = await batchApi.generateRecurringWeeklySchedule(instituteId, {
         batchId,
-        teacherProfileId: 't1',
+        teacherProfileId: recurringForm.teacherProfileId,
         title: recurringForm.title,
         room: recurringForm.room,
         daysOfWeek: recurringForm.daysOfWeek,
@@ -333,114 +443,128 @@ export default function BatchDetailPage({
         endDate: recurringForm.endDate,
         exceptions: recurringForm.exceptions.split(',').map((s) => s.trim()).filter(Boolean),
       });
-      setIsLiveApi(true);
-      setRecurringPreview(`Validated 0 conflicts! Created ${res.generatedCount ?? 24} recurring occurrences.`);
+      setRecurringPreview(`Validated 0 conflicts! Created ${res.generatedCount ?? res.created ?? 0} recurring occurrences.`);
+      await loadBatchDetail();
+      setTimeout(() => {
+        setShowRecurringModal(false);
+        setRecurringPreview(null);
+      }, 900);
     } catch (err: any) {
-      console.warn('Recurring schedule API error, generating local preview:', err.message);
-      const generatedCount = 24;
-      setRecurringPreview(
-        `Validated 0 conflicts! Generated ${generatedCount} class occurrences skipping 2 holiday exceptions.`,
-      );
+      setActionError(err?.message || 'Failed to generate recurring weekly schedule.');
+    } finally {
+      setSubmittingAction(false);
     }
-
-    setTimeout(() => {
-      setSessions([
-        ...sessions,
-        {
-          id: `sess-${Date.now()}`,
-          title: recurringForm.title,
-          teacherName: recurringForm.teacherName,
-          room: recurringForm.room,
-          startsAt: `${recurringForm.startDate}T${recurringForm.startTime}:00`,
-          endsAt: `${recurringForm.startDate}T${recurringForm.endTime}:00`,
-          isRecurring: true,
-          status: 'SCHEDULED',
-        },
-      ]);
-      setShowRecurringModal(false);
-      setRecurringPreview(null);
-    }, 1200);
   };
 
   const handleEnrollStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudent.fullName) return;
-
-    // Capacity enforcement check (Requirement 3)
-    if (students.length >= batch.capacity) {
-      alert(`Batch capacity limit reached (${batch.capacity} students max). Enrolment rejected.`);
+    if (!selectedEnrollStudentId) {
+      setActionError('Select a student to enroll in this batch.');
       return;
     }
 
-    try {
-      await batchApi.enrollStudent(instituteId, batchId, 'stud-profile-new');
-      setIsLiveApi(true);
-    } catch (err: any) {
-      console.warn('API student enrolment error or running standalone:', err.message);
+    if (students.length >= batch.capacity) {
+      setActionError(`Batch capacity limit reached (${batch.capacity} students max). Enrolment rejected.`);
+      return;
     }
 
-    setStudents([
-      ...students,
-      {
-        id: `stud-${Date.now()}`,
-        admissionNo: newStudent.admissionNo || `ADM-${Date.now().toString().slice(-4)}`,
-        fullName: newStudent.fullName,
-        email: newStudent.email || 'student@gbts.edu',
-        phone: newStudent.phone || '+91 98765 00000',
-        enrolledAt: new Date().toISOString().slice(0, 10),
-        status: 'ACTIVE',
-      },
-    ]);
-
-    setShowEnrolModal(false);
-    setNewStudent({ admissionNo: '', fullName: '', email: '', phone: '' });
+    setSubmittingAction(true);
+    setActionError(null);
+    try {
+      await batchApi.enrollStudent(instituteId, batchId, selectedEnrollStudentId);
+      await loadBatchDetail();
+      setShowEnrolModal(false);
+      showNotice('Student enrolled in cohort.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to enroll student in cohort.');
+    } finally {
+      setSubmittingAction(false);
+    }
   };
 
   const handleTransferStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudentForTransfer || !transferReason.trim()) return;
+    if (!selectedStudentForTransfer || !transferTargetBatchId || !transferReason.trim()) {
+      setActionError('Target batch and transfer reason are required.');
+      return;
+    }
 
+    setSubmittingAction(true);
+    setActionError(null);
     try {
       await batchApi.transferStudent(instituteId, batchId, {
         studentProfileId: selectedStudentForTransfer.id,
-        targetBatchId: 'target-batch-id',
-        reason: transferReason,
+        targetBatchId: transferTargetBatchId,
+        reason: transferReason.trim(),
       });
-      setIsLiveApi(true);
+      await loadBatchDetail();
+      setShowTransferModal(false);
+      setSelectedStudentForTransfer(null);
+      setTransferReason('');
+      showNotice('Student transferred and audit trail preserved.');
     } catch (err: any) {
-      console.warn('API student transfer error or running standalone:', err.message);
+      setActionError(err?.message || 'Failed to execute batch transfer.');
+    } finally {
+      setSubmittingAction(false);
     }
-
-    // Requirement 2: Record transfer log, update student list, never delete records
-    const newLog = {
-      id: `trans-${Date.now()}`,
-      studentName: selectedStudentForTransfer.fullName,
-      admissionNo: selectedStudentForTransfer.admissionNo,
-      sourceBatch: batch.name,
-      targetBatch: transferTargetBatch,
-      reason: transferReason,
-      transferredBy: 'Admin User',
-      transferredAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-    };
-
-    setTransferLogs([newLog, ...transferLogs]);
-    setStudents(students.filter((s) => s.id !== selectedStudentForTransfer.id));
-    setShowTransferModal(false);
-    setSelectedStudentForTransfer(null);
-    setTransferReason('');
   };
 
-  const fillPercentage = Math.round((students.length / batch.capacity) * 100);
+  const handleAssignTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignTeacherForm.teacherProfileId) {
+      setActionError('Select a teacher to assign.');
+      return;
+    }
+    setSubmittingAction(true);
+    setActionError(null);
+    try {
+      await batchApi.assignTeacher(instituteId, batchId, {
+        teacherProfileId: assignTeacherForm.teacherProfileId,
+        role: assignTeacherForm.role,
+      });
+      await loadBatchDetail();
+      setShowAssignTeacherModal(false);
+      showNotice('Faculty assigned to cohort.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to assign faculty member.');
+    } finally {
+      setSubmittingAction(false);
+    }
+  };
+
+  const handleRemoveTeacher = async (teacherProfileId: string) => {
+    setActionError(null);
+    try {
+      await batchApi.removeTeacher(instituteId, batchId, teacherProfileId);
+      await loadBatchDetail();
+      showNotice('Faculty assignment removed.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to remove faculty member.');
+    }
+  };
+
+  const fillPercentage = Math.round((students.length / Math.max(batch.capacity, 1)) * 100);
 
   return (
     <PortalShell
       portalTitle="Institute Admin"
       portalRole="ADMIN"
       navItems={adminNav}
-      userName="Principal Admin"
+      userName={adminName}
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6">
+        {actionError && (
+          <div className="bg-rose-500/10 border border-rose-500/30 p-3 rounded-lg text-xs text-rose-700 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2"><AlertCircle size={15} /> {actionError}</span>
+            <button onClick={() => setActionError(null)} className="text-rose-700 hover:underline">Dismiss</button>
+          </div>
+        )}
+        {actionNotice && (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-lg text-xs text-emerald-800 flex items-center gap-2">
+            <CheckCircle size={15} className="text-emerald-600" /> {actionNotice}
+          </div>
+        )}
         {/* Back Link & Header */}
         <div>
           <Link
@@ -798,10 +922,17 @@ export default function BatchDetailPage({
                     <p className="text-xs text-muted-foreground">{t.email}</p>
                     <p className="text-xs text-primary font-medium mt-1">{t.specialization}</p>
                   </div>
-                  <div className="pt-2 border-t flex justify-end">
+                  <div className="pt-2 border-t flex items-center justify-between">
                     <span className="text-[11px] text-muted-foreground">
                       Tenant Verified
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTeacher(t.id)}
+                      className="text-[11px] text-rose-600 hover:underline font-medium"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </Card>
               ))}
@@ -912,47 +1043,25 @@ export default function BatchDetailPage({
 
             <form onSubmit={handleEnrollStudent} className="space-y-3.5">
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Student Full Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Samuel Rutherford"
-                  value={newStudent.fullName}
-                  onChange={(e) => setNewStudent({ ...newStudent, fullName: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold">Admission Number</label>
-                <input
-                  type="text"
-                  value={newStudent.admissionNo}
-                  onChange={(e) => setNewStudent({ ...newStudent, admissionNo: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold">Email Address</label>
-                <input
-                  type="email"
-                  placeholder="samuel@gbts.edu"
-                  value={newStudent.email}
-                  onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold">Phone Number</label>
-                <input
-                  type="text"
-                  placeholder="+91 98765 43210"
-                  value={newStudent.phone}
-                  onChange={(e) => setNewStudent({ ...newStudent, phone: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
+                <label className="text-xs font-semibold">Select Institute Student *</label>
+                {instituteStudents.length === 0 ? (
+                  <p className="text-xs text-muted-foreground p-3 border rounded-lg bg-muted/30">
+                    All active students in this institute are already enrolled in this cohort, or no students exist yet.
+                  </p>
+                ) : (
+                  <select
+                    required
+                    value={selectedEnrollStudentId}
+                    onChange={(e) => setSelectedEnrollStudentId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {instituteStudents.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        {st.fullName} ({st.admissionNo}){st.email ? ` — ${st.email}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="bg-muted/50 p-3 rounded-lg text-xs text-muted-foreground flex items-center gap-2">
@@ -966,8 +1075,8 @@ export default function BatchDetailPage({
                 <Button type="button" variant="outline" onClick={() => setShowEnrolModal(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary">
-                  Confirm Enrolment
+                <Button type="submit" variant="primary" disabled={submittingAction || !selectedEnrollStudentId}>
+                  {submittingAction ? 'Enrolling...' : 'Confirm Enrolment'}
                 </Button>
               </div>
             </form>
@@ -1012,14 +1121,24 @@ export default function BatchDetailPage({
 
               <div className="space-y-1">
                 <label className="text-xs font-semibold">Target Batch (Same Course Only) *</label>
-                <select
-                  value={transferTargetBatch}
-                  onChange={(e) => setTransferTargetBatch(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="Evening Greek Intensive">Evening Greek Intensive (Capacity: 22/25)</option>
-                  <option value="Spring Systematic Cohort">Spring Systematic Cohort (Capacity: 14/50)</option>
-                </select>
+                {eligibleTargetBatches.length === 0 ? (
+                  <p className="text-xs text-muted-foreground p-3 border rounded-lg bg-muted/30">
+                    No other batches exist for this course yet. Create another cohort for this course first.
+                  </p>
+                ) : (
+                  <select
+                    required
+                    value={transferTargetBatchId}
+                    onChange={(e) => setTransferTargetBatchId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {eligibleTargetBatches.map((tb) => (
+                      <option key={tb.id} value={tb.id}>
+                        {tb.name} ({tb.code}) — Capacity: {tb.enrolledCount}/{tb.capacity}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <span className="text-[11px] text-muted-foreground block">
                   Requirement 2: Only cohorts offering the exact same course curriculum are eligible.
                 </span>
@@ -1089,18 +1208,23 @@ export default function BatchDetailPage({
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Instructor</label>
+                  <label className="text-xs font-semibold">Instructor *</label>
                   <select
-                    value={newClass.teacherName}
+                    required
+                    value={newClass.teacherProfileId}
                     onChange={(e) => {
-                      setNewClass({ ...newClass, teacherName: e.target.value });
-                      handleCheckConflict();
+                      const val = e.target.value;
+                      setNewClass({ ...newClass, teacherProfileId: val });
+                      handleCheckConflict({ teacherProfileId: val });
                     }}
                     className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
                   >
-                    {teachers.map((t) => (
-                      <option key={t.id} value={t.name}>
-                        {t.name} ({t.role})
+                    {instituteTeachers.length === 0 && (
+                      <option value="">No faculty profiles available</option>
+                    )}
+                    {instituteTeachers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.specialization})
                       </option>
                     ))}
                   </select>
@@ -1112,8 +1236,9 @@ export default function BatchDetailPage({
                     type="text"
                     value={newClass.room}
                     onChange={(e) => {
-                      setNewClass({ ...newClass, room: e.target.value });
-                      handleCheckConflict();
+                      const val = e.target.value;
+                      setNewClass({ ...newClass, room: val });
+                      handleCheckConflict({ room: val });
                     }}
                     className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
@@ -1128,8 +1253,9 @@ export default function BatchDetailPage({
                     required
                     value={newClass.startsAt}
                     onChange={(e) => {
-                      setNewClass({ ...newClass, startsAt: e.target.value });
-                      handleCheckConflict();
+                      const val = e.target.value;
+                      setNewClass({ ...newClass, startsAt: val });
+                      handleCheckConflict({ startsAt: val });
                     }}
                     className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
@@ -1142,8 +1268,9 @@ export default function BatchDetailPage({
                     required
                     value={newClass.endsAt}
                     onChange={(e) => {
-                      setNewClass({ ...newClass, endsAt: e.target.value });
-                      handleCheckConflict();
+                      const val = e.target.value;
+                      setNewClass({ ...newClass, endsAt: val });
+                      handleCheckConflict({ endsAt: val });
                     }}
                     className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
@@ -1199,15 +1326,35 @@ export default function BatchDetailPage({
             </div>
 
             <form onSubmit={handleGenerateRecurring} className="space-y-3.5">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold">Weekly Series Title *</label>
-                <input
-                  type="text"
-                  required
-                  value={recurringForm.title}
-                  onChange={(e) => setRecurringForm({ ...recurringForm, title: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold">Weekly Series Title *</label>
+                  <input
+                    type="text"
+                    required
+                    value={recurringForm.title}
+                    onChange={(e) => setRecurringForm({ ...recurringForm, title: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold">Instructor *</label>
+                  <select
+                    required
+                    value={recurringForm.teacherProfileId}
+                    onChange={(e) => setRecurringForm({ ...recurringForm, teacherProfileId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {instituteTeachers.length === 0 && (
+                      <option value="">No faculty available</option>
+                    )}
+                    {instituteTeachers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -1339,47 +1486,61 @@ export default function BatchDetailPage({
               </button>
             </div>
 
-            <div className="space-y-3">
+            <form onSubmit={handleAssignTeacher} className="space-y-3">
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Teacher Name</label>
-                <select className="w-full px-3 py-2 text-sm border rounded-lg bg-background">
-                  <option>Dr. John Stott (New Testament)</option>
-                  <option>Prof. FF Bruce (Biblical History)</option>
-                </select>
+                <label className="text-xs font-semibold">Teacher *</label>
+                {instituteTeachers.length === 0 ? (
+                  <p className="text-xs text-muted-foreground p-3 border rounded-lg bg-muted/30">
+                    No active faculty members found in this institute. Create a teacher profile first.
+                  </p>
+                ) : (
+                  <select
+                    required
+                    value={assignTeacherForm.teacherProfileId}
+                    onChange={(e) =>
+                      setAssignTeacherForm({ ...assignTeacherForm, teacherProfileId: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background"
+                  >
+                    {instituteTeachers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.specialization})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-semibold">Faculty Role</label>
-                <select className="w-full px-3 py-2 text-sm border rounded-lg bg-background">
+                <select
+                  value={assignTeacherForm.role}
+                  onChange={(e) =>
+                    setAssignTeacherForm({
+                      ...assignTeacherForm,
+                      role: e.target.value === 'LEAD' ? 'LEAD' : 'ASSISTANT',
+                    })
+                  }
+                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background"
+                >
                   <option value="ASSISTANT">Assistant Teacher</option>
                   <option value="LEAD">Lead Teacher (Demotes existing lead)</option>
                 </select>
               </div>
 
               <div className="pt-3 border-t flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setShowAssignTeacherModal(false)}>
+                <Button type="button" variant="outline" onClick={() => setShowAssignTeacherModal(false)}>
                   Cancel
                 </Button>
                 <Button
+                  type="submit"
                   variant="primary"
-                  onClick={() => {
-                    setTeachers([
-                      ...teachers,
-                      {
-                        id: `t-${Date.now()}`,
-                        name: 'Dr. John Stott',
-                        email: 'john.stott@gbts.edu',
-                        role: 'ASSISTANT',
-                        specialization: 'New Testament & Homiletics',
-                      },
-                    ]);
-                    setShowAssignTeacherModal(false);
-                  }}
+                  disabled={submittingAction || !assignTeacherForm.teacherProfileId}
                 >
-                  Assign Faculty
+                  {submittingAction ? 'Assigning...' : 'Assign Faculty'}
                 </Button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}

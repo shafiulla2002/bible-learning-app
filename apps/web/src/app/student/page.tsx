@@ -21,19 +21,19 @@ import {
 } from 'lucide-react';
 
 export default function StudentDashboardPage() {
-  const { student, profile, institute } = useStudentAuth({ requireAuth: false });
+  const { student } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const { dashboardData, isLoading } = useStudentDashboard();
 
   // Resolved student identity from database
-  const studentFullName = dashboardData?.student?.fullName || student?.fullName || 'Shaik Shafiulla';
-  const firstName = studentFullName.split(' ')[0] || 'Shaik';
+  const studentFullName = dashboardData?.student?.fullName || student?.fullName || 'Student';
+  const firstName = studentFullName.split(' ')[0] || 'Student';
 
-  // Resolved statistics with database defaults
-  const enrolledCount = dashboardData?.statistics?.enrolledCoursesCount ?? 4;
-  const completedCount = dashboardData?.statistics?.completedCoursesCount ?? 1;
-  const learningHours = dashboardData?.statistics?.learningHours ?? 38;
-  const streakDays = dashboardData?.statistics?.learningStreak ?? 14;
-  const xpPoints = dashboardData?.statistics?.xpPoints ?? '2.4k';
+  // Resolved statistics from database
+  const enrolledCount = dashboardData?.statistics?.enrolledCoursesCount ?? 0;
+  const completedCount = dashboardData?.statistics?.completedCoursesCount ?? 0;
+  const learningHours = dashboardData?.statistics?.learningHours ?? 0;
+  const streakDays = dashboardData?.statistics?.learningStreak ?? 0;
+  const xpPoints = dashboardData?.statistics?.xpPoints ?? '0';
 
   // Calendar widget state
   const [calendarDate, setCalendarDate] = useState(new Date(2026, 10, 6)); // Nov 6, 2026
@@ -77,56 +77,12 @@ export default function StudentDashboardPage() {
     calendarDays.push({ day: i, isCurrentMonth: false });
   }
 
-  // Resolved courses for Shaik Shafiulla
-  const continueLearningCourses = dashboardData?.continueLearningCourses && dashboardData.continueLearningCourses.length > 0
-    ? dashboardData.continueLearningCourses
-    : [
-        {
-          courseId: '4a191bde-4efb-41f4-af85-b15bd72768d9',
-          title: 'Building Biblical Theology',
-          category: 'Theology',
-          instructorName: 'Dr. Samuel Mathew',
-          nextLessonTitle: 'Lesson 19: Covenant & Promise',
-          completedLessons: 18,
-          totalLessons: 24,
-          progressPct: 75,
-        },
-        {
-          courseId: 'e80cfa87-1100-4f4d-9706-cdb90c3f55ca',
-          title: 'Church History: Reformation to Modern',
-          category: 'Biblical Studies',
-          instructorName: 'Rev. Joseph David',
-          nextLessonTitle: 'Lesson 7: Historical Context',
-          completedLessons: 6,
-          totalLessons: 15,
-          progressPct: 45,
-        },
-      ];
+  // Resolved courses from API
+  const continueLearningCourses = dashboardData?.continueLearningCourses || [];
 
-  // Resolved live classes
+  // Resolved live classes from API
   const liveClassesData = (dashboardData as any)?.upcomingClasses || dashboardData?.upcomingLiveClasses;
-  const liveClasses = liveClassesData && liveClassesData.length > 0
-    ? liveClassesData
-    : [
-        {
-          id: 'live-1',
-          title: 'Biblical Interpretation Q&A',
-          courseName: 'Building Biblical Theology',
-          instructor: 'Dr. Mary Thomas',
-          timeDisplay: 'Now',
-          isLiveNow: true,
-          joinUrl: 'https://meet.google.com/bib-inst-demo',
-        },
-        {
-          id: 'live-2',
-          title: 'Church History: Reformation Period',
-          courseName: 'Church History',
-          instructor: 'Rev. Joseph David',
-          timeDisplay: 'Tomorrow at 10:00 AM IST',
-          isLiveNow: false,
-          joinUrl: 'https://meet.google.com/bib-hist-live',
-        },
-      ];
+  const liveClasses = liveClassesData || [];
 
   return (
     <StudentShell pageTitle="Dashboard">
@@ -160,7 +116,7 @@ export default function StudentDashboardPage() {
                 </h2>
                 <p className="text-slate-300 text-xs md:text-sm mt-2 leading-relaxed font-normal">
                   Continue your spiritual learning journey and grow in your understanding of the Bible.
-                  You've completed <strong className="text-white font-semibold">75%</strong> of your course curriculum!
+                  You've completed <strong className="text-white font-semibold">{dashboardData?.statistics?.overallProgressPct ?? 0}%</strong> of your course curriculum!
                 </p>
                 <div className="mt-5">
                   <Link
@@ -380,18 +336,24 @@ export default function StudentDashboardPage() {
                       <Clock size={13} />
                       <span>{item.timeDisplay || 'Scheduled'}</span>
                     </div>
-                    <a
-                      href={item.joinUrl || 'https://meet.google.com/bib-inst-demo'}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`px-4 py-2 rounded-xl text-xs font-semibold transition inline-flex items-center gap-1.5 ${
-                        item.isLiveNow
-                          ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm shadow-rose-500/20'
-                          : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm shadow-blue-500/20'
-                      }`}
-                    >
-                      <span>Join Class</span>
-                    </a>
+                    {item.joinUrl ? (
+                      <a
+                        href={item.joinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`px-4 py-2 rounded-xl text-xs font-semibold transition inline-flex items-center gap-1.5 ${
+                          item.isLiveNow
+                            ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-sm shadow-rose-500/20'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm shadow-blue-500/20'
+                        }`}
+                      >
+                        <span>Join Class</span>
+                      </a>
+                    ) : (
+                      <span className="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 text-slate-500">
+                        Opens 15m before start
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface TeacherLiveClassItem {
   id: string;
@@ -81,7 +82,7 @@ export function useTeacherLiveClasses(initialLimit = 10) {
       if (batchId && batchId !== 'ALL') params.set('batchId', batchId);
       if (status && status !== 'ALL') params.set('status', status);
 
-      const res = await fetch(`/api/teachers/live-classes?${params.toString()}`, {
+      const res = await apiFetchResponse(`/teachers/live-classes?${params.toString()}`, {
         cache: 'no-store',
       });
 
@@ -128,9 +129,8 @@ export function useTeacherLiveClasses(initialLimit = 10) {
     room?: string;
   }) => {
     try {
-      const res = await fetch('/api/teachers/live-classes', {
+      const res = await apiFetchResponse('/teachers/live-classes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
@@ -148,9 +148,8 @@ export function useTeacherLiveClasses(initialLimit = 10) {
 
   const cancelClass = async (sessionId: string, reason?: string) => {
     try {
-      const res = await fetch(`/api/teachers/live-classes/${sessionId}/cancel`, {
+      const res = await apiFetchResponse(`/teachers/live-classes/${sessionId}/cancel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
 

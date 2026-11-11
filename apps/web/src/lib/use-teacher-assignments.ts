@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface TeacherAssignmentItem {
   id: string;
@@ -47,7 +48,7 @@ export function useTeacherAssignments(initialLimit = 10) {
       if (batchId && batchId !== 'ALL') params.set('batchId', batchId);
       if (status && status !== 'ALL') params.set('status', status);
 
-      const res = await fetch(`/api/teachers/assignments?${params.toString()}`, {
+      const res = await apiFetchResponse(`/teachers/assignments?${params.toString()}`, {
         cache: 'no-store',
       });
 
@@ -86,9 +87,8 @@ export function useTeacherAssignments(initialLimit = 10) {
     maxMarks?: number;
     status?: string;
   }) => {
-    const res = await fetch('/api/teachers/assignments', {
+    const res = await apiFetchResponse('/teachers/assignments', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 

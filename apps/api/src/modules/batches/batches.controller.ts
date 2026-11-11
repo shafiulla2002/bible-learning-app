@@ -11,9 +11,12 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { BatchesService } from './batches.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import {
   CreateAcademicYearSchema,
@@ -30,7 +33,8 @@ import {
 } from '@bible-lms/shared';
 
 @Controller('institutes/:instituteId')
-@UseGuards(JwtAuthGuard, InstituteTenantGuard)
+@UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
+@Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
 export class BatchesController {
   constructor(private readonly batchesService: BatchesService) {}
 

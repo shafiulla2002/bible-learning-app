@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { apiFetchResponse } from '@/lib/api';
 import {
   Phone,
   Lock,
@@ -16,14 +17,15 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-type RoleOption = 'STUDENT' | 'TEACHER' | 'ADMIN';
+type RoleOption = 'STUDENT' | 'TEACHER' | 'ADMIN' | 'SUPER_ADMIN';
 
 export default function LoginPage() {
   const router = useRouter();
   const [selectedRole, setSelectedRole] = useState<RoleOption>('STUDENT');
-  const [phone, setPhone] = useState('9642402639');
+  const [phone, setPhone] = useState('');
   const [otpSent, setOtpSent] = useState(false);
-  const [otp, setOtp] = useState('123456');
+  const [otp, setOtp] = useState('');
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -32,16 +34,11 @@ export default function LoginPage() {
     setSelectedRole(role);
     setErrorMessage(null);
     setOtpSent(false);
-    if (role === 'STUDENT') {
-      setPhone('9642402639');
-    } else if (role === 'TEACHER') {
-      setPhone('9876500011');
-    } else if (role === 'ADMIN') {
-      setPhone('9876543210');
-    }
+    setChallengeToken(null);
+    setOtp('');
   };
 
-  const handleSendOtp = (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!phone || phone.replace(/\D/g, '').length < 10) {
       setErrorMessage('Please enter a valid 10-digit mobile number');
@@ -49,84 +46,82 @@ export default function LoginPage() {
     }
     setErrorMessage(null);
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      const res = await apiFetchResponse('/auth/otp/request', {
+        method: 'POST',
+        body: JSON.stringify({ phoneNumber: phone }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.challengeToken) {
+        throw new Error(json?.message || 'Failed to send verification code');
+      }
+      setChallengeToken(json.challengeToken);
+      setOtp(typeof json.devOtp === 'string' ? json.devOtp : '');
       setOtpSent(true);
-      setOtp('123456');
-    }, 400);
-  };
-
-  const getFallbackSession = (targetRole: RoleOption) => {
-    if (targetRole === 'STUDENT') {
-      return {
-        accessToken: 'student_preview_session_token_shafiulla',
-        redirectUrl: '/student',
-        user: {
-          id: '0b1dd816-4c77-4a7a-9837-22c3627d0bdc',
-          fullName: 'Shaik Shafiulla',
-          role: 'STUDENT',
-          studentProfileId: '6a0ce008-8794-4395-bb24-8562a1bdc561',
-          instituteId: 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5',
-        },
-      };
-    } else if (targetRole === 'TEACHER') {
-      return {
-        accessToken: 'teacher_preview_session_token',
-        redirectUrl: '/teacher',
-        user: {
-          id: 'b5a03e1e-21f4-4cb6-a42e-15d2a933ff22',
-          fullName: 'Prof. David Kumar',
-          role: 'TEACHER',
-          instituteId: 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5',
-        },
-      };
-    } else {
-      return {
-        accessToken: 'admin_preview_session_token',
-        redirectUrl: '/admin',
-        user: {
-          id: 'e1d2c3b4-a5b6-4c7d-8e9f-0a1b2c3d4e5f',
-          fullName: 'Grace Institute Administrator',
-          role: 'INSTITUTE_ADMIN',
-          instituteId: 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5',
-        },
-      };
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to request verification code');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const executeLoginRequest = async (targetPhone: string, targetRole: RoleOption, targetOtp: string) => {
+  const executeLoginRequest = async (
+    targetPhone: string,
+    targetRole: RoleOption,
+    targetOtp: string,
+    existingChallengeToken?: string | null
+  ) => {
+    let resolvedChallengeToken = existingChallengeToken || null;
+    let resolvedOtp = targetOtp?.trim() || '';
+
+    if (!resolvedChallengeToken) {
+      const challengeRes = await apiFetchResponse('/auth/otp/request', {
+        method: 'POST',
+        body: JSON.stringify({ phoneNumber: targetPhone }),
+      });
+      const challengeData = await challengeRes.json().catch(() => ({}));
+      if (!challengeRes.ok || !challengeData?.challengeToken) {
+        throw new Error(challengeData?.message || 'Unable to start OTP verification');
+      }
+      resolvedChallengeToken = challengeData.challengeToken;
+      if (!resolvedOtp && typeof challengeData.devOtp === 'string') {
+        resolvedOtp = challengeData.devOtp;
+      }
+    }
+
     const payload = {
       phoneNumber: targetPhone,
       role: targetRole === 'ADMIN' ? 'INSTITUTE_ADMIN' : targetRole,
-      otp: targetOtp || '123456',
+      otp: resolvedOtp,
+      challengeToken: resolvedChallengeToken,
     };
 
-    try {
-      let res = await fetch('/api/auth/phone-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch(() => null);
+    const res = await apiFetchResponse('/auth/phone-otp', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
 
-      if (!res || res.status === 404 || res.status === 500) {
-        res = await fetch('/auth/phone-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }).catch(() => null);
-      }
-
-      if (res && res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && data.accessToken) {
-          return data;
-        }
-      }
-    } catch {
-      // Fallback seamlessly if server unreachable
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.accessToken) {
+      throw new Error(data?.message || data?.error || `Authentication failed (${res.status})`);
     }
+    return data;
+  };
 
-    return getFallbackSession(targetRole);
+  const persistAuthenticatedSession = (data: any) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('token', data.accessToken);
+    localStorage.setItem('access_token', data.accessToken);
+    localStorage.setItem('auth_token', data.accessToken);
+    if (data.user?.role) {
+      localStorage.setItem('current_user_role', data.user.role);
+    }
+    if (data.user?.instituteId) {
+      localStorage.setItem('current_institute_id', data.user.instituteId);
+    }
+    if (data.user?.studentProfileId) {
+      localStorage.setItem('current_student_profile_id', data.user.studentProfileId);
+    }
   };
 
   const handleLoginSubmit = async (e?: React.FormEvent) => {
@@ -135,23 +130,18 @@ export default function LoginPage() {
     setErrorMessage(null);
 
     try {
-      const data = await executeLoginRequest(phone, selectedRole, otp);
+      const data = await executeLoginRequest(phone, selectedRole, otp, challengeToken);
+      persistAuthenticatedSession(data);
 
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('token', data.accessToken);
-        localStorage.setItem('access_token', data.accessToken);
-        localStorage.setItem('auth_token', data.accessToken);
-        localStorage.setItem('current_user_role', data.user.role);
-        localStorage.setItem('current_institute_id', data.user.instituteId || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
-        
-        if (data.user.studentProfileId) {
-          localStorage.setItem('current_student_profile_id', data.user.studentProfileId);
-        }
-
-        document.cookie = `auth_token=${data.accessToken}; path=/; max-age=2592000; SameSite=Lax`;
-      }
-
-      const targetUrl = data.redirectUrl || (selectedRole === 'STUDENT' ? '/student' : selectedRole === 'TEACHER' ? '/teacher' : '/admin');
+      const targetUrl =
+        data.redirectUrl ||
+        (selectedRole === 'STUDENT'
+          ? '/student'
+          : selectedRole === 'TEACHER'
+            ? '/teacher'
+            : selectedRole === 'SUPER_ADMIN'
+              ? '/super-admin'
+              : '/admin');
       if (typeof window !== 'undefined') {
         window.location.href = targetUrl;
       } else {
@@ -159,18 +149,12 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      const fallbackUrl = selectedRole === 'STUDENT' ? '/student' : selectedRole === 'TEACHER' ? '/teacher' : '/admin';
-      if (typeof window !== 'undefined') {
-        window.location.href = fallbackUrl;
-      } else {
-        router.push(fallbackUrl);
-      }
+      setErrorMessage(err?.message || 'Authentication failed. Please check your OTP and registered role.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Direct 1-click test launcher
   const handleQuickLaunch = async (role: RoleOption, targetPhone: string) => {
     setSelectedRole(role);
     setPhone(targetPhone);
@@ -178,33 +162,25 @@ export default function LoginPage() {
     setErrorMessage(null);
 
     try {
-      const data = await executeLoginRequest(targetPhone, role, '123456');
+      const data = await executeLoginRequest(targetPhone, role, '');
+      persistAuthenticatedSession(data);
 
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('token', data.accessToken);
-        localStorage.setItem('access_token', data.accessToken);
-        localStorage.setItem('auth_token', data.accessToken);
-        localStorage.setItem('current_user_role', data.user.role);
-        localStorage.setItem('current_institute_id', data.user.instituteId || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
-        if (data.user.studentProfileId) {
-          localStorage.setItem('current_student_profile_id', data.user.studentProfileId);
-        }
-        document.cookie = `auth_token=${data.accessToken}; path=/; max-age=2592000; SameSite=Lax`;
-      }
-
-      const targetUrl = data.redirectUrl || (role === 'STUDENT' ? '/student' : role === 'TEACHER' ? '/teacher' : '/admin');
+      const targetUrl =
+        data.redirectUrl ||
+        (role === 'STUDENT'
+          ? '/student'
+          : role === 'TEACHER'
+            ? '/teacher'
+            : role === 'SUPER_ADMIN'
+              ? '/super-admin'
+              : '/admin');
       if (typeof window !== 'undefined') {
         window.location.href = targetUrl;
       } else {
         router.push(targetUrl);
       }
-    } catch {
-      const fallbackUrl = role === 'STUDENT' ? '/student' : role === 'TEACHER' ? '/teacher' : '/admin';
-      if (typeof window !== 'undefined') {
-        window.location.href = fallbackUrl;
-      } else {
-        router.push(fallbackUrl);
-      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Unable to sign in with the selected account.');
     } finally {
       setIsLoading(false);
     }
@@ -234,7 +210,7 @@ export default function LoginPage() {
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">
               Select Your Role
             </label>
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               
               {/* Role: Student */}
               <button
@@ -293,6 +269,25 @@ export default function LoginPage() {
                 <span className="text-[10px] text-slate-400 mt-0.5">Institute Admin</span>
               </button>
 
+              {/* Role: Super Admin */}
+              <button
+                type="button"
+                onClick={() => handleRoleChange('SUPER_ADMIN')}
+                className={`flex flex-col items-center p-3 rounded-2xl border-2 transition text-center ${
+                  selectedRole === 'SUPER_ADMIN'
+                    ? 'border-amber-600 bg-amber-50/70 text-amber-900 shadow-sm'
+                    : 'border-slate-200 hover:border-slate-300 bg-white text-slate-600'
+                }`}
+              >
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-1.5 ${
+                  selectedRole === 'SUPER_ADMIN' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  <ShieldCheck size={18} />
+                </div>
+                <span className="text-xs font-bold">Super Admin</span>
+                <span className="text-[10px] text-slate-400 mt-0.5">Platform Root</span>
+              </button>
+
             </div>
           </div>
 
@@ -323,30 +318,10 @@ export default function LoginPage() {
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="9642402639"
+                    placeholder="Enter registered 10-digit mobile number"
                     required
                     className="w-full pl-12 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
                   />
-                </div>
-
-                {/* Role-based suggestion pill */}
-                <div className="mt-2 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">Quick fill registered number:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (selectedRole === 'STUDENT') setPhone('9642402639');
-                      else if (selectedRole === 'TEACHER') setPhone('9876500011');
-                      else setPhone('9876543210');
-                    }}
-                    className="text-blue-600 font-bold hover:underline"
-                  >
-                    {selectedRole === 'STUDENT'
-                      ? 'Shaik Shafiulla (9642402639)'
-                      : selectedRole === 'TEACHER'
-                      ? 'Dr. John Mark (9876500011)'
-                      : 'Samuel Admin (9876543210)'}
-                  </button>
                 </div>
               </div>
 
@@ -388,7 +363,7 @@ export default function LoginPage() {
                 />
 
                 <p className="text-[11px] text-slate-500 mt-2 text-center">
-                  Verification code sent to <strong>+91 {phone}</strong>. (Test OTP: <strong className="text-blue-600 font-bold">123456</strong>)
+                  Enter the 6-digit verification code for <strong>+91 {phone}</strong>.
                 </p>
               </div>
 
@@ -401,46 +376,11 @@ export default function LoginPage() {
                   isLoading={isLoading}
                 >
                   <CheckCircle2 size={16} className="mr-1.5" />
-                  <span>Verify & Enter {selectedRole === 'STUDENT' ? 'Student Portal' : selectedRole === 'TEACHER' ? 'Teacher Portal' : 'Admin Portal'}</span>
+                  <span>Verify & Enter {selectedRole === 'STUDENT' ? 'Student Portal' : selectedRole === 'TEACHER' ? 'Teacher Portal' : selectedRole === 'SUPER_ADMIN' ? 'Super Admin Portal' : 'Admin Portal'}</span>
                 </Button>
               </div>
             </form>
           )}
-
-          {/* 3. Direct Role Demo Shortcuts */}
-          <div className="pt-4 border-t border-slate-100">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center mb-3">
-              Direct Instant Role Access
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickLaunch('STUDENT', '9642402639')}
-                className="flex items-center justify-center gap-1.5 py-2.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition border border-blue-100"
-              >
-                <UserCheck size={14} />
-                <span>Student</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLaunch('TEACHER', '9876500011')}
-                className="flex items-center justify-center gap-1.5 py-2.5 px-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl text-xs font-bold transition border border-purple-100"
-              >
-                <GraduationCap size={14} />
-                <span>Teacher</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLaunch('ADMIN', '9876543210')}
-                className="flex items-center justify-center gap-1.5 py-2.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-bold transition border border-emerald-100"
-              >
-                <Building2 size={14} />
-                <span>Admin</span>
-              </button>
-            </div>
-          </div>
 
         </div>
 

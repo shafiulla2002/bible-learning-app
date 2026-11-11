@@ -5,6 +5,7 @@ import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { apiFetch, apiFetchResponse } from '@/lib/api';
 import {
   Award,
   Download,
@@ -49,12 +50,7 @@ export default function StudentCertificatesPage() {
     setLoading(true);
     setErrorMessage(null);
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      else headers['x-dev-role'] = 'STUDENT';
-
-      const res = await fetch('/api/students/certificates', { headers });
+      const res = await apiFetchResponse('/students/certificates');
       if (res.ok) {
         const data = await res.json();
         setCertificates(Array.isArray(data.certificates) ? data.certificates : []);
@@ -261,8 +257,25 @@ export default function StudentCertificatesPage() {
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => {
-                      alert(`Downloading certificate ${cert.certificateNo} PDF...`);
+                    onClick={async () => {
+                      try {
+                        const doc = await apiFetch<{ html?: string; fileName?: string }>(
+                          `/students/certificates/${cert.id}/document`,
+                        );
+                        if (doc?.html) {
+                          const blob = new Blob([doc.html], { type: 'text/html' });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = doc.fileName || `${cert.certificateNo}.html`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        } else {
+                          window.print();
+                        }
+                      } catch {
+                        window.print();
+                      }
                     }}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs h-9 font-semibold gap-1.5 shadow-xs"
                   >
@@ -345,8 +358,8 @@ export default function StudentCertificatesPage() {
                 </Button>
                 <Button
                   onClick={() => {
-                    alert(`Downloading certificate PDF: ${selectedCert.certificateNo}`);
                     setSelectedCert(null);
+                    setTimeout(() => window.print(), 150);
                   }}
                   className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-10 px-6 font-semibold gap-1.5 shadow-sm"
                 >

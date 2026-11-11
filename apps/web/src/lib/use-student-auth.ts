@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch, clearCache } from './api';
+import { apiFetch, apiFetchResponse, clearCache } from './api';
 
 export interface StudentAuthContext {
   student: {
@@ -28,28 +28,28 @@ export interface StudentAuthContext {
   activeEnrolmentCount: number;
 }
 
-export const DEFAULT_SHAFIULLA_AUTH: StudentAuthContext = {
+const EMPTY_STUDENT_AUTH: StudentAuthContext = {
   student: {
-    id: '0b1dd816-4c77-4a7a-9837-22c3627d0bdc',
-    fullName: 'Shaik Shafiulla',
-    email: 'shaikshafiulla20012@gmail.com',
-    phone: '+91 9642402639',
+    id: '',
+    fullName: '',
+    email: null,
+    phone: null,
     avatarUrl: null,
   },
   profile: {
-    studentProfileId: '6a0ce008-8794-4395-bb24-8562a1bdc561',
-    admissionNo: 'ADM-2026-038',
-    church: 'Grace Bible Church, Hyderabad',
+    studentProfileId: '',
+    admissionNo: '',
+    church: null,
     preferredLanguage: 'English',
-    status: 'ACTIVE',
+    status: 'PENDING',
   },
   institute: {
-    id: 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5',
-    name: 'Grace Bible Institute',
-    code: 'GBI',
+    id: '',
+    name: '',
+    code: '',
     logoUrl: null,
   },
-  activeEnrolmentCount: 4,
+  activeEnrolmentCount: 0,
 };
 
 export interface UseStudentAuthOptions {
@@ -96,7 +96,7 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
 
       // Server-side cookie clear request
       try {
-        fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+        apiFetchResponse('/auth/logout', { method: 'POST' }).catch(() => null);
       } catch {}
 
       // Always perform hard navigation to /login to flush React state and unmount portals
@@ -109,21 +109,14 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     setIsLoading(true);
     setError(null);
     try {
-      if (typeof window !== 'undefined') {
-        const hasToken =
-          localStorage.getItem('token') ||
-          localStorage.getItem('access_token') ||
-          localStorage.getItem('auth_token') ||
-          document.cookie.includes('auth_token=');
-
-        if (!hasToken && options.requireAuth) {
-          throw new Error('401 Unauthorized: Session terminated');
-        }
-      }
-
-      const res = await apiFetch<StudentAuthContext>('/students/me', {
-        ttlMs: 60000, // 1 min safe cache
+      const rawRes = await apiFetchResponse('/students/me', {
+        cache: 'no-store',
       });
+      if (!rawRes.ok) {
+        const errJson = await rawRes.json().catch(() => ({}));
+        throw new Error(errJson?.message || `${rawRes.status} Unauthorized`);
+      }
+      const res: StudentAuthContext = await rawRes.json();
 
       if (res && res.student && res.profile) {
         setData(res);
@@ -138,15 +131,12 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
       const errMsg = err?.message || 'Authentication error';
       setError(errMsg);
 
-      // If unauthorized and requireAuth is active, immediately redirect to login
-      if (options.requireAuth) {
-        setData(null);
+      // If unauthorized and requireAuth is active (default), immediately redirect to login
+      setData(null);
+      if (options.requireAuth !== false) {
         logout();
         return;
       }
-
-      // For preview / demo purposes, only fallback gracefully when requireAuth is false
-      setData(DEFAULT_SHAFIULLA_AUTH);
     } finally {
       setIsLoading(false);
     }
@@ -156,7 +146,7 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     fetchStudentContext();
   }, [fetchStudentContext]);
 
-  const resolved = data || DEFAULT_SHAFIULLA_AUTH;
+  const resolved = data || EMPTY_STUDENT_AUTH;
 
   return {
     student: resolved.student,

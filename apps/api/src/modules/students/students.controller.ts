@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -10,9 +11,12 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { StudentsService } from './students.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import {
   CreateStudentAdmissionSchema,
@@ -27,7 +31,8 @@ import {
 } from '@bible-lms/shared';
 
 @Controller('institutes/:instituteId/students')
-@UseGuards(JwtAuthGuard, InstituteTenantGuard)
+@UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
+@Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
 export class StudentsController {
   constructor(private readonly studentsService: StudentsService) {}
 
@@ -51,6 +56,7 @@ export class StudentsController {
   }
 
   @Get('me')
+  @Roles(Role.STUDENT)
   async getStudentMe(@CurrentUser() user: any) {
     return this.studentsService.getStudentMe(user);
   }
@@ -109,5 +115,13 @@ export class StudentsController {
       body.courseId,
       body.batchId,
     );
+  }
+
+  @Delete(':id')
+  async deleteStudent(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+  ) {
+    return this.studentsService.deleteStudent(instituteId, id);
   }
 }

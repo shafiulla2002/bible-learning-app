@@ -3,6 +3,7 @@
 import React, { useState, useEffect, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   Clock,
   CheckCircle2,
@@ -68,22 +69,7 @@ export default function StudentExamPlayerPage({
     async function fetchAttempt() {
       try {
         setIsLoading(true);
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
-        const res = await fetch(`/api/students/exams/${examId}/attempts/${attemptId}`, { headers });
+        const res = await apiFetchResponse(`/students/exams/${examId}/attempts/${attemptId}`);
         if (!res.ok) throw new Error('Failed to load exam attempt');
         const data = await res.json();
 
@@ -98,48 +84,9 @@ export default function StudentExamPlayerPage({
         }
         setAnswers(initialAnswers);
       } catch (err: any) {
-        console.warn('Attempt fallback:', err.message);
-        // Fallback mock questions for preview
-        const mockQuestions: ExamQuestion[] = [
-          {
-            id: 'q1',
-            number: 1,
-            prompt: 'Which biblical genre requires distinguishing between normative narrative and descriptive history?',
-            type: 'MCQ_SINGLE',
-            marks: 5,
-            options: [
-              { id: 'opt1', label: 'Historical Narrative' },
-              { id: 'opt2', label: 'Wisdom Literature' },
-              { id: 'opt3', label: 'Apocalyptic Prophecy' },
-              { id: 'opt4', label: 'Pauline Epistles' },
-            ],
-            savedAnswer: null,
-          },
-          {
-            id: 'q2',
-            number: 2,
-            prompt: 'The grammatical-historical method prioritizes the author original intended meaning over modern reader interpretations.',
-            type: 'TRUE_FALSE',
-            marks: 5,
-            options: [
-              { id: 'opt-t', label: 'True' },
-              { id: 'opt-f', label: 'False' },
-            ],
-            savedAnswer: null,
-          },
-        ];
-        setQuestions(mockQuestions);
-        setAttempt({
-          id: attemptId,
-          examId,
-          examTitle: 'Mid-Term Examination: Biblical Hermeneutics & Exegesis',
-          durationMin: 30,
-          totalMarks: 50,
-          startedAt: new Date().toISOString(),
-          status: 'IN_PROGRESS',
-          remainingSec: 1800,
-          isExpired: false,
-        });
+        console.error('Failed to load exam attempt:', err?.message || err);
+        setQuestions([]);
+        setAttempt(null);
       } finally {
         setIsLoading(false);
       }
@@ -177,18 +124,8 @@ export default function StudentExamPlayerPage({
   const triggerAutoSave = async (questionId: string, chosen: string) => {
     try {
       setIsSaving(true);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (typeof window !== 'undefined') {
-        const token =
-          localStorage.getItem('token') ||
-          localStorage.getItem('access_token') ||
-          localStorage.getItem('auth_token');
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      await fetch(`/api/students/exams/${examId}/attempts/${attemptId}/answers`, {
+      await apiFetchResponse(`/students/exams/${examId}/attempts/${attemptId}/answers`, {
         method: 'POST',
-        headers,
         body: JSON.stringify({ answers: { [questionId]: chosen } }),
       });
     } catch {
@@ -205,24 +142,8 @@ export default function StudentExamPlayerPage({
   const handleFinalSubmit = async () => {
     try {
       setIsSubmitting(true);
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (typeof window !== 'undefined') {
-        const token =
-          localStorage.getItem('token') ||
-          localStorage.getItem('access_token') ||
-          localStorage.getItem('auth_token');
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      if (profile?.studentProfileId) {
-        headers['x-dev-user-id'] = student?.id || '';
-        headers['x-dev-role'] = 'STUDENT';
-        headers['x-dev-institute-id'] = institute?.id || '';
-      }
-
-      const res = await fetch(`/api/students/exams/${examId}/attempts/${attemptId}/submit`, {
+      const res = await apiFetchResponse(`/students/exams/${examId}/attempts/${attemptId}/submit`, {
         method: 'POST',
-        headers,
         body: JSON.stringify({ answers }),
       });
 

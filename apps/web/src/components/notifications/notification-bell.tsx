@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  apiFetchResponse,
   notificationsApi,
   resolveVerifiedAdminContext,
   NotificationItemDto,
@@ -129,15 +130,15 @@ export function NotificationBell({
   const effectiveApiPrefix =
     apiPrefix ||
     (role === 'TEACHER'
-      ? '/api/teachers/notifications'
+      ? '/teachers/notifications'
       : role === 'STUDENT'
-      ? '/api/students/notifications'
+      ? '/students/notifications'
       : '');
 
   const loadUnreadCount = useCallback(async (instId?: string) => {
     try {
       if (role === 'TEACHER' || role === 'STUDENT') {
-        const res = await fetch(`${effectiveApiPrefix}/unread-count`, {
+        const res = await apiFetchResponse(`${effectiveApiPrefix}/unread-count`, {
           headers: { Accept: 'application/json' },
         });
         if (res.ok) {
@@ -167,7 +168,7 @@ export function NotificationBell({
       setLoadingList(true);
       try {
         if (role === 'TEACHER' || role === 'STUDENT') {
-          const res = await fetch(
+          const res = await apiFetchResponse(
             `${effectiveApiPrefix}?page=1&limit=8&status=${unreadOnly ? 'UNREAD' : 'ALL'}`,
             { headers: { Accept: 'application/json' } },
           );
@@ -240,9 +241,8 @@ export function NotificationBell({
     if (notif.isRead) return;
     try {
       if (role === 'TEACHER' || role === 'STUDENT') {
-        await fetch(`${effectiveApiPrefix}/${notif.id}/read`, {
+        await apiFetchResponse(`${effectiveApiPrefix}/${notif.id}/read`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
         });
       } else if (instituteId) {
         await notificationsApi.markAsRead(instituteId, notif.id);
@@ -261,9 +261,8 @@ export function NotificationBell({
     if (unreadCount === 0) return;
     try {
       if (role === 'TEACHER' || role === 'STUDENT') {
-        const res = await fetch(effectiveApiPrefix, {
+        const res = await apiFetchResponse(effectiveApiPrefix, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ category: 'ALL' }),
         });
         if (res.ok) {
@@ -285,9 +284,8 @@ export function NotificationBell({
     if (!notif.isRead) {
       try {
         if (role === 'TEACHER' || role === 'STUDENT') {
-          await fetch(`${effectiveApiPrefix}/${notif.id}/read`, {
+          await apiFetchResponse(`${effectiveApiPrefix}/${notif.id}/read`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
           });
         } else if (instituteId) {
           await notificationsApi.markAsRead(instituteId, notif.id);

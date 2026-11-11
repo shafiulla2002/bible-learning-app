@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { PortalShell } from '@/components/layout/portal-shell';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { teacherApi } from '@/lib/api';
+import { teacherApi, resolveActiveInstituteId } from '@/lib/api';
 import {
   GraduationCap,
   Users,
@@ -79,7 +79,7 @@ function compressImageToThumbnail(file: File, maxDim = 256, quality = 0.82): Pro
 
 export default function RegisterTeacherPage() {
   const router = useRouter();
-  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+  const [instituteId, setInstituteId] = useState<string>('');
 
   // Form State
   const [fullName, setFullName] = useState('');
@@ -109,10 +109,9 @@ export default function RegisterTeacherPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedId = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-      setInstituteId(storedId);
-    }
+    resolveActiveInstituteId().then((id) => {
+      if (id) setInstituteId(id);
+    });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

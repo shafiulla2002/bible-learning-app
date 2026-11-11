@@ -222,3 +222,18 @@ export class UpdateUserStatusDto {
   status: 'ACTIVE' | 'INVITED' | 'SUSPENDED';
 }
 
+export class UpdatePaymentGatewayDto {
+  @IsString()
+  @Matches(/^rzp_(test|live)_[A-Za-z0-9]+$/, {
+    message: 'keyId must be a valid Razorpay Key ID starting with rzp_test_ or rzp_live_',
+  })
+  keyId: string;
+
+  @IsString()
+  keySecret: string;
+
+  @IsOptional()
+  @IsString()
+  webhookSecret?: string;
+}
+

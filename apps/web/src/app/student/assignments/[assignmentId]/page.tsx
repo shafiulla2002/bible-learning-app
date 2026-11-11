@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   ArrowLeft,
   Calendar,
@@ -52,7 +53,7 @@ export default function StudentAssignmentDetailPage({
 }) {
   const { assignmentId } = use(params);
   const router = useRouter();
-  const { student, profile, institute } = useStudentAuth();
+  const { logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
 
   const [assignment, setAssignment] = useState<AssignmentDetailData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -70,22 +71,11 @@ export default function StudentAssignmentDetailPage({
         setIsLoading(true);
         setError(null);
 
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await apiFetchResponse(`/students/assignments/${assignmentId}`);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
         }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
-        const res = await fetch(`/api/students/assignments/${assignmentId}`, { headers });
         if (!res.ok) throw new Error(`Failed to load assignment details (${res.status})`);
         const json = await res.json();
         setAssignment(json.assignment);
@@ -96,32 +86,16 @@ export default function StudentAssignmentDetailPage({
           setFileUrl(json.assignment.submission.fileUrl);
         }
       } catch (err: any) {
-        console.warn('Assignment detail fallback:', err.message);
-        // Fallback demo data
-        setAssignment({
-          id: assignmentId,
-          title: 'Theological Essay: Covenant & Dispensational Frameworks',
-          instructions:
-            'Submit a 1,500-word critical evaluation comparing Covenant Theology and Progressive Dispensationalism. Cite at least 5 scholarly sources including Herman Bavinck and Geerhardus Vos.',
-          courseId: 'c1',
-          courseTitle: 'Building Biblical Theology',
-          batchId: 'b1',
-          batchName: 'Batch 2026-A Diploma',
-          instructorName: 'Dr. Mary Thomas',
-          dueAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-          maxMarks: 100,
-          status: 'PENDING',
-          isOverdue: false,
-          canSubmit: true,
-          submission: null,
-        });
+        console.error('Failed to load assignment details:', err?.message || err);
+        setAssignment(null);
+        setError(err?.message || 'Unable to load assignment details');
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchDetail();
-  }, [assignmentId, profile?.studentProfileId, student?.id, institute?.id]);
+  }, [assignmentId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,24 +108,8 @@ export default function StudentAssignmentDetailPage({
       setIsSubmitting(true);
       setSubmitSuccess(null);
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (typeof window !== 'undefined') {
-        const token =
-          localStorage.getItem('token') ||
-          localStorage.getItem('access_token') ||
-          localStorage.getItem('auth_token');
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      if (profile?.studentProfileId) {
-        headers['x-dev-user-id'] = student?.id || '';
-        headers['x-dev-role'] = 'STUDENT';
-        headers['x-dev-institute-id'] = institute?.id || '';
-      }
-
-      const res = await fetch(`/api/students/assignments/${assignmentId}/submit`, {
+      const res = await apiFetchResponse(`/students/assignments/${assignmentId}/submit`, {
         method: 'POST',
-        headers,
         body: JSON.stringify({ answerText, fileUrl }),
       });
 

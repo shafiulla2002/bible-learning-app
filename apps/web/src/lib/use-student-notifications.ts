@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export type NotificationCategory =
   | 'STUDENT'
@@ -64,7 +65,7 @@ export function useStudentNotifications(
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await fetch('/api/students/notifications/unread-count', {
+      const res = await apiFetchResponse('/students/notifications/unread-count', {
         headers: { Accept: 'application/json' },
       });
       if (!res.ok) return;
@@ -100,9 +101,9 @@ export function useStudentNotifications(
           queryParams.set('search', search.trim());
         }
 
-        const res = await fetch(
-          `/api/students/notifications?${queryParams.toString()}`,
-          { credentials: 'same-origin', headers: { Accept: 'application/json' } },
+        const res = await apiFetchResponse(
+          `/students/notifications?${queryParams.toString()}`,
+          { headers: { Accept: 'application/json' } },
         );
 
         if (!res.ok) {
@@ -175,9 +176,8 @@ export function useStudentNotifications(
     setUnreadCount((c) => Math.max(0, c - 1));
 
     try {
-      await fetch(`/api/students/notifications/${notificationId}/read`, {
+      await apiFetchResponse(`/students/notifications/${notificationId}/read`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
       });
       window.dispatchEvent(new CustomEvent('bible-lms:notifications-updated'));
     } catch {
@@ -198,9 +198,8 @@ export function useStudentNotifications(
     }
 
     try {
-      const res = await fetch('/api/students/notifications', {
+      const res = await apiFetchResponse('/students/notifications/mark-all-read', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: selectedCategory || 'ALL' }),
       });
       if (res.ok) {

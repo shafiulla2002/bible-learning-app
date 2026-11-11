@@ -6,16 +6,26 @@ import {
   Param,
   Body,
   Query,
+  Res,
   UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { Role } from '@prisma/client';
 import { StudentsService } from './students.service';
+import {
+  resolveResourceDelivery,
+  resolveVideoSource,
+} from '../courses/pdf-syllabus.util';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 
 @Controller('students')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.STUDENT)
 export class StudentMeController {
   constructor(private readonly studentsService: StudentsService) {}
 
@@ -47,6 +57,20 @@ export class StudentMeController {
     @Param('courseId') courseId: string
   ) {
     return this.studentsService.getStudentCourseDetail(user, courseId);
+  }
+
+  @Get('courses/:courseId/syllabus')
+  @HttpCode(HttpStatus.OK)
+  async getStudentCourseSyllabus(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, fileName } = await this.studentsService.getStudentCourseSyllabusPdf(user, courseId);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
   }
 
   @Get('courses/:courseId/lessons/:lessonId')
@@ -97,6 +121,71 @@ export class StudentMeController {
     @Param('sessionId') sessionId: string
   ) {
     return this.studentsService.getStudentLiveSessionDetail(user, sessionId);
+  }
+
+  @Post('live-sessions/:sessionId/join')
+  @HttpCode(HttpStatus.OK)
+  async joinStudentLiveSession(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string
+  ) {
+    return this.studentsService.joinStudentLiveSession(user, sessionId);
+  }
+
+  @Get('materials/:resourceId/content')
+  @HttpCode(HttpStatus.OK)
+  async getStudentMaterialContent(
+    @CurrentUser() user: any,
+    @Param('resourceId') resourceId: string,
+    @Query('meta') meta: string | undefined,
+    @Query('download') download: string | undefined,
+    @Query('inline') inline: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const wantsStream =
+      download === '1' ||
+      download === 'true' ||
+      inline === '1' ||
+      inline === 'true';
+
+    if (!wantsStream) {
+      const payload = await this.studentsService.getStudentMaterialContent(user, resourceId);
+      if (meta === '1' || meta === 'true') {
+        const storageKey = (payload as any)?.data?.storageKey || (payload as any)?.storageKey || '';
+        return {
+          ...(payload as any),
+          video: resolveVideoSource(storageKey),
+        };
+      }
+      return payload;
+    }
+
+    const info = await this.studentsService.getStudentMaterialContentForStreaming(
+      user,
+      resourceId,
+      download === '1' || download === 'true',
+    );
+    const mode = inline === '1' || inline === 'true' ? 'inline' : 'download';
+    const delivery = resolveResourceDelivery({
+      title: info.title,
+      resourceType: info.kind,
+      url: info.storageKey,
+      content: info.lessonBody,
+      courseTitle: info.courseTitle,
+      lessonTitle: info.lessonTitle,
+      instituteName: info.instituteName,
+      mode,
+    });
+
+    if (delivery.kind === 'redirect') {
+      res.redirect(delivery.url);
+      return;
+    }
+
+    res.setHeader('Content-Type', delivery.mimeType);
+    res.setHeader('Content-Disposition', `${delivery.disposition}; filename="${delivery.fileName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(delivery.buffer);
   }
 
   @Get('attendance')
@@ -257,7 +346,17 @@ export class StudentMeController {
   async verifyAndProcessPayment(
     @CurrentUser() user: any,
     @Param('invoiceId') invoiceId: string,
-    @Body() body: { amountPaise: number; paymentMode?: string; referenceNumber?: string; idempotencyKey?: string }
+    @Body()
+    body: {
+      amountPaise?: number;
+      razorpayOrderId?: string;
+      razorpay_order_id?: string;
+      razorpayPaymentId?: string;
+      razorpay_payment_id?: string;
+      razorpaySignature?: string;
+      razorpay_signature?: string;
+      method?: string;
+    },
   ) {
     return this.studentsService.verifyAndProcessPayment(user, invoiceId, body);
   }
@@ -284,6 +383,15 @@ export class StudentMeController {
     @Param('certificateId') certificateId: string
   ) {
     return this.studentsService.getStudentCertificateDetail(user, certificateId);
+  }
+
+  @Get('certificates/:certificateId/document')
+  @HttpCode(HttpStatus.OK)
+  async getStudentCertificateDocument(
+    @CurrentUser() user: any,
+    @Param('certificateId') certificateId: string
+  ) {
+    return this.studentsService.getStudentCertificateDocument(user, certificateId);
   }
 
   @Get('profile')
@@ -347,6 +455,24 @@ export class StudentMeController {
     @Param('notificationId') notificationId: string,
   ) {
     return this.studentsService.markStudentNotificationRead(user, notificationId);
+  }
+
+  @Post('notifications/:notificationId/read')
+  @HttpCode(HttpStatus.OK)
+  async markStudentNotificationReadPost(
+    @CurrentUser() user: any,
+    @Param('notificationId') notificationId: string,
+  ) {
+    return this.studentsService.markStudentNotificationRead(user, notificationId);
+  }
+
+  @Post('notifications')
+  @HttpCode(HttpStatus.OK)
+  async markAllStudentNotificationsReadAlias(
+    @CurrentUser() user: any,
+    @Body() body: any,
+  ) {
+    return this.studentsService.markAllStudentNotificationsRead(user, body);
   }
 
   @Post('notifications/mark-all-read')

@@ -1,4 +1,4 @@
-import { RoleType } from './roles-permissions.js';
+import type { RoleType } from './roles-permissions.js';
 
 export interface UserSession {
   userId: string;
@@ -148,10 +148,18 @@ export interface CourseSummaryItem {
   categoryId: string;
   categoryName: string;
   level: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+  courseType?: 'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE';
+  learningMode?: 'ONLINE' | 'OFFLINE' | 'HYBRID';
+  durationLabel?: string;
+  eligibility?: string;
   language: string;
   pricing: 'FREE' | 'PAID';
   price: number;
   salePrice?: number;
+  registrationFee?: number;
+  requiresApproval?: boolean;
+  enrollmentStartsAt?: string;
+  enrollmentEndsAt?: string;
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   coverImage?: string;
   enrolledCount: number;

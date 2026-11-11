@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   User,
   Mail,
@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
 import { useTeacherAuth } from '@/lib/use-teacher-auth';
+import { teacherMeApi } from '@/lib/api';
 
 export default function TeacherProfilePage() {
   const { teacher, institute, stats, isLoading, error, refresh } = useTeacherAuth({
@@ -28,17 +29,53 @@ export default function TeacherProfilePage() {
     redirectTo: '/login',
   });
 
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [qualifications, setQualifications] = useState('');
+  const [specialization, setSpecialization] = useState('');
+  const [experienceYears, setExperienceYears] = useState<string>('');
+  const [bio, setBio] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const handleSavePreferences = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (teacher) {
+      setFullName(teacher.fullName || '');
+      setEmail(teacher.email || '');
+      setQualifications(teacher.qualifications || '');
+      setSpecialization(teacher.specialization || '');
+      setExperienceYears(
+        teacher.experienceYears !== null && teacher.experienceYears !== undefined
+          ? String(teacher.experienceYears)
+          : '',
+      );
+      setBio(teacher.bio || '');
+    }
+  }, [teacher]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    setTimeout(() => {
-      setIsSaving(false);
+    setSaveError(null);
+    setSaveSuccess(false);
+    try {
+      await teacherMeApi.updateProfile({
+        fullName: fullName.trim() || undefined,
+        email: email.trim(),
+        qualifications: qualifications.trim(),
+        specialization: specialization.trim(),
+        experienceYears: experienceYears ? Number(experienceYears) : undefined,
+        bio: bio.trim(),
+      });
       setSaveSuccess(true);
+      await refresh();
       setTimeout(() => setSaveSuccess(false), 3000);
-    }, 600);
+    } catch (err: any) {
+      setSaveError(err?.message || 'Failed to save faculty profile updates.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (isLoading) {
@@ -184,96 +221,162 @@ export default function TeacherProfilePage() {
         </div>
 
         {/* Details & Credentials */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Academic & Faculty Info */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
-              <GraduationCap size={18} className="text-indigo-600" />
-              Academic & Teaching Credentials
-            </h3>
+        <form onSubmit={handleSaveProfile} className="space-y-6">
+          {saveError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium">
+              {saveError}
+            </div>
+          )}
+          {saveSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
+              <CheckCircle2 size={16} /> Faculty profile saved to PostgreSQL successfully.
+            </div>
+          )}
 
-            <div className="space-y-4 text-xs">
-              <div>
-                <span className="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                  Faculty Qualifications
-                </span>
-                <p className="text-sm font-medium text-slate-800 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                  {teacher?.qualifications || 'M.Div / Th.M in Biblical Studies'}
-                </p>
-              </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Academic & Faculty Info */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
+                <GraduationCap size={18} className="text-indigo-600" />
+                Academic & Teaching Credentials
+              </h3>
 
-              <div>
-                <span className="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                  Department / Specialization
-                </span>
-                <p className="text-sm font-medium text-slate-800 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                  {teacher?.specialization || 'Systematic Theology & New Testament Exegesis'}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4 text-xs">
                 <div>
-                  <span className="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                    Teaching Experience
-                  </span>
-                  <p className="text-sm font-medium text-slate-800 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    {teacher?.experienceYears ? `${teacher.experienceYears} Years` : '5+ Years'}
-                  </p>
+                  <label className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                    Faculty Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Enter faculty name"
+                    className="w-full text-sm font-medium text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200"
+                  />
                 </div>
+
                 <div>
-                  <span className="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                    Faculty Status
+                  <label className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                    Faculty Qualifications
+                  </label>
+                  <input
+                    type="text"
+                    value={qualifications}
+                    onChange={(e) => setQualifications(e.target.value)}
+                    placeholder="e.g. M.Div / Th.M in Biblical Studies"
+                    className="w-full text-sm font-medium text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                    Department / Specialization
+                  </label>
+                  <input
+                    type="text"
+                    value={specialization}
+                    onChange={(e) => setSpecialization(e.target.value)}
+                    placeholder="e.g. Systematic Theology & New Testament Exegesis"
+                    className="w-full text-sm font-medium text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                      Teaching Experience (Years)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={experienceYears}
+                      onChange={(e) => setExperienceYears(e.target.value)}
+                      placeholder="Years"
+                      className="w-full text-sm font-medium text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                      Faculty Status
+                    </span>
+                    <p className="text-sm font-medium text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                      {teacher?.status || 'ACTIVE'}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                    Faculty Bio
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={bio}
+                    onChange={(e) => setBio(e.target.value)}
+                    placeholder="Short theological teaching biography..."
+                    className="w-full text-sm font-medium text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Contact Details */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
+                <Mail size={18} className="text-indigo-600" />
+                Official Institute Contact
+              </h3>
+
+              <div className="space-y-4 text-xs">
+                <div>
+                  <label className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                    Registered Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="faculty@institute.edu"
+                    className="w-full text-sm font-mono text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200"
+                  />
+                </div>
+
+                <div>
+                  <span className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                    Phone (E.164 Verified)
                   </span>
-                  <p className="text-sm font-medium text-slate-800 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    {teacher?.status || 'Active Member'}
-                  </p>
+                  <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-sm text-slate-800">
+                    <Phone size={16} className="text-slate-400 shrink-0" />
+                    <span className="font-mono">{teacher?.phone || 'Not configured'}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <span className="font-semibold text-slate-500 uppercase tracking-wider block mb-1">
+                    Affiliated Bible Institute
+                  </span>
+                  <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-sm text-slate-800">
+                    <Building size={16} className="text-slate-400 shrink-0" />
+                    <span>
+                      {institute?.name} ({institute?.code})
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Contact Details */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-5">
-            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
-              <Mail size={18} className="text-indigo-600" />
-              Official Institute Contact
-            </h3>
-
-            <div className="space-y-4 text-xs">
-              <div>
-                <span className="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                  Registered Email Address
-                </span>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100 text-sm text-slate-800">
-                  <Mail size={16} className="text-slate-400 shrink-0" />
-                  <span className="font-mono">{teacher?.email || 'N/A'}</span>
-                </div>
-              </div>
-
-              <div>
-                <span className="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                  Phone (E.164 Verified)
-                </span>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100 text-sm text-slate-800">
-                  <Phone size={16} className="text-slate-400 shrink-0" />
-                  <span className="font-mono">{teacher?.phone || '+91 9876543210'}</span>
-                </div>
-              </div>
-
-              <div>
-                <span className="font-semibold text-slate-400 uppercase tracking-wider block mb-1">
-                  Affiliated Bible Institute
-                </span>
-                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100 text-sm text-slate-800">
-                  <Building size={16} className="text-slate-400 shrink-0" />
-                  <span>
-                    {institute?.name} ({institute?.code})
-                  </span>
-                </div>
-              </div>
-            </div>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition shadow-sm disabled:opacity-60"
+            >
+              <Save size={16} />
+              {isSaving ? 'Saving Profile...' : 'Save Faculty Profile'}
+            </button>
           </div>
-        </div>
+        </form>
       </div>
     </TeacherShell>
   );

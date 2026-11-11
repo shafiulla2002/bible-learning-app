@@ -3,8 +3,10 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { getRequiredJwtSecret } from '../jwt-secret.util';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -13,48 +15,51 @@ export class JwtAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers['authorization'];
+    let token = '';
+    let fromCookie = false;
 
-    // 1. Check Bearer token in Authorization header
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
-      try {
-        const payload = this.jwtService.verify(token, {
-          secret: process.env.JWT_SECRET || 'dev-secret-key-bible-institute-lms-12345',
-        });
-        request.user = payload;
-        return true;
-      } catch (err) {
-        throw new UnauthorizedException('Invalid or expired authentication token');
+    if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else if (request.cookies) {
+      token =
+        request.cookies.auth_token ||
+        request.cookies.access_token ||
+        request.cookies.token ||
+        '';
+      if (token) {
+        fromCookie = true;
       }
     }
 
-    // 2. Allow simulated / dev header in non-production environments
-    const isDev = process.env.NODE_ENV !== 'production';
-    const devUserId = request.headers['x-dev-user-id'];
-    const devRole = request.headers['x-dev-role'];
-    const devInstituteId = request.headers['x-dev-institute-id'];
-
-    if (isDev && devRole) {
-      request.user = {
-        sub: devUserId || 'dev-test-user-id',
-        role: devRole,
-        instituteId: devInstituteId || request.params?.instituteId,
-        permissions: ['*'],
-      };
-      return true;
+    if (!token) {
+      throw new UnauthorizedException('Authentication token required');
     }
 
-    // In local development when accessing API without header, provide safe default institute admin user
-    if (isDev && !authHeader) {
-      request.user = {
-        sub: 'dev-admin-user',
-        role: 'INSTITUTE_ADMIN',
-        instituteId: request.params?.instituteId || 'default-inst-id',
-        permissions: ['*'],
-      };
-      return true;
-    }
+    const secret = getRequiredJwtSecret();
 
-    throw new UnauthorizedException('Authentication token required');
+    try {
+      const payload = this.jwtService.verify(token, { secret });
+      if (!payload || typeof payload !== 'object' || !payload.sub || !payload.role) {
+        throw new UnauthorizedException('Invalid authentication token payload');
+      }
+
+      // Enforce double-submit CSRF token on cookie-authenticated mutations
+      const method = String(request.method || 'GET').toUpperCase();
+      if (fromCookie && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        const csrfCookie = request.cookies?.csrf_token;
+        const csrfHeader = request.headers['x-csrf-token'];
+        if (csrfCookie && csrfHeader !== csrfCookie) {
+          throw new ForbiddenException('Invalid CSRF token');
+        }
+      }
+
+      request.user = payload;
+      return true;
+    } catch (err) {
+      if (err instanceof ForbiddenException) {
+        throw err;
+      }
+      throw new UnauthorizedException('Invalid or expired authentication token');
+    }
   }
 }

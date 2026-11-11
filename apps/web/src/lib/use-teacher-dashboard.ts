@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { clearCache } from './api';
+import { apiFetchResponse, clearCache } from './api';
 
 export interface TeacherScheduleItem {
   id: string;
@@ -125,21 +125,7 @@ export function useTeacherDashboard(
     setIsLoading(true);
     setError(null);
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-
-      if (typeof window !== 'undefined') {
-        const storedToken =
-          localStorage.getItem('token') ||
-          localStorage.getItem('auth_token') ||
-          localStorage.getItem('access_token');
-        if (storedToken) {
-          headers['Authorization'] = `Bearer ${storedToken}`;
-        }
-      }
-
-      const res = await fetch('/api/teachers/dashboard', { headers });
+      const res = await apiFetchResponse('/teachers/dashboard', { cache: 'no-store' });
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));

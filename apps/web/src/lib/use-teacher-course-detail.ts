@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface LessonResourceItem {
   id: string;
@@ -113,7 +114,7 @@ export function useTeacherCourseDetail(courseId: string) {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/teachers/courses/${courseId}`, {
+      const res = await apiFetchResponse(`/teachers/courses/${courseId}`, {
         cache: 'no-store',
       });
 

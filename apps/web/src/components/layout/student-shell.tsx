@@ -64,7 +64,7 @@ export function StudentShell({
 }: StudentShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
+  const { student, profile, institute, isLoading, isAuthenticated, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -86,16 +86,16 @@ export function StudentShell({
     setMobileMenuOpen(false);
   }, [pathname]);
 
-  const studentDisplayName = student?.fullName || 'Shaik Shafiulla';
+  const studentDisplayName = student?.fullName || 'Student';
   const studentInitials = studentDisplayName
     .split(' ')
     .filter(Boolean)
     .map((n) => n[0])
     .slice(0, 2)
     .join('')
-    .toUpperCase() || 'SS';
-  const admissionNumber = profile?.admissionNo || 'ADM-2026-038';
-  const instituteName = institute?.name || 'Grace Bible Institute';
+    .toUpperCase() || 'ST';
+  const admissionNumber = profile?.admissionNo || '';
+  const instituteName = institute?.name || 'Bible Institute';
 
   return (
     <div className="min-h-screen bg-[#F4F6F9] text-slate-800 font-sans antialiased p-0 md:p-3 lg:p-4">
@@ -298,7 +298,7 @@ export function StudentShell({
                 role="STUDENT"
                 notificationsUrl="/student/notifications"
                 preferencesUrl="/student/settings"
-                apiPrefix="/api/students/notifications"
+                apiPrefix="/students/notifications"
               />
 
               {/* Student Profile Dropdown */}
@@ -371,7 +371,13 @@ export function StudentShell({
 
           {/* Main Dashboard Body */}
           <main className="flex-1 p-4 md:p-6 lg:p-7 max-w-[1400px] w-full mx-auto">
-            {children}
+            {isLoading || !isAuthenticated ? (
+              <div className="flex items-center justify-center min-h-[50vh] text-sm font-medium text-slate-500">
+                Verifying student session...
+              </div>
+            ) : (
+              children
+            )}
           </main>
         </div>
       </div>

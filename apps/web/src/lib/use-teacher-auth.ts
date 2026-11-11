@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { clearCache } from './api';
+import { apiFetchResponse, clearCache } from './api';
 
 export interface TeacherAuthData {
   teacher: {
@@ -15,6 +15,7 @@ export interface TeacherAuthData {
     qualifications: string | null;
     specialization: string | null;
     experienceYears: number | null;
+    bio?: string | null;
     photoUrl: string | null;
     status: string;
   };
@@ -77,7 +78,7 @@ export function useTeacherAuth(
 
       // Server-side cookie clear request
       try {
-        fetch('/api/auth/logout', { method: 'POST' }).catch(() => null);
+        apiFetchResponse('/auth/logout', { method: 'POST' }).catch(() => null);
       } catch {}
 
       const target = options.redirectTo || '/login';
@@ -89,26 +90,7 @@ export function useTeacherAuth(
     setIsLoading(true);
     setError(null);
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-
-      let hasToken = false;
-      if (typeof window !== 'undefined') {
-        const storedToken = localStorage.getItem('token') || localStorage.getItem('auth_token') || localStorage.getItem('access_token');
-        if (storedToken) {
-          headers['Authorization'] = `Bearer ${storedToken}`;
-          hasToken = true;
-        } else if (document.cookie.includes('auth_token=')) {
-          hasToken = true;
-        }
-
-        if (!hasToken && options.requireAuth) {
-          throw new Error('401 Unauthorized: Session terminated');
-        }
-      }
-
-      const res = await fetch('/api/teachers/me', { headers });
+      const res = await apiFetchResponse('/teachers/me', { cache: 'no-store' });
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));

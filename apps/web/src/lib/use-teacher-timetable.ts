@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 import { AssignedOption } from './use-teacher-live-classes';
 
 export interface TimetableEvent {
@@ -88,7 +89,7 @@ export function useTeacherTimetable() {
       if (courseId !== 'ALL') params.set('courseId', courseId);
       if (batchId !== 'ALL') params.set('batchId', batchId);
 
-      const res = await fetch(`/api/teachers/timetable?${params.toString()}`, {
+      const res = await apiFetchResponse(`/teachers/timetable?${params.toString()}`, {
         cache: 'no-store',
       });
 

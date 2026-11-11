@@ -30,6 +30,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
+import { apiFetchResponse, resolveApiUrl } from '@/lib/api';
 import { useTeacherMaterials, TeacherMaterialItem } from '@/lib/use-teacher-materials';
 import { useTeacherCourses } from '@/lib/use-teacher-courses';
 import { MediaPlayerModal } from '@/components/shared/MediaPlayerModal';
@@ -135,7 +136,7 @@ function TeacherMaterialsContent() {
     }
     setLoadingLessons(true);
     try {
-      const res = await fetch(`/api/teachers/courses/${cId}`);
+      const res = await apiFetchResponse(`/teachers/courses/${cId}`);
       if (res.ok) {
         const json = await res.json();
         const extracted: Array<{ id: string; title: string }> = [];
@@ -384,7 +385,7 @@ function TeacherMaterialsContent() {
             {items.map((mat) => {
               const isVideo = mat.kind?.toUpperCase() === 'VIDEO';
               const isPdf = mat.kind?.toUpperCase() === 'PDF' || mat.mimeType?.toLowerCase().includes('pdf');
-              const contentUrl = `/api/teachers/materials/${mat.id}/content`;
+              const contentUrl = resolveApiUrl(`/teachers/materials/${mat.id}/content`);
               return (
               <div
                 key={mat.id}
@@ -709,16 +710,15 @@ function TeacherMaterialsContent() {
           canAttachUrl={true}
           downloadHref={
             activeVideoMaterial?.downloadable
-              ? `/api/teachers/materials/${activeVideoMaterial.id}/content?download=1`
+              ? resolveApiUrl(`/teachers/materials/${activeVideoMaterial.id}/content?download=1`)
               : null
           }
           onSaveVideoUrl={async (newUrl) => {
             if (!activeVideoMaterial) return;
-            const res = await fetch(
-              `/api/teachers/materials/${activeVideoMaterial.id}/content`,
+            const res = await apiFetchResponse(
+              `/teachers/materials/${activeVideoMaterial.id}/content`,
               {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ videoStreamId: newUrl }),
               }
             );

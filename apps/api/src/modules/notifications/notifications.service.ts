@@ -59,26 +59,6 @@ export class NotificationsService {
       throw new NotFoundException('Institute not found');
     }
 
-    // Local unauthenticated dev fallback check (only in non-production when JwtAuthGuard assigns 'dev-admin-user')
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      rawUserId === 'dev-admin-user'
-    ) {
-      const firstAdmin = await this.prisma.membership.findFirst({
-        where: {
-          instituteId: requestedInstituteId,
-          status: MembershipStatus.ACTIVE,
-          role: { in: ADMIN_PORTAL_ROLES },
-        },
-        orderBy: { createdAt: 'asc' },
-      });
-      return {
-        instituteId: requestedInstituteId,
-        userId: firstAdmin?.userId || rawUserId,
-        role: firstAdmin?.role || Role.INSTITUTE_ADMIN,
-      };
-    }
-
     // SUPER_ADMIN cross-tenant verification
     if (rawRole === Role.SUPER_ADMIN) {
       const superMembership = await this.prisma.membership.findFirst({
@@ -1152,7 +1132,10 @@ export class NotificationsService {
         | 'COURSE_PUBLISHED'
         | 'BATCH_CREATED'
         | 'LIVE_SESSION_SCHEDULED'
-        | 'ANNOUNCEMENT_POSTED';
+        | 'ANNOUNCEMENT_POSTED'
+        | 'ADMISSION_SUBMITTED'
+        | 'ADMISSION_APPROVED'
+        | 'ADMISSION_REJECTED';
       referenceId: string;
       title: string;
       body: string;

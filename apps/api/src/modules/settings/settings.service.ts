@@ -14,7 +14,12 @@ import {
   UpdateFinancialSettingsDto,
   UpdateSecurityPreferencesDto,
   UpdateUserStatusDto,
+  UpdatePaymentGatewayDto,
 } from './settings.dto';
+import {
+  encryptRazorpayCredentials,
+  resolveRazorpayConfig,
+} from '../../common/razorpay-crypto.util';
 import { Role, MembershipStatus } from '@prisma/client';
 
 export interface InstituteProfileData {
@@ -822,6 +827,88 @@ export class SettingsService {
     });
 
     return logs;
+  }
+
+  /**
+   * Return masked Razorpay gateway status without exposing secrets.
+   */
+  async getPaymentGatewaySettings(instituteId: string) {
+    await this.findInstituteOrThrow(instituteId);
+    const settings = await this.prisma.instituteSettings.findUnique({
+      where: { instituteId },
+    });
+
+    const config = resolveRazorpayConfig(settings?.razorpayKeyEncrypted);
+    const maskedKeyId = config.keyId
+      ? `${config.keyId.slice(0, 12)}...${config.keyId.slice(-4)}`
+      : null;
+
+    return {
+      configured: config.mode !== 'UNCONFIGURED',
+      mode: config.mode,
+      keyIdPreview: maskedKeyId,
+      hasWebhookSecret: Boolean(config.webhookSecret),
+      source: settings?.razorpayKeyEncrypted ? 'INSTITUTE_ENCRYPTED' : config.keyId ? 'ENVIRONMENT' : 'NONE',
+    };
+  }
+
+  /**
+   * Encrypt and store per-institute Razorpay credentials in InstituteSettings.razorpayKeyEncrypted.
+   */
+  async updatePaymentGatewaySettings(
+    instituteId: string,
+    dto: UpdatePaymentGatewayDto,
+    actorUserId: string,
+  ) {
+    await this.findInstituteOrThrow(instituteId);
+
+    const keyId = dto.keyId?.trim();
+    const keySecret = dto.keySecret?.trim();
+    const webhookSecret = dto.webhookSecret?.trim();
+
+    if (!keyId || !/^rzp_(test|live)_/.test(keyId)) {
+      throw new BadRequestException('Invalid Razorpay Key ID format.');
+    }
+    if (!keySecret || keySecret.length < 8) {
+      throw new BadRequestException('Razorpay Key Secret must be at least 8 characters.');
+    }
+
+    const encrypted = encryptRazorpayCredentials({
+      keyId,
+      keySecret,
+      ...(webhookSecret ? { webhookSecret } : {}),
+    });
+
+    await this.prisma.instituteSettings.upsert({
+      where: { instituteId },
+      create: {
+        instituteId,
+        razorpayKeyEncrypted: encrypted,
+      },
+      update: {
+        razorpayKeyEncrypted: encrypted,
+      },
+    });
+
+    await this.logAuditEvent(
+      instituteId,
+      actorUserId,
+      'UPDATE_PAYMENT_GATEWAY',
+      'InstituteSettings',
+      instituteId,
+      {
+        mode: keyId.startsWith('rzp_live_') ? 'LIVE' : 'TEST',
+        hasWebhookSecret: Boolean(webhookSecret),
+      },
+    );
+
+    return {
+      configured: true,
+      mode: keyId.startsWith('rzp_live_') ? 'LIVE' : 'TEST',
+      keyIdPreview: `${keyId.slice(0, 12)}...${keyId.slice(-4)}`,
+      hasWebhookSecret: Boolean(webhookSecret),
+      source: 'INSTITUTE_ENCRYPTED',
+    };
   }
 }
 

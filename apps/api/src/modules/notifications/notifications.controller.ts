@@ -11,6 +11,8 @@ import {
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import { NotificationsService } from './notifications.service';
 import {
@@ -20,7 +22,13 @@ import {
 } from './notifications.dto';
 
 @Controller('institutes/:instituteId/notifications')
-@UseGuards(JwtAuthGuard, InstituteTenantGuard)
+@UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
+@Roles(
+  Role.SUPER_ADMIN,
+  Role.INSTITUTE_ADMIN,
+  Role.ACADEMIC_COORDINATOR,
+  Role.FINANCE_OFFICER,
+)
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
@@ -57,6 +65,7 @@ export class NotificationsController {
   }
 
   @Get('preferences')
+  @Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
   async getPreferences(
     @Param('instituteId') instituteId: string,
     @CurrentUser() user: any,
@@ -70,6 +79,7 @@ export class NotificationsController {
   }
 
   @Patch('preferences')
+  @Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
   async updatePreferences(
     @Param('instituteId') instituteId: string,
     @Body() dto: UpdateNotificationPreferencesDto,

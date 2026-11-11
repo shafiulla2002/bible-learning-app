@@ -1,28 +1,35 @@
 /**
  * Bible Institute LMS - API Client
- * Centralized API client supporting both real API requests and seamless fallback
- * to demo mock data when running in detached/prototype preview mode.
+ * Centralized API client communicating with the central NestJS /api/v1 backend.
  */
 
 export function resolveApiBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, '');
+  const configured = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '');
+  if (configured) {
+    return configured.endsWith('/api/v1') ? configured : `${configured}/api/v1`;
   }
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
     const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
     if (isLocalhost) {
-      return 'http://localhost:4000';
+      return 'http://localhost:4000/api/v1';
     }
-    return '';
+    return '/api/v1';
   }
   if (process.env.NODE_ENV === 'development') {
-    return 'http://localhost:4000';
+    return 'http://localhost:4000/api/v1';
   }
-  return '';
+  return '/api/v1';
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
+
+function readBrowserCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const escaped = name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 export interface ApiFetchOptions extends RequestInit {
   token?: string;
@@ -96,15 +103,59 @@ function autoInvalidateOnMutation(endpoint: string) {
   }
 }
 
+export function resolveApiUrl(endpoint: string): string {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  let normalizedEndpoint = cleanEndpoint;
+  if (cleanEndpoint.startsWith('/api/v1')) {
+    normalizedEndpoint = cleanEndpoint.slice('/api/v1'.length) || '/';
+  } else if (cleanEndpoint.startsWith('/api/')) {
+    normalizedEndpoint = cleanEndpoint.slice('/api'.length) || '/';
+  }
+  return `${API_BASE_URL}${normalizedEndpoint}`;
+}
+
+export async function apiFetchResponse(
+  endpoint: string,
+  options: RequestInit = {},
+): Promise<Response> {
+  const url = resolveApiUrl(endpoint);
+  const method = (options.method || 'GET').toUpperCase();
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  if (!headers['Authorization'] && typeof window !== 'undefined') {
+    const storedToken = localStorage.getItem('access_token');
+    if (storedToken) {
+      headers['Authorization'] = `Bearer ${storedToken}`;
+    }
+  }
+
+  if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+    const csrfToken = readBrowserCookie('csrf_token');
+    if (csrfToken && !headers['x-csrf-token']) {
+      headers['x-csrf-token'] = csrfToken;
+    }
+  }
+
+  return fetch(url, {
+    ...options,
+    credentials: options.credentials ?? 'include',
+    headers,
+  });
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: ApiFetchOptions = {},
 ): Promise<T> {
   const { token, instituteId, bypassCache, ttlMs = 25000, headers: customHeaders, ...rest } = options;
   const method = (rest.method || 'GET').toUpperCase();
-
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const url = `${API_BASE_URL}${cleanEndpoint}`;
+  const url = resolveApiUrl(endpoint);
 
   // 1. GET requests: Check in-memory cache and in-flight deduplication
   if (method === 'GET' && !bypassCache) {
@@ -132,10 +183,18 @@ export async function apiFetch<T>(
     }
   }
 
+  if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+    const csrfToken = readBrowserCookie('csrf_token');
+    if (csrfToken && !headers['x-csrf-token']) {
+      headers['x-csrf-token'] = csrfToken;
+    }
+  }
+
   const executionPromise = (async () => {
     try {
       const response = await fetch(url, {
         ...rest,
+        credentials: rest.credentials ?? 'include',
         headers,
       });
 
@@ -161,7 +220,7 @@ export async function apiFetch<T>(
 
       // Auto-invalidate related caches on mutation
       if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
-        autoInvalidateOnMutation(cleanEndpoint);
+        autoInvalidateOnMutation(url);
       }
 
       return result as T;
@@ -330,6 +389,49 @@ export const studentApi = {
     apiFetch<any>(`/institutes/${instituteId}/students/${studentId}/finance`),
 };
 
+export const admissionsApi = {
+  listAdmissions: (
+    instituteId: string,
+    params?: { status?: string; courseId?: string; search?: string; page?: number; limit?: number },
+  ) => {
+    const q = buildCleanQueryString(params);
+    return apiFetch<{
+      data: any[];
+      summary: Record<string, number>;
+      meta: { total: number; page: number; limit: number; totalPages: number };
+    }>(`/institutes/${instituteId}/admissions${q}`);
+  },
+
+  getAdmission: (instituteId: string, admissionId: string) =>
+    apiFetch<any>(`/institutes/${instituteId}/admissions/${admissionId}`),
+
+  reviewAdmission: (
+    instituteId: string,
+    admissionId: string,
+    data: { status: 'UNDER_REVIEW' | 'INTERVIEW_SCHEDULED'; interviewAt?: string; interviewNotes?: string },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/admissions/${admissionId}/review`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  approveAdmission: (
+    instituteId: string,
+    admissionId: string,
+    data: { batchId?: string; source?: 'PURCHASE' | 'FREE' | 'ADMIN' | 'SCHOLARSHIP'; notes?: string; createFeeInvoice?: boolean },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/admissions/${admissionId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  rejectAdmission: (instituteId: string, admissionId: string, reason: string) =>
+    apiFetch<any>(`/institutes/${instituteId}/admissions/${admissionId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+};
+
 // -----------------------------------------------------------------------------
 // COURSE & CURRICULUM SERVICES
 // -----------------------------------------------------------------------------
@@ -377,22 +479,52 @@ export interface ModuleDto {
 
 export interface CourseDto {
   id: string;
-  instituteId: string;
+  instituteId?: string;
   categoryId: string;
+  categoryName?: string;
   category?: CourseCategoryDto;
   title: string;
   slug: string;
-  description: string;
-  level: string;
+  description?: string;
+  level: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | string;
+  courseType?: 'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE';
+  learningMode?: 'ONLINE' | 'OFFLINE' | 'HYBRID';
+  durationLabel?: string;
+  eligibility?: string;
   language: string;
   price: number; // in paise
-  pricing: string;
+  salePrice?: number;
+  registrationFee?: number; // in paise
+  accessDays?: number;
+  enrollmentStartsAt?: string;
+  enrollmentEndsAt?: string;
+  requiresApproval?: boolean;
+  pricing: 'FREE' | 'PAID' | string;
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   coverImage?: string | null;
   modules?: ModuleDto[];
+  instructors?: Array<{
+    id: string;
+    courseId: string;
+    teacherProfileId: string;
+    teacherName: string;
+    teacherEmail?: string;
+    role: 'LEAD' | 'ASSISTANT';
+  }>;
+  completionRule?: {
+    minProgressPct: number;
+    allMandatory: boolean;
+    minExamPct: number;
+    minAttendancePct: number;
+  };
+  moduleCount?: number;
+  lessonCount?: number;
+  durationMinutes?: number;
+  leadTeacherName?: string;
   modulesCount?: number;
   lessonsCount?: number;
   enrolledCount?: number;
+  updatedAt?: string;
   _count?: {
     enrolments: number;
     batches: number;
@@ -416,6 +548,7 @@ export const courseApi = {
     params?: {
       status?: string;
       categoryId?: string;
+      level?: string;
       search?: string;
       page?: number;
       limit?: number;
@@ -427,6 +560,23 @@ export const courseApi = {
 
   getCategories: (instituteId: string) =>
     apiFetch<CourseCategoryDto[]>(`/institutes/${instituteId}/courses/categories`),
+
+  createCategory: (instituteId: string, data: { name: string; slug?: string }) =>
+    apiFetch<CourseCategoryDto>(`/institutes/${instituteId}/courses/categories`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateCategory: (instituteId: string, categoryId: string, data: { name?: string; slug?: string }) =>
+    apiFetch<CourseCategoryDto>(`/institutes/${instituteId}/courses/categories/${categoryId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  deleteCategory: (instituteId: string, categoryId: string) =>
+    apiFetch<{ success: boolean }>(`/institutes/${instituteId}/courses/categories/${categoryId}`, {
+      method: 'DELETE',
+    }),
 
   getCourse: (instituteId: string, courseId: string) =>
     apiFetch<CourseDto>(`/institutes/${instituteId}/courses/${courseId}`),
@@ -451,16 +601,70 @@ export const courseApi = {
       body: JSON.stringify({ status }),
     }),
 
-  createCategory: (instituteId: string, data: { name: string; slug: string; description?: string }) =>
-    apiFetch<CourseCategoryDto>(`/institutes/${instituteId}/courses/categories`, {
+  deleteCourse: (instituteId: string, courseId: string) =>
+    apiFetch<{ success: boolean }>(`/institutes/${instituteId}/courses/${courseId}`, {
+      method: 'DELETE',
+    }),
+
+  upsertCompletionRule: (
+    instituteId: string,
+    courseId: string,
+    data: { minProgressPct: number; allMandatory: boolean; minExamPct: number; minAttendancePct: number },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/courses/${courseId}/completion-rule`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getCourseEnrolments: (instituteId: string, courseId: string) =>
+    apiFetch<
+      Array<{
+        id: string;
+        studentProfileId: string;
+        admissionNo: string;
+        studentName: string;
+        phoneNumber?: string;
+        email?: string;
+        batchId?: string;
+        batchName?: string;
+        status: string;
+        source: string;
+        progressPct: number;
+        enrolledAt: string;
+      }>
+    >(`/institutes/${instituteId}/courses/${courseId}/enrolments`),
+
+  assignInstructor: (
+    instituteId: string,
+    courseId: string,
+    data: { teacherProfileId: string; role: 'LEAD' | 'ASSISTANT' },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/courses/${courseId}/instructors`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  removeInstructor: (instituteId: string, courseId: string, teacherProfileId: string) =>
+    apiFetch<{ success: boolean }>(
+      `/institutes/${instituteId}/courses/${courseId}/instructors/${teacherProfileId}`,
+      { method: 'DELETE' },
+    ),
 
   createModule: (instituteId: string, courseId: string, data: { title: string; position?: number }) =>
     apiFetch<ModuleDto>(`/institutes/${instituteId}/courses/${courseId}/modules`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  updateModule: (instituteId: string, courseId: string, moduleId: string, data: { title?: string; position?: number }) =>
+    apiFetch<ModuleDto>(`/institutes/${instituteId}/courses/${courseId}/modules/${moduleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteModule: (instituteId: string, courseId: string, moduleId: string) =>
+    apiFetch<{ success: boolean }>(`/institutes/${instituteId}/courses/${courseId}/modules/${moduleId}`, {
+      method: 'DELETE',
     }),
 
   createChapter: (instituteId: string, courseId: string, moduleId: string, data: { title: string; position?: number }) =>
@@ -469,10 +673,59 @@ export const courseApi = {
       body: JSON.stringify(data),
     }),
 
+  updateChapter: (instituteId: string, courseId: string, chapterId: string, data: { title?: string; position?: number }) =>
+    apiFetch<ChapterDto>(`/institutes/${instituteId}/courses/${courseId}/chapters/${chapterId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteChapter: (instituteId: string, courseId: string, chapterId: string) =>
+    apiFetch<{ success: boolean }>(`/institutes/${instituteId}/courses/${courseId}/chapters/${chapterId}`, {
+      method: 'DELETE',
+    }),
+
   createLesson: (instituteId: string, courseId: string, chapterId: string, data: any) =>
     apiFetch<LessonDto>(`/institutes/${instituteId}/courses/${courseId}/chapters/${chapterId}/lessons`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  updateLesson: (instituteId: string, courseId: string, lessonId: string, data: any) =>
+    apiFetch<LessonDto>(`/institutes/${instituteId}/courses/${courseId}/lessons/${lessonId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteLesson: (instituteId: string, courseId: string, lessonId: string) =>
+    apiFetch<{ success: boolean }>(`/institutes/${instituteId}/courses/${courseId}/lessons/${lessonId}`, {
+      method: 'DELETE',
+    }),
+
+  attachResource: (
+    instituteId: string,
+    courseId: string,
+    lessonId: string,
+    data: { kind: 'VIDEO' | 'PDF' | 'AUDIO' | 'IMAGE' | 'FILE'; storageKey: string; mimeType: string; sizeBytes: string; downloadable: boolean },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/courses/${courseId}/lessons/${lessonId}/resources`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateResource: (
+    instituteId: string,
+    courseId: string,
+    resourceId: string,
+    data: { downloadable?: boolean; kind?: string },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/courses/${courseId}/resources/${resourceId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  removeResource: (instituteId: string, courseId: string, resourceId: string) =>
+    apiFetch<{ success: boolean }>(`/institutes/${instituteId}/courses/${courseId}/resources/${resourceId}`, {
+      method: 'DELETE',
     }),
 };
 
@@ -620,7 +873,7 @@ export const batchApi = {
     }),
 
   // Faculty Assignment
-  assignTeacher: (instituteId: string, batchId: string, data: { teacherProfileId: string; role?: 'PRIMARY' | 'ASSISTANT' | 'GUEST' }) =>
+  assignTeacher: (instituteId: string, batchId: string, data: { teacherProfileId: string; role?: 'LEAD' | 'ASSISTANT' }) =>
     apiFetch<any>(`/institutes/${instituteId}/batches/${batchId}/teachers`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1006,6 +1259,37 @@ export const teacherApi = {
       body: JSON.stringify(data),
     });
   },
+};
+
+export interface TeacherPortalSettingsDto {
+  emailNotifications: boolean;
+  submissionAlerts: boolean;
+  liveSessionReminders: boolean;
+  examDeadlineAlerts: boolean;
+  preferredLanguage: string;
+  timezone: string;
+}
+
+export const teacherMeApi = {
+  getProfile: () => apiFetch<{ success: boolean; teacher: any; institute: any; stats: any }>('/teachers/me'),
+  updateProfile: (data: {
+    fullName?: string;
+    email?: string;
+    qualifications?: string;
+    specialization?: string;
+    experienceYears?: number;
+    bio?: string;
+  }) =>
+    apiFetch<{ success: boolean; teacher: any; institute: any; stats: any }>('/teachers/me', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  getSettings: () => apiFetch<{ success: boolean; settings: TeacherPortalSettingsDto }>('/teachers/settings'),
+  updateSettings: (data: Partial<TeacherPortalSettingsDto>) =>
+    apiFetch<{ success: boolean; settings: TeacherPortalSettingsDto }>('/teachers/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 };
 
 
@@ -1571,7 +1855,46 @@ export const settingsApi = {
     const q = limit ? `?limit=${limit}` : '';
     return apiFetch<AuditLogItemDto[]>(`/institutes/${instituteId}/settings/audit-logs${q}`);
   },
+  getPaymentGateway: (instituteId: string) =>
+    apiFetch<{
+      configured: boolean;
+      mode: 'LIVE' | 'TEST' | 'UNCONFIGURED';
+      keyIdPreview: string | null;
+      hasWebhookSecret: boolean;
+      source: string;
+    }>(`/institutes/${instituteId}/settings/payment-gateway`),
+  updatePaymentGateway: (
+    instituteId: string,
+    data: { keyId: string; keySecret: string; webhookSecret?: string },
+  ) =>
+    apiFetch<{
+      configured: boolean;
+      mode: 'LIVE' | 'TEST' | 'UNCONFIGURED';
+      keyIdPreview: string | null;
+      hasWebhookSecret: boolean;
+      source: string;
+    }>(`/institutes/${instituteId}/settings/payment-gateway`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 };
+
+export async function resolveActiveInstituteId(): Promise<string> {
+  if (typeof window === 'undefined') return '';
+  const stored = localStorage.getItem('current_institute_id');
+  if (stored) return stored;
+  try {
+    const me = await apiFetch<{
+      instituteId?: string;
+      memberships?: Array<{ instituteId: string }>;
+    }>('/auth/me');
+    const id = me?.instituteId || me?.memberships?.[0]?.instituteId || '';
+    if (id) localStorage.setItem('current_institute_id', id);
+    return id;
+  } catch {
+    return '';
+  }
+}
 
 // --- ADMIN NOTIFICATION CENTER (MILESTONE 2.8) ---
 
@@ -1803,4 +2126,138 @@ export const financeApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  reversePayment: (
+    instituteId: string,
+    paymentId: string,
+    data: { reversedAmountPaise?: number; reason: string },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/finance/payments/${paymentId}/reverse`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createAllocation: (
+    instituteId: string,
+    data: {
+      studentProfileId: string;
+      feeStructureId: string;
+      billingPeriod: string;
+      customAmountPaise?: number;
+      remarks?: string;
+    },
+  ) =>
+    apiFetch<any>(`/institutes/${instituteId}/finance/allocations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getStudentFinance: (instituteId: string, studentId: string) =>
+    apiFetch<any>(`/institutes/${instituteId}/students/${studentId}/finance`),
+};
+
+// --- SUPER ADMIN PLATFORM SAAS API ---
+
+export interface PlatformAnalyticsDto {
+  metrics: {
+    totalInstitutes: number;
+    activeInstitutes: number;
+    suspendedInstitutes: number;
+    pendingApplications: number;
+    totalStudents: number;
+    totalTeachers: number;
+    totalCourses: number;
+    activeSubscriptions: number;
+    platformMrrPaise: number;
+    totalPlatformRevenuePaise: number;
+  };
+  institutes: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    status: string;
+    currency: string;
+    timezone: string;
+    createdAt: string;
+    studentsCount: number;
+    teachersCount: number;
+    coursesCount: number;
+    subscription: {
+      id: string;
+      status: string;
+      cycle: string;
+      planName?: string;
+      planCode?: string;
+      periodEnd: string;
+    } | null;
+  }>;
+  recentApplications: Array<any>;
+}
+
+export const platformApi = {
+  getAnalytics: () => apiFetch<PlatformAnalyticsDto>('/platform/analytics'),
+  listInstitutes: () => apiFetch<PlatformAnalyticsDto['institutes']>('/platform/institutes'),
+  createInstitute: (data: {
+    name: string;
+    slug: string;
+    adminName: string;
+    adminPhoneE164: string;
+    adminEmail?: string;
+    planCode?: string;
+  }) =>
+    apiFetch<any>('/platform/institutes', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateInstituteStatus: (instituteId: string, status: 'ACTIVE' | 'SUSPENDED' | 'PENDING' | 'CLOSED', reason?: string) =>
+    apiFetch<any>(`/platform/institutes/${instituteId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, reason }),
+    }),
+  listApplications: (status?: string) =>
+    apiFetch<any[]>(`/platform/applications${status ? `?status=${status}` : ''}`),
+  approveApplication: (id: string) =>
+    apiFetch<any>(`/platform/applications/${id}/approve`, { method: 'POST' }),
+  rejectApplication: (id: string, reason: string) =>
+    apiFetch<any>(`/platform/applications/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  listPlans: () => apiFetch<any[]>('/platform/plans'),
+  createPlan: (data: {
+    code: string;
+    name: string;
+    priceMonthly: number;
+    priceYearly: number;
+    trialDays?: number;
+    maxStudents?: number;
+    maxTeachers?: number;
+    maxCourses?: number;
+    storageGb?: number;
+  }) =>
+    apiFetch<any>('/platform/plans', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updatePlan: (planId: string, data: Record<string, any>) =>
+    apiFetch<any>(`/platform/plans/${planId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  listSubscriptions: () => apiFetch<any[]>('/platform/subscriptions'),
+  assignSubscription: (data: {
+    instituteId: string;
+    planId: string;
+    cycle?: 'MONTHLY' | 'YEARLY';
+    status?: 'TRIALING' | 'ACTIVE';
+  }) =>
+    apiFetch<any>('/platform/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  listInvoices: () => apiFetch<any[]>('/platform/invoices'),
+  markInvoicePaid: (invoiceId: string) =>
+    apiFetch<any>(`/platform/invoices/${invoiceId}/mark-paid`, { method: 'PATCH' }),
+  listAuditLogs: (limit: number = 50) =>
+    apiFetch<any[]>(`/platform/audit-logs?limit=${limit}`),
 };

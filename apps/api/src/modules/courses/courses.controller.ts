@@ -12,13 +12,20 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { CoursesService } from './courses.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import {
   CreateCourseSchema,
   UpdateCourseSchema,
+  CreateCourseCategorySchema,
+  UpdateCourseCategorySchema,
+  UpsertCompletionRuleSchema,
+  UpdateResourceSchema,
   CourseFilterQuerySchema,
   CreateModuleSchema,
   UpdateModuleSchema,
@@ -32,11 +39,18 @@ import {
 } from '@bible-lms/shared';
 
 @Controller('institutes/:instituteId/courses')
-@UseGuards(JwtAuthGuard, InstituteTenantGuard)
+@UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
+@Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
 export class CoursesController {
   constructor(private readonly coursesService: CoursesService) {}
 
   @Get()
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.FINANCE_OFFICER,
+  )
   async getCourses(
     @Param('instituteId') instituteId: string,
     @Query() query: any,
@@ -46,8 +60,42 @@ export class CoursesController {
   }
 
   @Get('categories')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.FINANCE_OFFICER,
+  )
   async getCategories(@Param('instituteId') instituteId: string) {
     return this.coursesService.listCategories(instituteId);
+  }
+
+  @Post('categories')
+  @HttpCode(HttpStatus.CREATED)
+  async createCategory(
+    @Param('instituteId') instituteId: string,
+    @Body() body: any,
+  ) {
+    const validated = CreateCourseCategorySchema.parse(body);
+    return this.coursesService.createCategory(instituteId, validated);
+  }
+
+  @Patch('categories/:categoryId')
+  async updateCategory(
+    @Param('instituteId') instituteId: string,
+    @Param('categoryId') categoryId: string,
+    @Body() body: any,
+  ) {
+    const validated = UpdateCourseCategorySchema.parse(body);
+    return this.coursesService.updateCategory(instituteId, categoryId, validated);
+  }
+
+  @Delete('categories/:categoryId')
+  async deleteCategory(
+    @Param('instituteId') instituteId: string,
+    @Param('categoryId') categoryId: string,
+  ) {
+    return this.coursesService.deleteCategory(instituteId, categoryId);
   }
 
   @Post()
@@ -85,6 +133,38 @@ export class CoursesController {
     @Body('status') status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED',
   ) {
     return this.coursesService.updateStatus(instituteId, id, status);
+  }
+
+  @Delete(':id')
+  async deleteCourse(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+  ) {
+    return this.coursesService.softDelete(instituteId, id);
+  }
+
+  @Put(':id/completion-rule')
+  async upsertCompletionRule(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    const validated = UpsertCompletionRuleSchema.parse(body);
+    return this.coursesService.upsertCompletionRule(instituteId, id, validated);
+  }
+
+  @Get(':id/enrolments')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.FINANCE_OFFICER,
+  )
+  async getCourseEnrolments(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+  ) {
+    return this.coursesService.listCourseEnrolments(instituteId, id);
   }
 
   @Post(':id/instructors')
@@ -214,6 +294,17 @@ export class CoursesController {
     return this.coursesService.attachResource(instituteId, id, lessonId, validated);
   }
 
+  @Patch(':id/resources/:resourceId')
+  async updateResource(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+    @Param('resourceId') resourceId: string,
+    @Body() body: any,
+  ) {
+    const validated = UpdateResourceSchema.parse(body);
+    return this.coursesService.updateResource(instituteId, id, resourceId, validated);
+  }
+
   @Delete(':id/resources/:resourceId')
   async removeResource(
     @Param('instituteId') instituteId: string,
@@ -234,6 +325,13 @@ export class CoursesController {
   }
 
   @Get(':id/lessons/:lessonId/resources/:resourceId/access')
+  @Roles(
+    Role.SUPER_ADMIN,
+    Role.INSTITUTE_ADMIN,
+    Role.ACADEMIC_COORDINATOR,
+    Role.TEACHER,
+    Role.STUDENT,
+  )
   async getResourceAccess(
     @Param('instituteId') instituteId: string,
     @Param('id') id: string,

@@ -37,6 +37,7 @@ import {
   AttendanceOverviewDto,
   BatchDto,
   resolveVerifiedAdminContext,
+  resolveActiveInstituteId,
 } from '@/lib/api';
 
 const adminNav = [
@@ -76,8 +77,16 @@ export default function AdminAttendancePage() {
       const stored = localStorage.getItem('current_institute_id');
       if (stored) return stored;
     }
-    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+    return '';
   });
+
+  useEffect(() => {
+    if (!instituteId) {
+      resolveActiveInstituteId().then((id) => {
+        if (id) setInstituteId(id);
+      });
+    }
+  }, [instituteId]);
 
   // Genuine Database State (Strict Zero-Mock: empty by default)
   const [overview, setOverview] = useState<AttendanceOverviewDto | null>(null);

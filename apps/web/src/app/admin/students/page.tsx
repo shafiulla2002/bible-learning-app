@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   studentApi,
+  admissionsApi,
   courseApi,
   batchApi,
   StudentProfileSummaryDto,
@@ -95,13 +96,17 @@ function compressImageToThumbnail(file: File, maxDim = 256, quality = 0.82): Pro
 }
 
 export default function StudentsDirectoryPage() {
-  const [instituteId, setInstituteId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id');
-      if (stored) return stored;
-    }
-    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-  });
+  const [instituteId, setInstituteId] = useState<string>('');
+  const [adminName, setAdminName] = useState<string>('Institute Admin');
+  const [activeSection, setActiveSection] = useState<'DIRECTORY' | 'ADMISSIONS'>('DIRECTORY');
+  const [admissions, setAdmissions] = useState<any[]>([]);
+  const [admissionSummary, setAdmissionSummary] = useState<Record<string, number>>({});
+  const [admissionStatusFilter, setAdmissionStatusFilter] = useState<string>('ALL');
+  const [isLoadingAdmissions, setIsLoadingAdmissions] = useState<boolean>(false);
+  const [approveTarget, setApproveTarget] = useState<any | null>(null);
+  const [approveBatchId, setApproveBatchId] = useState<string>('');
+  const [rejectTarget, setRejectTarget] = useState<any | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>('');
 
   // Live Database State (Strict Zero-Mock: starts empty)
   const [students, setStudents] = useState<StudentProfileSummaryDto[]>([]);
@@ -175,13 +180,80 @@ export default function StudentsDirectoryPage() {
         if (!active) return;
         if (ctx?.instituteId) {
           setInstituteId(ctx.instituteId);
+        } else {
+          setIsLoading(false);
+          setErrorMessage('Active institute session required. Please log in again.');
         }
+        if (ctx?.user?.fullName) setAdminName(ctx.user.fullName);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!active) return;
+        setIsLoading(false);
+        setErrorMessage('Unable to verify administrator session.');
+      });
     return () => {
       active = false;
     };
   }, []);
+
+  // Fetch Admissions Applications Queue
+  const fetchAdmissions = useCallback(async () => {
+    if (!instituteId) return;
+    setIsLoadingAdmissions(true);
+    try {
+      const res = await admissionsApi.listAdmissions(instituteId, {
+        status: admissionStatusFilter !== 'ALL' ? admissionStatusFilter : undefined,
+        search: debouncedSearch || undefined,
+        limit: 50,
+      });
+      setAdmissions(res.data || []);
+      setAdmissionSummary(res.summary || {});
+    } catch {
+      setAdmissions([]);
+    } finally {
+      setIsLoadingAdmissions(false);
+    }
+  }, [instituteId, admissionStatusFilter, debouncedSearch]);
+
+  useEffect(() => {
+    fetchAdmissions();
+  }, [fetchAdmissions]);
+
+  const handleConfirmApproveAdmission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instituteId || !approveTarget) return;
+    try {
+      const res = await admissionsApi.approveAdmission(instituteId, approveTarget.id, {
+        batchId: approveBatchId || undefined,
+        source: 'ADMIN',
+        createFeeInvoice: true,
+      });
+      showToast(
+        `Application ${approveTarget.applicationNumber} approved!${res?.invoiceNumber ? ` Invoice ${res.invoiceNumber} generated.` : ''}`,
+      );
+      setApproveTarget(null);
+      setApproveBatchId('');
+      fetchAdmissions();
+      fetchStudents();
+    } catch (err: any) {
+      showToast(`Approval failed: ${err?.message || 'Server error'}`);
+    }
+  };
+
+  const handleConfirmRejectAdmission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instituteId || !rejectTarget || rejectReason.trim().length < 3) return;
+    try {
+      await admissionsApi.rejectAdmission(instituteId, rejectTarget.id, rejectReason.trim());
+      showToast(`Application ${rejectTarget.applicationNumber} marked Rejected.`);
+      setRejectTarget(null);
+      setRejectReason('');
+      fetchAdmissions();
+      fetchStudents();
+    } catch (err: any) {
+      showToast(`Rejection failed: ${err?.message || 'Server error'}`);
+    }
+  };
 
   // Fetch courses and batches for dropdowns
   useEffect(() => {
@@ -438,7 +510,7 @@ export default function StudentsDirectoryPage() {
       portalTitle="Institute Admin"
       portalRole="ADMIN"
       navItems={adminNav}
-      userName="Samuel Admin"
+      userName={adminName}
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6">
@@ -531,6 +603,145 @@ export default function StudentsDirectoryPage() {
           />
         </div>
 
+        {/* Section Switcher: Directory vs Admissions Queue */}
+        <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+          <button
+            type="button"
+            onClick={() => setActiveSection('DIRECTORY')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition ${
+              activeSection === 'DIRECTORY'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Enrolled Students Directory ({totalCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSection('ADMISSIONS')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
+              activeSection === 'ADMISSIONS'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <span>Admissions Applications Queue</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-100 text-amber-800 font-bold">
+              {(admissionSummary.APPLIED || 0) + (admissionSummary.UNDER_REVIEW || 0) + (admissionSummary.INTERVIEW_SCHEDULED || 0)} Pending
+            </span>
+          </button>
+        </div>
+
+        {/* ADMISSIONS APPLICATIONS QUEUE TAB */}
+        {activeSection === 'ADMISSIONS' && (
+          <Card className="overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Incoming Admission Applications</h3>
+                <p className="text-xs text-slate-500">Review applications from the public enrollment website, schedule interviews, and approve into batches.</p>
+              </div>
+              <select
+                value={admissionStatusFilter}
+                onChange={(e) => setAdmissionStatusFilter(e.target.value)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
+              >
+                <option value="ALL">All Applications</option>
+                <option value="APPLIED">Applied ({admissionSummary.APPLIED || 0})</option>
+                <option value="UNDER_REVIEW">Under Review ({admissionSummary.UNDER_REVIEW || 0})</option>
+                <option value="INTERVIEW_SCHEDULED">Interview Scheduled ({admissionSummary.INTERVIEW_SCHEDULED || 0})</option>
+                <option value="ACCEPTED">Accepted ({admissionSummary.ACCEPTED || 0})</option>
+                <option value="REJECTED">Rejected ({admissionSummary.REJECTED || 0})</option>
+              </select>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50 text-slate-500 uppercase text-[11px]">
+                    <th className="py-3 px-4">Application #</th>
+                    <th className="py-3 px-4">Applicant</th>
+                    <th className="py-3 px-4">Course Applied</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Submitted</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {isLoadingAdmissions ? (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-slate-400">Loading applications from PostgreSQL...</td>
+                    </tr>
+                  ) : admissions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-slate-400">No admission applications match this filter.</td>
+                    </tr>
+                  ) : (
+                    admissions.map((adm) => (
+                      <tr key={adm.id} className="hover:bg-slate-50/70">
+                        <td className="py-3 px-4 font-mono font-semibold text-slate-800">{adm.applicationNumber}</td>
+                        <td className="py-3 px-4">
+                          <div className="font-semibold text-slate-900">{adm.studentProfile?.fullName}</div>
+                          <div className="text-[11px] text-slate-500">{adm.studentProfile?.phoneNumber} {adm.studentProfile?.email ? `· ${adm.studentProfile.email}` : ''}</div>
+                        </td>
+                        <td className="py-3 px-4 text-slate-700">{adm.course?.title || 'General Admission'}</td>
+                        <td className="py-3 px-4">
+                          <Badge variant={adm.status === 'ACCEPTED' ? 'success' : adm.status === 'REJECTED' ? 'danger' : 'warning'}>
+                            {adm.status}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 text-slate-500">{adm.createdAt?.slice(0, 10)}</td>
+                        <td className="py-3 px-4 text-right space-x-1.5">
+                          {adm.status === 'APPLIED' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                await admissionsApi.reviewAdmission(instituteId, adm.id, { status: 'UNDER_REVIEW' });
+                                fetchAdmissions();
+                                showToast(`Marked ${adm.applicationNumber} Under Review`);
+                              }}
+                              className="h-7 text-[11px]"
+                            >
+                              Review
+                            </Button>
+                          )}
+                          {['APPLIED', 'UNDER_REVIEW', 'INTERVIEW_SCHEDULED'].includes(adm.status) && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={() => {
+                                  setApproveTarget(adm);
+                                  setApproveBatchId(adm.batch?.id || '');
+                                }}
+                                className="h-7 text-[11px] bg-emerald-600 hover:bg-emerald-700"
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setRejectTarget(adm);
+                                  setRejectReason('');
+                                }}
+                                className="h-7 text-[11px] text-rose-600 border-rose-200 hover:bg-rose-50"
+                              >
+                                Reject
+                              </Button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
+        {activeSection === 'DIRECTORY' && (
+        <>
         {/* Search & Filter Toolbar */}
         <Card className="p-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
@@ -796,6 +1007,65 @@ export default function StudentsDirectoryPage() {
             </div>
           </div>
         </Card>
+        </>
+        )}
+
+        {/* Modal: Approve Admission */}
+        {approveTarget && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <form onSubmit={handleConfirmApproveAdmission} className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+              <h3 className="text-base font-bold text-slate-900">Approve Admission {approveTarget.applicationNumber}</h3>
+              <p className="text-xs text-slate-600">
+                Approving <strong>{approveTarget.studentProfile?.fullName}</strong> activates their student account and enrols them into <strong>{approveTarget.course?.title || 'the selected program'}</strong>.
+              </p>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Assign Cohort Batch (Optional)</label>
+                <select
+                  value={approveBatchId}
+                  onChange={(e) => setApproveBatchId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+                >
+                  <option value="">No batch assigned yet</option>
+                  {batches
+                    .filter((b: any) => !approveTarget.course?.id || b.courseId === approveTarget.course.id)
+                    .map((b: any) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.status})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setApproveTarget(null)}>Cancel</Button>
+                <Button type="submit" variant="primary" size="sm" className="bg-emerald-600 hover:bg-emerald-700">Confirm Approval</Button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Modal: Reject Admission */}
+        {rejectTarget && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <form onSubmit={handleConfirmRejectAdmission} className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+              <h3 className="text-base font-bold text-slate-900">Reject Application {rejectTarget.applicationNumber}</h3>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Reason for Rejection *</label>
+                <textarea
+                  rows={3}
+                  required
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Provide clear academic/eligibility feedback..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setRejectTarget(null)}>Cancel</Button>
+                <Button type="submit" variant="primary" size="sm" className="bg-rose-600 hover:bg-rose-700">Confirm Rejection</Button>
+              </div>
+            </form>
+          </div>
+        )}
 
         {/* Modal 1: Add Student Admission Form */}
         {isAddModalOpen && (

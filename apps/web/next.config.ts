@@ -14,8 +14,11 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
-    const apiHost = process.env.NEXT_PUBLIC_API_URL;
-    if (!apiHost) {
+    const apiHost =
+      process.env.API_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      (process.env.NODE_ENV !== 'production' ? 'http://localhost:4000/api/v1' : '');
+    if (!apiHost || apiHost.startsWith('/')) {
       return [];
     }
     const cleanHost = apiHost.endsWith('/') ? apiHost.slice(0, -1) : apiHost;
@@ -24,6 +27,10 @@ const nextConfig: NextConfig = {
       beforeFiles: [],
       afterFiles: [],
       fallback: [
+        {
+          source: '/api/v1/:path*',
+          destination: `${targetHost}/:path*`,
+        },
         {
           source: '/api/:path*',
           destination: `${targetHost}/:path*`,

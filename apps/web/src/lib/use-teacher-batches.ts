@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface TeacherBatchItem {
   id: string;
@@ -52,7 +53,7 @@ export function useTeacherBatches() {
       if (search.trim()) params.set('search', search.trim());
       if (status && status !== 'ALL') params.set('status', status);
 
-      const res = await fetch(`/api/teachers/batches?${params.toString()}`, {
+      const res = await apiFetchResponse(`/teachers/batches?${params.toString()}`, {
         cache: 'no-store',
       });
 
@@ -191,7 +192,7 @@ export function useTeacherBatchDetail(batchId: string) {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/teachers/batches/${batchId}`, {
+      const res = await apiFetchResponse(`/teachers/batches/${batchId}`, {
         cache: 'no-store',
       });
 

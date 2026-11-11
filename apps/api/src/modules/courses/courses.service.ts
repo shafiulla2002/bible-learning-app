@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import {
   Injectable,
   Optional,
@@ -18,6 +19,10 @@ import {
   CourseInstructorDetail,
   CreateCourseInput,
   UpdateCourseInput,
+  CreateCourseCategoryInput,
+  UpdateCourseCategoryInput,
+  UpsertCompletionRuleInput,
+  UpdateResourceInput,
   CourseFilterQuery,
   CreateModuleInput,
   UpdateModuleInput,
@@ -30,7 +35,7 @@ import {
   ReorderCurriculumInput,
   PaginatedResult,
 } from '@bible-lms/shared';
-import { CourseLevel, CourseStatus, PricingType, LessonType } from '@prisma/client';
+import { CourseLevel, CourseStatus, CourseType, LearningMode, PricingType, LessonType } from '@prisma/client';
 
 @Injectable()
 export class CoursesService {
@@ -155,10 +160,18 @@ export class CoursesService {
         categoryId: c.categoryId,
         categoryName: c.category?.name || 'Uncategorized',
         level: c.level as any,
+        courseType: (c.courseType || 'COHORT') as any,
+        learningMode: (c.learningMode || 'ONLINE') as any,
+        durationLabel: c.durationLabel || undefined,
+        eligibility: c.eligibility || undefined,
         language: c.language,
         pricing: c.pricing as any,
         price: c.price,
         salePrice: c.salePrice || undefined,
+        registrationFee: c.registrationFee ?? 0,
+        requiresApproval: c.requiresApproval ?? true,
+        enrollmentStartsAt: c.enrollmentStartsAt ? c.enrollmentStartsAt.toISOString() : undefined,
+        enrollmentEndsAt: c.enrollmentEndsAt ? c.enrollmentEndsAt.toISOString() : undefined,
         status: c.status as any,
         coverImage: c.coverImage || undefined,
         enrolledCount: c._count?.enrolments || 0,
@@ -301,10 +314,18 @@ export class CoursesService {
       categoryId: course.categoryId,
       categoryName: course.category?.name || 'Uncategorized',
       level: course.level as any,
+      courseType: (course.courseType || 'COHORT') as any,
+      learningMode: (course.learningMode || 'ONLINE') as any,
+      durationLabel: course.durationLabel || undefined,
+      eligibility: course.eligibility || undefined,
       language: course.language,
       pricing: course.pricing as any,
       price: course.price,
       salePrice: course.salePrice || undefined,
+      registrationFee: course.registrationFee ?? 0,
+      requiresApproval: course.requiresApproval ?? true,
+      enrollmentStartsAt: course.enrollmentStartsAt ? course.enrollmentStartsAt.toISOString() : undefined,
+      enrollmentEndsAt: course.enrollmentEndsAt ? course.enrollmentEndsAt.toISOString() : undefined,
       status: course.status as any,
       coverImage: course.coverImage || undefined,
       description: course.description,
@@ -371,11 +392,19 @@ export class CoursesService {
           slug,
           description: input.description,
           level: (input.level as CourseLevel) || CourseLevel.BEGINNER,
+          courseType: ((input.courseType || 'COHORT') as CourseType),
+          learningMode: ((input.learningMode || 'ONLINE') as LearningMode),
+          durationLabel: input.durationLabel || null,
+          eligibility: input.eligibility || null,
           language: input.language || 'English',
           pricing: (input.pricing as PricingType) || PricingType.FREE,
           price: input.price || 0,
           salePrice: input.salePrice || null,
+          registrationFee: input.registrationFee ?? 0,
           accessDays: input.accessDays || null,
+          enrollmentStartsAt: input.enrollmentStartsAt ? new Date(input.enrollmentStartsAt) : null,
+          enrollmentEndsAt: input.enrollmentEndsAt ? new Date(input.enrollmentEndsAt) : null,
+          requiresApproval: input.requiresApproval ?? true,
           coverImage: input.coverImage || null,
           status: (input.status as CourseStatus) || CourseStatus.DRAFT,
           completionRule: {
@@ -461,11 +490,29 @@ export class CoursesService {
         categoryId: input.categoryId,
         description: input.description,
         level: input.level as CourseLevel,
+        courseType: input.courseType as CourseType | undefined,
+        learningMode: input.learningMode as LearningMode | undefined,
+        durationLabel: input.durationLabel,
+        eligibility: input.eligibility,
         language: input.language,
         pricing: input.pricing as PricingType,
         price: input.price,
         salePrice: input.salePrice,
+        registrationFee: input.registrationFee,
         accessDays: input.accessDays,
+        enrollmentStartsAt:
+          input.enrollmentStartsAt === ''
+            ? null
+            : input.enrollmentStartsAt
+              ? new Date(input.enrollmentStartsAt)
+              : undefined,
+        enrollmentEndsAt:
+          input.enrollmentEndsAt === ''
+            ? null
+            : input.enrollmentEndsAt
+              ? new Date(input.enrollmentEndsAt)
+              : undefined,
+        requiresApproval: input.requiresApproval,
         coverImage: input.coverImage,
         status: input.status as CourseStatus,
       },
@@ -1006,16 +1053,30 @@ export class CoursesService {
       );
     }
 
-    // 6. Return secure signed delivery payload
-    const tokenPayload = Buffer.from(
+    // 6. Return HMAC-SHA256 signed delivery payload (prevents client-side token forgery)
+    const signingSecret =
+      process.env.RESOURCE_SIGNING_SECRET ||
+      process.env.JWT_SECRET ||
+      'dev-resource-signing-key';
+    const payloadB64 = Buffer.from(
       JSON.stringify({
+        instituteId,
+        courseId,
+        lessonId,
+        resourceId,
         assetId: resource.mediaAssetId,
         storageKey: resource.mediaAsset.storageKey,
         kind: resource.mediaAsset.kind,
         mode: requestDownload ? 'DOWNLOAD' : 'STREAM',
+        userId: user?.sub || 'guest',
         expiresAt: Date.now() + 15 * 60 * 1000,
       }),
     ).toString('base64url');
+    const signature = crypto
+      .createHmac('sha256', signingSecret)
+      .update(payloadB64)
+      .digest('base64url');
+    const signedAccessToken = `${payloadB64}.${signature}`;
 
     return {
       resourceId: resource.id,
@@ -1024,8 +1085,8 @@ export class CoursesService {
       mimeType: resource.mediaAsset.mimeType,
       sizeBytes: resource.mediaAsset.sizeBytes.toString(),
       accessMode: requestDownload ? 'ATTACHMENT_DOWNLOAD' : 'INLINE_STREAM',
-      signedAccessToken: tokenPayload,
-      streamUrl: `/api/v1/institutes/${instituteId}/courses/${courseId}/lessons/${lessonId}/resources/${resourceId}/stream?token=${tokenPayload}`,
+      signedAccessToken,
+      streamUrl: `/api/v1/institutes/${instituteId}/courses/${courseId}/lessons/${lessonId}/resources/${resourceId}/stream?token=${signedAccessToken}`,
       expiresInSeconds: 900,
     };
   }
@@ -1093,12 +1154,215 @@ export class CoursesService {
   }
 
   /**
-   * List course categories for this institute
+   * List course categories for this institute (with active course count)
    */
   async listCategories(instituteId: string) {
     return this.prisma.courseCategory.findMany({
       where: { instituteId },
+      include: {
+        _count: {
+          select: { courses: true },
+        },
+      },
       orderBy: { name: 'asc' },
     });
+  }
+
+  /**
+   * Create a new course category for this institute
+   */
+  async createCategory(instituteId: string, input: CreateCourseCategoryInput) {
+    const baseSlug = (input.slug || input.name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'general';
+    const existing = await this.prisma.courseCategory.findFirst({
+      where: { instituteId, slug: baseSlug },
+    });
+    if (existing) {
+      throw new ConflictException(`Category slug "${baseSlug}" already exists in this institute`);
+    }
+    return this.prisma.courseCategory.create({
+      data: {
+        instituteId,
+        name: input.name.trim(),
+        slug: baseSlug,
+      },
+    });
+  }
+
+  /**
+   * Rename/update a course category
+   */
+  async updateCategory(
+    instituteId: string,
+    categoryId: string,
+    input: UpdateCourseCategoryInput,
+  ) {
+    const category = await this.prisma.courseCategory.findFirst({
+      where: { id: categoryId, instituteId },
+    });
+    if (!category) throw new NotFoundException('Category not found in this institute');
+
+    return this.prisma.courseCategory.update({
+      where: { id: categoryId },
+      data: {
+        ...(input.name ? { name: input.name.trim() } : {}),
+        ...(input.slug ? { slug: input.slug.trim() } : {}),
+      },
+    });
+  }
+
+  /**
+   * Delete an unused course category
+   */
+  async deleteCategory(instituteId: string, categoryId: string): Promise<{ success: boolean }> {
+    const category = await this.prisma.courseCategory.findFirst({
+      where: { id: categoryId, instituteId },
+      include: { _count: { select: { courses: true } } },
+    });
+    if (!category) throw new NotFoundException('Category not found in this institute');
+    if (category._count.courses > 0) {
+      throw new ConflictException(
+        'Cannot delete category while courses are assigned to it. Reassign those courses first.',
+      );
+    }
+    await this.prisma.courseCategory.delete({ where: { id: categoryId } });
+    return { success: true };
+  }
+
+  /**
+   * Soft-archive & hide a course cleanly while preserving enrolment/order history
+   */
+  async softDelete(instituteId: string, courseId: string): Promise<{ success: boolean }> {
+    const existing = await this.prisma.course.findFirst({
+      where: { id: courseId, instituteId, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Course not found in this institute');
+
+    await this.prisma.course.update({
+      where: { id: courseId },
+      data: {
+        deletedAt: new Date(),
+        status: CourseStatus.ARCHIVED,
+      },
+    });
+    return { success: true };
+  }
+
+  /**
+   * Update a resource (e.g., toggle DRM downloadable flag)
+   */
+  async updateResource(
+    instituteId: string,
+    courseId: string,
+    resourceId: string,
+    input: UpdateResourceInput,
+  ): Promise<ResourceItemDetail> {
+    const resource = await this.prisma.lessonResource.findFirst({
+      where: {
+        id: resourceId,
+        instituteId,
+        lesson: { chapter: { module: { courseId, instituteId } } },
+      },
+      include: { mediaAsset: true },
+    });
+    if (!resource) {
+      throw new NotFoundException('Resource not found in this course');
+    }
+
+    const updated = await this.prisma.lessonResource.update({
+      where: { id: resourceId },
+      data: {
+        ...(input.downloadable !== undefined ? { downloadable: input.downloadable } : {}),
+      },
+      include: { mediaAsset: true },
+    });
+
+    return {
+      id: updated.id,
+      lessonId: updated.lessonId,
+      mediaAssetId: updated.mediaAssetId,
+      kind: updated.mediaAsset.kind,
+      storageKey: updated.mediaAsset.storageKey,
+      mimeType: updated.mediaAsset.mimeType,
+      sizeBytes: updated.mediaAsset.sizeBytes.toString(),
+      downloadable: updated.downloadable,
+      createdAt: updated.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Upsert course completion rule
+   */
+  async upsertCompletionRule(
+    instituteId: string,
+    courseId: string,
+    input: UpsertCompletionRuleInput,
+  ) {
+    const course = await this.prisma.course.findFirst({
+      where: { id: courseId, instituteId, deletedAt: null },
+    });
+    if (!course) throw new NotFoundException('Course not found in this institute');
+
+    return this.prisma.completionRule.upsert({
+      where: { courseId },
+      update: {
+        minProgressPct: input.minProgressPct,
+        allMandatory: input.allMandatory,
+        minExamPct: input.minExamPct,
+        minAttendancePct: input.minAttendancePct,
+      },
+      create: {
+        courseId,
+        instituteId,
+        minProgressPct: input.minProgressPct,
+        allMandatory: input.allMandatory,
+        minExamPct: input.minExamPct,
+        minAttendancePct: input.minAttendancePct,
+      },
+    });
+  }
+
+  /**
+   * List real enrolments for a course
+   */
+  async listCourseEnrolments(instituteId: string, courseId: string) {
+    const course = await this.prisma.course.findFirst({
+      where: { id: courseId, instituteId, deletedAt: null },
+    });
+    if (!course) throw new NotFoundException('Course not found in this institute');
+
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: { instituteId, courseId },
+      include: {
+        batch: { select: { id: true, name: true } },
+        studentProfile: {
+          include: {
+            membership: {
+              include: {
+                user: { select: { id: true, fullName: true, phoneE164: true, email: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return (enrolments as any[]).map((e) => ({
+      id: e.id,
+      studentProfileId: e.studentProfileId,
+      admissionNo: e.studentProfile?.admissionNo || '',
+      studentName: e.studentProfile?.membership?.user?.fullName || 'Student',
+      phoneNumber: e.studentProfile?.membership?.user?.phoneE164 || undefined,
+      email: e.studentProfile?.membership?.user?.email || undefined,
+      batchId: e.batchId || undefined,
+      batchName: e.batch?.name || undefined,
+      status: e.status,
+      source: e.source,
+      progressPct: e.progressPct,
+      enrolledAt: e.createdAt.toISOString(),
+    }));
   }
 }

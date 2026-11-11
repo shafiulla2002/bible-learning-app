@@ -10,6 +10,12 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  buildSyllabusPdfBuffer,
+  resolveResourceDelivery,
+  resolveVideoSource,
+  safeFileName,
+} from '../courses/pdf-syllabus.util';
+import {
   CreateTeacherInput,
   UpdateTeacherProfileInput,
   TeacherFilterQueryInput,
@@ -991,7 +997,7 @@ export class TeachersService {
     if (!user || (!user.sub && !user.userId)) {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== Role.TEACHER) {
+    if (!user.role || user.role !== Role.TEACHER) {
       throw new ForbiddenException(
         `Access denied: Current role '${user.role}' is not authorized to access Teacher Portal.`
       );
@@ -1002,6 +1008,8 @@ export class TeachersService {
         userId: tokenUserId,
         role: Role.TEACHER,
         status: 'ACTIVE',
+        user: { status: 'ACTIVE', deletedAt: null },
+        institute: { status: 'ACTIVE' },
         ...(user.instituteId ? { instituteId: user.instituteId } : {}),
       },
       include: {
@@ -1048,6 +1056,7 @@ export class TeachersService {
         qualifications: teacherProfile.qualifications,
         specialization: teacherProfile.specialization,
         experienceYears: teacherProfile.experienceYears,
+        bio: teacherProfile.bio,
         photoUrl: teacherProfile.photoUrl || u.avatarUrl,
         status: teacherProfile.status,
       },
@@ -1072,7 +1081,7 @@ export class TeachersService {
     if (!user || (!user.sub && !user.userId)) {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== Role.TEACHER) {
+    if (!user.role || user.role !== Role.TEACHER) {
       throw new ForbiddenException(
         `Access denied: Current role '${user.role}' is not authorized to access Teacher Portal.`
       );
@@ -1083,6 +1092,8 @@ export class TeachersService {
         userId: tokenUserId,
         role: Role.TEACHER,
         status: 'ACTIVE',
+        user: { status: 'ACTIVE', deletedAt: null },
+        institute: { status: 'ACTIVE' },
         ...(user.instituteId ? { instituteId: user.instituteId } : {}),
       },
       include: {
@@ -1306,6 +1317,7 @@ export class TeachersService {
         qualifications: teacherProfile.qualifications,
         specialization: teacherProfile.specialization,
         experienceYears: teacherProfile.experienceYears,
+        bio: teacherProfile.bio,
         photoUrl: teacherProfile.photoUrl || u.avatarUrl,
         status: teacherProfile.status,
       },
@@ -1348,7 +1360,7 @@ export class TeachersService {
     if (!user || (!user.sub && !user.userId)) {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== Role.TEACHER) {
+    if (!user.role || user.role !== Role.TEACHER) {
       throw new ForbiddenException(
         `Access denied: Current role '${user.role}' is not authorized to access Teacher Portal.`
       );
@@ -1359,6 +1371,8 @@ export class TeachersService {
         userId: tokenUserId,
         role: Role.TEACHER,
         status: 'ACTIVE',
+        user: { status: 'ACTIVE', deletedAt: null },
+        institute: { status: 'ACTIVE' },
         ...(user.instituteId ? { instituteId: user.instituteId } : {}),
       },
       include: {
@@ -1935,6 +1949,7 @@ export class TeachersService {
 
     if (assignedCourseIds.length === 0) {
       return {
+        success: true,
         data: [],
         meta: {
           total: 0,
@@ -2047,6 +2062,7 @@ export class TeachersService {
     });
 
     return {
+      success: true,
       data,
       meta: {
         total,
@@ -2216,39 +2232,42 @@ export class TeachersService {
     const role = isDirect ? isDirect.role : (isBatch ? isBatch.role : 'INSTRUCTOR');
 
     return {
-      id: course.id,
-      title: course.title,
-      slug: course.slug,
-      description: course.description,
-      coverImage: course.coverImage,
-      level: course.level,
-      language: course.language,
-      pricing: course.pricing,
-      price: course.price,
-      salePrice: course.salePrice,
-      status: course.status,
-      category: course.category?.name || 'Uncategorized',
-      categoryId: course.categoryId,
-      role,
-      instructors: course.instructors.map((ci) => ({
-        id: ci.id,
-        role: ci.role,
-        teacherProfileId: ci.teacherProfileId,
-        fullName: ci.teacherProfile?.membership?.user?.fullName || 'Instructor',
-        email: ci.teacherProfile?.membership?.user?.email || null,
-        avatarUrl: ci.teacherProfile?.membership?.user?.avatarUrl || null,
-      })),
-      assignedBatches,
-      summary: {
-        moduleCount: course.modules.length,
-        chapterCount,
-        lessonCount,
-        resourceCount,
-        totalDurationMinutes: Math.round(totalDurationSec / 60),
+      success: true,
+      course: {
+        id: course.id,
+        title: course.title,
+        slug: course.slug,
+        description: course.description,
+        coverImage: course.coverImage,
+        level: course.level,
+        language: course.language,
+        pricing: course.pricing,
+        price: course.price,
+        salePrice: course.salePrice,
+        status: course.status,
+        category: course.category?.name || 'Uncategorized',
+        categoryId: course.categoryId,
+        role,
+        instructors: course.instructors.map((ci) => ({
+          id: ci.id,
+          role: ci.role,
+          teacherProfileId: ci.teacherProfileId,
+          fullName: ci.teacherProfile?.membership?.user?.fullName || 'Instructor',
+          email: ci.teacherProfile?.membership?.user?.email || null,
+          avatarUrl: ci.teacherProfile?.membership?.user?.avatarUrl || null,
+        })),
+        assignedBatches,
+        summary: {
+          moduleCount: course.modules.length,
+          chapterCount,
+          lessonCount,
+          resourceCount,
+          totalDurationMinutes: Math.round(totalDurationSec / 60),
+        },
+        modules,
+        createdAt: course.createdAt.toISOString(),
+        updatedAt: course.updatedAt.toISOString(),
       },
-      modules,
-      createdAt: course.createdAt.toISOString(),
-      updatedAt: course.updatedAt.toISOString(),
     };
   }
 
@@ -2286,6 +2305,7 @@ export class TeachersService {
 
     if (assignedCourseIds.length === 0) {
       return {
+        success: true,
         data: [],
         meta: {
           total: 0,
@@ -2389,12 +2409,14 @@ export class TeachersService {
         kind: r.mediaAsset?.kind || 'FILE',
         mimeType: r.mediaAsset?.mimeType || '',
         sizeBytes: r.mediaAsset?.sizeBytes ? r.mediaAsset.sizeBytes.toString() : '0',
+        videoStreamId: r.mediaAsset?.videoStreamId || null,
         downloadable: r.downloadable,
         createdAt: r.createdAt.toISOString(),
       };
     });
 
     return {
+      success: true,
       data,
       meta: {
         total,
@@ -2514,6 +2536,247 @@ export class TeachersService {
     };
   }
 
+  async createTeacherMaterial(
+    user: any,
+    payload: {
+      courseId?: string;
+      lessonId: string;
+      kind?: string;
+      storageKey: string;
+      mimeType?: string;
+      sizeBytes?: string | number;
+      downloadable?: boolean;
+    },
+  ) {
+    const { instituteId } = await this.resolveTeacherMembership(user);
+    if (!payload.lessonId) {
+      throw new BadRequestException('lessonId is required');
+    }
+
+    let resolvedCourseId = payload.courseId?.trim() || '';
+    if (!resolvedCourseId) {
+      const lesson = await this.prisma.lesson.findFirst({
+        where: { id: payload.lessonId, instituteId },
+        include: {
+          chapter: {
+            include: {
+              module: { select: { courseId: true } },
+            },
+          },
+        },
+      });
+      if (!lesson) {
+        throw new NotFoundException('Lesson not found');
+      }
+      resolvedCourseId = lesson.chapter.module.courseId;
+    }
+
+    return this.uploadTeacherResource(user, resolvedCourseId, payload.lessonId, {
+      kind: payload.kind || 'FILE',
+      storageKey: payload.storageKey,
+      mimeType: payload.mimeType || 'application/octet-stream',
+      sizeBytes: payload.sizeBytes,
+      downloadable: payload.downloadable,
+    });
+  }
+
+  private async verifyTeacherCourseAccess(
+    teacherProfileId: string,
+    instituteId: string,
+    courseId: string,
+  ) {
+    const isDirect = await this.prisma.courseInstructor.findFirst({
+      where: { courseId, teacherProfileId, instituteId },
+    });
+    const isBatch = isDirect
+      ? null
+      : await this.prisma.batchTeacher.findFirst({
+          where: { teacherProfileId, instituteId, batch: { courseId } },
+        });
+    if (!isDirect && !isBatch) {
+      throw new ForbiddenException('You do not have access to this course resource.');
+    }
+  }
+
+  async getTeacherMaterialContent(user: any, resourceId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const resource = await this.prisma.lessonResource.findFirst({
+      where: { id: resourceId, instituteId },
+      include: {
+        mediaAsset: true,
+        lesson: {
+          include: {
+            chapter: {
+              include: {
+                module: {
+                  include: {
+                    course: {
+                      include: {
+                        institute: { select: { name: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!resource) {
+      throw new NotFoundException('Learning material not found');
+    }
+
+    const course = resource.lesson.chapter.module.course;
+    await this.verifyTeacherCourseAccess(teacherProfileId, instituteId, course.id);
+
+    const storageKey = resource.mediaAsset?.storageKey || '';
+    const title = storageKey ? storageKey.split('/').pop() || resource.lesson.title : resource.lesson.title;
+
+    return {
+      id: resource.id,
+      title,
+      kind: resource.mediaAsset?.kind || 'FILE',
+      mimeType: resource.mediaAsset?.mimeType || 'application/octet-stream',
+      storageKey,
+      videoStreamId: resource.mediaAsset?.videoStreamId || null,
+      downloadable: resource.downloadable,
+      lessonId: resource.lessonId,
+      lessonTitle: resource.lesson.title,
+      lessonBody: resource.lesson.body || null,
+      courseId: course.id,
+      courseTitle: course.title,
+      instituteName: course.institute?.name || undefined,
+    };
+  }
+
+  async updateTeacherMaterialContent(
+    user: any,
+    resourceId: string,
+    payload: {
+      storageKey?: string;
+      videoStreamId?: string | null;
+      downloadable?: boolean;
+    },
+  ) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+
+    const resource = await this.prisma.lessonResource.findFirst({
+      where: { id: resourceId, instituteId },
+      include: {
+        mediaAsset: true,
+        lesson: {
+          include: {
+            chapter: {
+              include: {
+                module: { select: { courseId: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!resource) {
+      throw new NotFoundException('Learning material not found');
+    }
+
+    await this.verifyTeacherCourseAccess(
+      teacherProfileId,
+      instituteId,
+      resource.lesson.chapter.module.courseId,
+    );
+
+    const nextStorageKey = payload.storageKey?.trim();
+    const resolved = nextStorageKey ? resolveVideoSource(nextStorageKey) : null;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (nextStorageKey || payload.videoStreamId !== undefined) {
+        await tx.mediaAsset.update({
+          where: { id: resource.mediaAssetId },
+          data: {
+            ...(nextStorageKey ? { storageKey: nextStorageKey } : {}),
+            ...(payload.videoStreamId !== undefined
+              ? { videoStreamId: payload.videoStreamId }
+              : resolved?.streamId
+                ? { videoStreamId: resolved.streamId }
+                : {}),
+          },
+        });
+      }
+      if (payload.downloadable !== undefined) {
+        await tx.lessonResource.update({
+          where: { id: resource.id },
+          data: { downloadable: Boolean(payload.downloadable) },
+        });
+      }
+    });
+
+    const updated = await this.getTeacherMaterialContent(user, resourceId);
+    return {
+      success: true,
+      data: {
+        ...updated,
+        video: resolveVideoSource(updated.storageKey),
+      },
+    };
+  }
+
+  async getTeacherCourseSyllabusPdf(user: any, courseId: string) {
+    const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
+    await this.verifyTeacherCourseAccess(teacherProfileId, instituteId, courseId);
+
+    const course = await this.prisma.course.findFirst({
+      where: { id: courseId, instituteId, deletedAt: null },
+      include: {
+        institute: { select: { name: true } },
+        modules: {
+          orderBy: { position: 'asc' },
+          include: {
+            chapters: {
+              orderBy: { position: 'asc' },
+              include: {
+                lessons: {
+                  orderBy: { position: 'asc' },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    const buffer = buildSyllabusPdfBuffer({
+      instituteName: course.institute?.name || undefined,
+      courseTitle: course.title,
+      courseCode: course.slug,
+      description: course.description,
+      modules: course.modules.map((mod) => ({
+        title: mod.title,
+        orderIndex: mod.position,
+        lessons: mod.chapters.flatMap((ch) =>
+          ch.lessons.map((l) => ({
+            title: `${ch.title}: ${l.title}`,
+            lessonType: l.type,
+            durationMinutes: l.durationSec ? Math.round(l.durationSec / 60) : null,
+            summary: l.body,
+          })),
+        ),
+      })),
+    });
+
+    return {
+      fileName: `${safeFileName(course.slug || course.title, 'course')}-syllabus.pdf`,
+      buffer,
+    };
+  }
+
   /**
    * Requirement: Teacher Assignments List
    * Retrieves all assignments belonging to courses or batches assigned to the authenticated teacher.
@@ -2550,6 +2813,7 @@ export class TeachersService {
 
     if (assignedCourseIds.length === 0 && assignedBatchIds.length === 0) {
       return {
+        success: true,
         data: [],
         meta: {
           total: 0,
@@ -2698,6 +2962,7 @@ export class TeachersService {
     });
 
     return {
+      success: true,
       data,
       meta: {
         total,
@@ -3348,33 +3613,74 @@ export class TeachersService {
     const limit = Math.min(100, Math.max(1, parseInt(options.limit || '10', 10)));
     const skip = (page - 1) * limit;
 
-    const [allExamsForMetrics, exams, totalCount] = await Promise.all([
-      this.prisma.exam.findMany({
-        where: {
+    let allExamsForMetrics: any[] = [];
+    let exams: any[] = [];
+    let totalCount = 0;
+
+    try {
+      [allExamsForMetrics, exams, totalCount] = await Promise.all([
+        this.prisma.exam.findMany({
+          where: {
+            instituteId,
+            OR: [
+              { courseId: { in: assignedCourseIds } },
+              ...(assignedBatchIds.length > 0 ? [{ batchId: { in: assignedBatchIds } }] : []),
+            ],
+          },
+          include: {
+            attempts: { select: { id: true, status: true, score: true } },
+          },
+        }),
+        this.prisma.exam.findMany({
+          where: whereClause,
+          include: {
+            course: { select: { id: true, title: true } },
+            batch: { select: { id: true, name: true, code: true } },
+            questions: { select: { id: true, marks: true } },
+            attempts: { select: { id: true, status: true, score: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        this.prisma.exam.count({ where: whereClause }),
+      ]);
+    } catch (err: any) {
+      if (err?.code === 'P2022') {
+        const fallbackWhere: any = {
           instituteId,
-          OR: [
-            { courseId: { in: assignedCourseIds } },
-            ...(assignedBatchIds.length > 0 ? [{ batchId: { in: assignedBatchIds } }] : []),
-          ],
-        },
-        include: {
-          attempts: { select: { id: true, status: true, score: true } },
-        },
-      }),
-      this.prisma.exam.findMany({
-        where: whereClause,
-        include: {
-          course: { select: { id: true, title: true } },
-          batch: { select: { id: true, name: true, code: true } },
-          questions: { select: { id: true, marks: true } },
-          attempts: { select: { id: true, status: true, score: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.exam.count({ where: whereClause }),
-    ]);
+          courseId: options.courseId && options.courseId !== 'ALL' ? options.courseId : { in: assignedCourseIds },
+        };
+        if (options.search && options.search.trim()) {
+          fallbackWhere.OR = [
+            { title: { contains: options.search.trim(), mode: 'insensitive' } },
+            { course: { title: { contains: options.search.trim(), mode: 'insensitive' } } },
+          ];
+        }
+        [allExamsForMetrics, exams, totalCount] = await Promise.all([
+          this.prisma.exam.findMany({
+            where: { instituteId, courseId: { in: assignedCourseIds } },
+            include: {
+              attempts: { select: { id: true, status: true, score: true } },
+            },
+          }),
+          this.prisma.exam.findMany({
+            where: fallbackWhere,
+            include: {
+              course: { select: { id: true, title: true } },
+              questions: { select: { id: true, marks: true } },
+              attempts: { select: { id: true, status: true, score: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit,
+          }),
+          this.prisma.exam.count({ where: fallbackWhere }),
+        ]);
+      } else {
+        throw err;
+      }
+    }
 
     // Compute metrics
     const now = new Date();
@@ -4948,11 +5254,62 @@ export class TeachersService {
 
     const assignedBatchTeachers = await this.prisma.batchTeacher.findMany({
       where: { teacherProfileId, instituteId },
+      include: {
+        batch: {
+          include: {
+            course: { select: { id: true, title: true } },
+          },
+        },
+      },
     });
     const assignedBatchIds = assignedBatchTeachers.map((bt) => bt.batchId);
 
+    const filterCoursesMap = new Map<string, { id: string; title: string }>();
+    const filterBatches: Array<{ id: string; title: string; courseId?: string }> = [];
+    for (const bt of assignedBatchTeachers) {
+      if (bt.batch) {
+        filterBatches.push({
+          id: bt.batch.id,
+          title: bt.batch.name,
+          courseId: bt.batch.courseId,
+        });
+        if (bt.batch.course) {
+          filterCoursesMap.set(bt.batch.course.id, {
+            id: bt.batch.course.id,
+            title: bt.batch.course.title,
+          });
+        }
+      }
+    }
+    const filters = {
+      courses: Array.from(filterCoursesMap.values()),
+      batches: filterBatches,
+    };
+
+    const now = new Date();
+    const day = now.getDay();
+    const mondayDiff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const defaultStart = new Date(now.getFullYear(), now.getMonth(), mondayDiff, 0, 0, 0, 0);
+    const defaultEnd = new Date(defaultStart);
+    defaultEnd.setDate(defaultStart.getDate() + 6);
+    defaultEnd.setHours(23, 59, 59, 999);
+
+    const range = {
+      startDate: options.startDate || defaultStart.toISOString(),
+      endDate: options.endDate || defaultEnd.toISOString(),
+    };
+
     if (assignedBatchIds.length === 0) {
-      return { success: true, items: [] };
+      return {
+        success: true,
+        items: [],
+        data: {
+          events: [],
+          range,
+          summary: { totalEvents: 0, upcoming: 0, live: 0, completed: 0 },
+          filters,
+        },
+      };
     }
 
     const where: any = {
@@ -4967,6 +5324,11 @@ export class TeachersService {
       };
     } else if (options.startDate) {
       where.startsAt = { gte: new Date(options.startDate) };
+    } else {
+      where.startsAt = {
+        gte: defaultStart,
+        lte: defaultEnd,
+      };
     }
 
     if (options.batchId && options.batchId !== 'ALL') {
@@ -4981,30 +5343,55 @@ export class TeachersService {
       orderBy: { startsAt: 'asc' },
       include: {
         batch: {
-          include: { course: { select: { id: true, title: true } } },
+          include: {
+            course: { select: { id: true, title: true, slug: true } },
+            _count: { select: { enrolments: true } },
+          },
         },
+        _count: { select: { attendances: true } },
       },
     });
 
-    const items = sessions.map((s) => ({
-      id: s.id,
-      title: s.title,
-      description: s.description,
-      room: s.room,
-      courseId: s.batch.courseId,
-      courseTitle: s.batch.course.title,
-      batchId: s.batchId,
-      batchName: s.batch.name,
-      startsAt: s.startsAt.toISOString(),
-      endsAt: s.endsAt.toISOString(),
-      durationMin: Math.round((s.endsAt.getTime() - s.startsAt.getTime()) / (1000 * 60)),
-      status: s.status,
-      joinUrl: s.joinUrl,
-    }));
+    const items = sessions.map((s) => {
+      const durationMin = Math.round((s.endsAt.getTime() - s.startsAt.getTime()) / (1000 * 60));
+      return {
+        id: s.id,
+        title: s.title,
+        description: s.description,
+        room: s.room || 'Online Classroom',
+        courseId: s.batch.courseId,
+        courseTitle: s.batch.course.title,
+        courseCode: s.batch.course.slug || null,
+        batchId: s.batchId,
+        batchName: s.batch.name,
+        startsAt: s.startsAt.toISOString(),
+        endsAt: s.endsAt.toISOString(),
+        durationMin,
+        durationMinutes: durationMin,
+        status: s.status,
+        joinUrl: s.joinUrl,
+        recordingUrl: s.recordingUrl || null,
+        attendanceCount: s._count?.attendances || 0,
+        enrolledCount: s.batch._count?.enrolments || 0,
+      };
+    });
+
+    const summary = {
+      totalEvents: items.length,
+      upcoming: items.filter((e) => e.status === 'SCHEDULED').length,
+      live: items.filter((e) => e.status === 'LIVE').length,
+      completed: items.filter((e) => e.status === 'COMPLETED').length,
+    };
 
     return {
       success: true,
       items,
+      data: {
+        events: items,
+        range,
+        summary,
+        filters,
+      },
     };
   }
 
@@ -5510,6 +5897,162 @@ export class TeachersService {
           })),
         },
       },
+    };
+  }
+
+  /**
+   * Admin: Get concise teacher workload summary for GET /institutes/:instituteId/teachers/:id/workload
+   */
+  async getTeacherWorkload(instituteId: string, teacherProfileId: string) {
+    const detail = await this.findOne(instituteId, teacherProfileId);
+    return {
+      ...detail.workloadSummary,
+      upcomingSessions: detail.recentLiveSessions,
+      assignedCourses: detail.assignedCourses,
+      assignedBatches: detail.assignedBatches,
+    };
+  }
+
+  /**
+   * Self-service: Update authenticated teacher's profile & credentials in PostgreSQL
+   */
+  async updateTeacherMe(user: any, payload: any) {
+    const me = await this.getTeacherMe(user);
+    const teacherProfileId = me.teacher.teacherProfileId;
+    const userId = me.teacher.userId;
+
+    const fullName =
+      typeof payload?.fullName === 'string' && payload.fullName.trim().length >= 2
+        ? payload.fullName.trim()
+        : undefined;
+    const email =
+      typeof payload?.email === 'string' ? payload.email.trim() || null : undefined;
+    const qualifications =
+      typeof payload?.qualifications === 'string'
+        ? payload.qualifications.trim() || null
+        : undefined;
+    const specialization =
+      typeof payload?.specialization === 'string'
+        ? payload.specialization.trim() || null
+        : undefined;
+    const bio =
+      typeof payload?.bio === 'string' ? payload.bio.trim() || null : undefined;
+    const experienceYears =
+      payload?.experienceYears !== undefined && payload?.experienceYears !== ''
+        ? Math.max(0, Number(payload.experienceYears) || 0)
+        : undefined;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (fullName !== undefined || email !== undefined) {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            ...(fullName !== undefined ? { fullName } : {}),
+            ...(email !== undefined ? { email } : {}),
+          },
+        });
+      }
+      await tx.teacherProfile.update({
+        where: { id: teacherProfileId },
+        data: {
+          ...(qualifications !== undefined ? { qualifications } : {}),
+          ...(specialization !== undefined ? { specialization } : {}),
+          ...(bio !== undefined ? { bio } : {}),
+          ...(experienceYears !== undefined ? { experienceYears } : {}),
+        },
+      });
+    });
+
+    return this.getTeacherMe(user);
+  }
+
+  /**
+   * Self-service: Load authenticated teacher portal settings persisted in PostgreSQL
+   */
+  async getTeacherSettings(user: any) {
+    const me = await this.getTeacherMe(user);
+    const profile = await this.prisma.teacherProfile.findUnique({
+      where: { id: me.teacher.teacherProfileId },
+      select: { address: true },
+    });
+    const addr = (profile?.address && typeof profile.address === 'object'
+      ? profile.address
+      : {}) as Record<string, any>;
+    const saved = (addr.portalSettings && typeof addr.portalSettings === 'object'
+      ? addr.portalSettings
+      : {}) as Record<string, any>;
+
+    return {
+      success: true,
+      settings: {
+        emailNotifications: saved.emailNotifications ?? true,
+        submissionAlerts: saved.submissionAlerts ?? true,
+        liveSessionReminders: saved.liveSessionReminders ?? true,
+        examDeadlineAlerts: saved.examDeadlineAlerts ?? true,
+        preferredLanguage: saved.preferredLanguage || 'English',
+        timezone: saved.timezone || 'Asia/Kolkata',
+      },
+    };
+  }
+
+  /**
+   * Self-service: Persist authenticated teacher portal settings in PostgreSQL
+   */
+  async updateTeacherSettings(user: any, payload: any) {
+    const me = await this.getTeacherMe(user);
+    const existing = await this.prisma.teacherProfile.findUnique({
+      where: { id: me.teacher.teacherProfileId },
+      select: { address: true },
+    });
+    const existingAddr =
+      existing?.address && typeof existing.address === 'object'
+        ? (existing.address as Record<string, any>)
+        : {};
+    const prevSettings =
+      existingAddr.portalSettings && typeof existingAddr.portalSettings === 'object'
+        ? (existingAddr.portalSettings as Record<string, any>)
+        : {};
+
+    const nextSettings = {
+      emailNotifications:
+        typeof payload?.emailNotifications === 'boolean'
+          ? payload.emailNotifications
+          : (prevSettings.emailNotifications ?? true),
+      submissionAlerts:
+        typeof payload?.submissionAlerts === 'boolean'
+          ? payload.submissionAlerts
+          : (prevSettings.submissionAlerts ?? true),
+      liveSessionReminders:
+        typeof payload?.liveSessionReminders === 'boolean'
+          ? payload.liveSessionReminders
+          : (prevSettings.liveSessionReminders ?? true),
+      examDeadlineAlerts:
+        typeof payload?.examDeadlineAlerts === 'boolean'
+          ? payload.examDeadlineAlerts
+          : (prevSettings.examDeadlineAlerts ?? true),
+      preferredLanguage:
+        typeof payload?.preferredLanguage === 'string' && payload.preferredLanguage.trim()
+          ? payload.preferredLanguage.trim()
+          : (prevSettings.preferredLanguage || 'English'),
+      timezone:
+        typeof payload?.timezone === 'string' && payload.timezone.trim()
+          ? payload.timezone.trim()
+          : (prevSettings.timezone || 'Asia/Kolkata'),
+    };
+
+    await this.prisma.teacherProfile.update({
+      where: { id: me.teacher.teacherProfileId },
+      data: {
+        address: {
+          ...existingAddr,
+          portalSettings: nextSettings,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      settings: nextSettings,
     };
   }
 }

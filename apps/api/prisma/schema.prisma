@@ -55,6 +55,20 @@ enum CourseStatus {
   ARCHIVED
 }
 
+enum CourseType {
+  SELF_PACED
+  COHORT
+  LIVE
+  DIPLOMA
+  CERTIFICATE
+}
+
+enum LearningMode {
+  ONLINE
+  OFFLINE
+  HYBRID
+}
+
 enum CourseLevel {
   BEGINNER
   INTERMEDIATE
@@ -182,6 +196,7 @@ model Institute {
   feePayments   FeePayment[]
   feeReceipts   FeeReceipt[]
   paymentReversalAudits PaymentReversalAudit[]
+  paymentWebhookEvents PaymentWebhookEvent[]
 
   @@index([status])
 }
@@ -425,18 +440,31 @@ model TeacherProfile {
 }
 
 model Admission {
-  id               String         @id @default(uuid())
-  instituteId      String
-  studentProfileId String
-  studentProfile   StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
-  status           String         @default("APPLIED") // APPLIED, UNDER_REVIEW, INTERVIEW_SCHEDULED, ACCEPTED, REJECTED
-  statement        String?
-  interviewNotes   String?
-  interviewAt      DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                  String         @id @default(uuid())
+  instituteId         String
+  studentProfileId    String
+  studentProfile      StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  applicationNumber   String?
+  courseId            String?
+  course              Course?        @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  batchId             String?
+  batch               Batch?         @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  status              String         @default("APPLIED") // APPLIED, UNDER_REVIEW, INTERVIEW_SCHEDULED, ACCEPTED, REJECTED
+  statement           String?
+  documents           Json?
+  applicantDetails    Json?
+  interviewNotes      String?
+  interviewAt         DateTime?
+  reviewedByUserId    String?
+  reviewedAt          DateTime?
+  rejectionReason     String?
+  approvedEnrolmentId String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
+  @@unique([instituteId, applicationNumber])
   @@index([instituteId, status])
+  @@index([courseId])
 }
 
 // ----------------------------------------------------
@@ -458,30 +486,39 @@ model CourseCategory {
 }
 
 model Course {
-  id          String         @id @default(uuid())
-  instituteId String
-  institute   Institute      @relation(fields: [instituteId], references: [id], onDelete: Cascade)
-  categoryId  String
-  category    CourseCategory @relation(fields: [categoryId], references: [id])
-  title       String
-  slug        String
-  description String
-  coverImage  String?
-  level       CourseLevel    @default(BEGINNER)
-  language    String         @default("English")
-  pricing     PricingType    @default(FREE)
-  price       Int            @default(0) // in paise
-  salePrice   Int?
-  accessDays  Int?           // null = lifetime
-  status      CourseStatus   @default(DRAFT)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  deletedAt   DateTime?
+  id                 String         @id @default(uuid())
+  instituteId        String
+  institute          Institute      @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  categoryId         String
+  category           CourseCategory @relation(fields: [categoryId], references: [id])
+  title              String
+  slug               String
+  description        String
+  coverImage         String?
+  level              CourseLevel    @default(BEGINNER)
+  courseType         CourseType     @default(COHORT)
+  learningMode       LearningMode   @default(ONLINE)
+  durationLabel      String?
+  eligibility        String?
+  language           String         @default("English")
+  pricing            PricingType    @default(FREE)
+  price              Int            @default(0) // in paise
+  salePrice          Int?
+  registrationFee    Int            @default(0) // in paise
+  accessDays         Int?           // null = lifetime
+  enrollmentStartsAt DateTime?
+  enrollmentEndsAt   DateTime?
+  requiresApproval   Boolean        @default(true)
+  status             CourseStatus   @default(DRAFT)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  deletedAt          DateTime?
 
   instructors    CourseInstructor[]
   modules        Module[]
   batches        Batch[]
   enrolments     Enrolment[]
+  admissions     Admission[]
   assignments    Assignment[]
   exams          Exam[]
   cartItems      CartItem[]
@@ -617,6 +654,7 @@ model Batch {
 
   teachers        BatchTeacher[]
   enrolments      Enrolment[]
+  admissions      Admission[]
   liveSessions    LiveSession[]
   attendances     Attendance[]
   assignments     Assignment[]
@@ -977,19 +1015,22 @@ model CouponRedemption {
 }
 
 model Order {
-  id               String         @id @default(uuid())
-  instituteId      String
-  institute        Institute      @relation(fields: [instituteId], references: [id], onDelete: Cascade)
-  studentProfileId String
-  studentProfile   StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
-  orderNumber      String         @unique
-  subtotal         Int
-  discount         Int            @default(0)
-  total            Int
-  status           OrderStatus    @default(PENDING)
-  providerOrderId  String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                String         @id @default(uuid())
+  instituteId       String
+  institute         Institute      @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  studentProfileId  String
+  studentProfile    StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  orderNumber       String         @unique
+  subtotal          Int
+  discount          Int            @default(0)
+  total             Int
+  status            OrderStatus    @default(PENDING)
+  providerOrderId   String?
+  invoiceId         String?
+  admissionId       String?
+  signatureVerified Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   items            OrderItem[]
   payments         Payment[]
@@ -997,6 +1038,7 @@ model Order {
   receipt          Receipt?
 
   @@index([instituteId, status])
+  @@index([providerOrderId])
 }
 
 model OrderItem {
@@ -1016,7 +1058,11 @@ model Payment {
   orderId           String
   order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   amount            Int           // in paise
+  providerOrderId   String?
   providerPaymentId String?       @unique
+  providerSignature String?
+  signatureVerified Boolean       @default(false)
+  rawPayload        Json?
   status            PaymentStatus @default(CREATED)
   method            String?
   createdAt         DateTime      @default(now())
@@ -1025,6 +1071,63 @@ model Payment {
   refunds Refund[]
 
   @@index([orderId])
+  @@index([providerOrderId])
+}
+
+model PaymentWebhookEvent {
+  id                String     @id @default(uuid())
+  instituteId       String?
+  institute         Institute? @relation(fields: [instituteId], references: [id], onDelete: SetNull)
+  provider          String     @default("RAZORPAY")
+  eventId           String     @unique
+  eventType         String
+  signatureVerified Boolean    @default(false)
+  payload           Json
+  status            String     @default("RECEIVED")
+  errorMessage      String?
+  processedAt       DateTime?
+  createdAt         DateTime   @default(now())
+
+  @@index([instituteId, status])
+  @@index([eventType, createdAt])
+}
+
+model InstituteApplication {
+  id                 String    @id @default(uuid())
+  instituteName      String
+  slug               String
+  applicantName      String
+  applicantEmail     String
+  applicantPhone     String
+  city               String?
+  state              String?
+  country            String?   @default("India")
+  planCode           String?
+  status             String    @default("PENDING") // PENDING, UNDER_REVIEW, APPROVED, REJECTED
+  notes              String?
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  createdInstituteId String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([slug])
+}
+
+model PlatformAuditLog {
+  id                String   @id @default(uuid())
+  actorUserId       String
+  actorRole         String
+  action            String
+  entityType        String
+  entityId          String
+  targetInstituteId String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([targetInstituteId, createdAt])
 }
 
 model Refund {

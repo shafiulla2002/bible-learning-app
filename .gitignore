@@ -38,3 +38,8 @@ desktop.ini
 # ---- Scratch directory ----
 scratch/
 
+# ---- Separate Repository Prototypes & Archives ----
+student-enrollment-ui/
+*.zip
+
+

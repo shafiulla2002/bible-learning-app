@@ -129,11 +129,19 @@ export const CreateCourseSchema = z.object({
   categoryName: z.string().optional(),
   description: z.string().min(10, 'Description must be at least 10 characters'),
   level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']).default('BEGINNER'),
+  courseType: z.enum(['SELF_PACED', 'COHORT', 'LIVE', 'DIPLOMA', 'CERTIFICATE']).default('COHORT'),
+  learningMode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).default('ONLINE'),
+  durationLabel: z.string().max(120).optional(),
+  eligibility: z.string().max(1000).optional(),
   language: z.string().default('English'),
   pricing: z.enum(['FREE', 'PAID']).default('FREE'),
   price: z.coerce.number().int().min(0, 'Price must be non-negative').default(0), // in paise
   salePrice: z.coerce.number().int().min(0).optional(),
+  registrationFee: z.coerce.number().int().min(0, 'Registration fee must be non-negative').default(0), // in paise
   accessDays: z.coerce.number().int().min(1).optional(),
+  enrollmentStartsAt: z.string().optional().or(z.literal('')),
+  enrollmentEndsAt: z.string().optional().or(z.literal('')),
+  requiresApproval: z.boolean().default(true),
   coverImage: z.string().url().optional().or(z.literal('')),
   leadTeacherId: z.string().optional(),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).default('DRAFT'),
@@ -143,6 +151,34 @@ export type CreateCourseInput = z.infer<typeof CreateCourseSchema>;
 
 export const UpdateCourseSchema = CreateCourseSchema.partial();
 export type UpdateCourseInput = z.infer<typeof UpdateCourseSchema>;
+
+export const CreateCourseCategorySchema = z.object({
+  name: z.string().min(2, 'Category name must be at least 2 characters').max(80),
+  slug: z
+    .string()
+    .min(2)
+    .max(80)
+    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens')
+    .optional(),
+});
+export type CreateCourseCategoryInput = z.infer<typeof CreateCourseCategorySchema>;
+
+export const UpdateCourseCategorySchema = CreateCourseCategorySchema.partial();
+export type UpdateCourseCategoryInput = z.infer<typeof UpdateCourseCategorySchema>;
+
+export const UpsertCompletionRuleSchema = z.object({
+  minProgressPct: z.coerce.number().int().min(0).max(100).default(100),
+  allMandatory: z.boolean().default(true),
+  minExamPct: z.coerce.number().int().min(0).max(100).default(60),
+  minAttendancePct: z.coerce.number().int().min(0).max(100).default(75),
+});
+export type UpsertCompletionRuleInput = z.infer<typeof UpsertCompletionRuleSchema>;
+
+export const UpdateResourceSchema = z.object({
+  downloadable: z.boolean().optional(),
+  kind: z.enum(['VIDEO', 'PDF', 'AUDIO', 'IMAGE', 'FILE']).optional(),
+});
+export type UpdateResourceInput = z.infer<typeof UpdateResourceSchema>;
 
 export const CourseFilterQuerySchema = z.object({
   search: z.string().optional(),
@@ -472,6 +508,199 @@ export const AssignTeacherBatchSchema = z.object({
   role: InstructorRoleEnum.default('LEAD'),
 });
 export type AssignTeacherBatchInput = z.infer<typeof AssignTeacherBatchSchema>;
+
+// -----------------------------------------------------------------------------
+// PUBLIC ENROLLMENT, ADMISSIONS & CHECKOUT SCHEMAS (Phases 3, 4, 5, 9, 11)
+// -----------------------------------------------------------------------------
+
+export const PublicCourseCatalogQuerySchema = z.object({
+  instituteSlug: z.string().optional(),
+  instituteId: z.string().optional(),
+  category: z.string().optional(),
+  level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']).optional(),
+  courseType: z.enum(['SELF_PACED', 'COHORT', 'LIVE', 'DIPLOMA', 'CERTIFICATE']).optional(),
+  pricing: z.enum(['FREE', 'PAID']).optional(),
+  search: z.string().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(24),
+});
+export type PublicCourseCatalogQuery = z.infer<typeof PublicCourseCatalogQuerySchema>;
+
+export const PublicStudentRegisterSchema = z.object({
+  instituteSlug: z.string().optional(),
+  instituteId: z.string().optional(),
+  fullName: z.string().trim().min(2, 'Full name is required').max(120),
+  phoneNumber: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'Phone number must be E.164 format (e.g. +919876543210)'),
+  email: z.string().trim().email('Invalid email address').optional().or(z.literal('')),
+  password: z.string().min(8, 'Password must be at least 8 characters').optional(),
+  church: z.string().trim().max(150).optional(),
+  preferredLanguage: z.string().trim().max(50).default('English'),
+  gender: z.string().optional(),
+  dateOfBirth: z.string().optional(),
+});
+export type PublicStudentRegisterInput = z.infer<typeof PublicStudentRegisterSchema>;
+
+export const PublicSubmitApplicationSchema = z.object({
+  instituteSlug: z.string().optional(),
+  instituteId: z.string().optional(),
+  courseId: z.string().min(1, 'Course selection is required'),
+  batchId: z.string().optional(),
+  fullName: z.string().trim().min(2, 'Full name is required').max(120),
+  phoneNumber: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'Phone number must be E.164 format (e.g. +919876543210)'),
+  email: z.string().trim().email('Invalid email address').optional().or(z.literal('')),
+  gender: z.string().optional(),
+  dateOfBirth: z.string().optional(),
+  church: z.string().trim().max(150).optional(),
+  preferredLanguage: z.string().trim().max(50).default('English'),
+  educationLevel: z.string().trim().max(150).optional(),
+  statement: z.string().trim().max(2000).optional(),
+  applicantDetails: z.record(z.any()).optional(),
+  documents: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(120),
+        url: z.string().min(1).max(500),
+      }),
+    )
+    .max(10)
+    .optional(),
+  couponCode: z.string().trim().max(40).optional(),
+});
+export type PublicSubmitApplicationInput = z.infer<typeof PublicSubmitApplicationSchema>;
+
+export const ReviewAdmissionSchema = z.object({
+  status: z.enum(['UNDER_REVIEW', 'INTERVIEW_SCHEDULED']),
+  interviewAt: z.string().optional().nullable(),
+  interviewNotes: z.string().max(1500).optional().nullable(),
+});
+export type ReviewAdmissionInput = z.infer<typeof ReviewAdmissionSchema>;
+
+export const ApproveAdmissionSchema = z.object({
+  batchId: z.string().optional().nullable(),
+  source: z.enum(['PURCHASE', 'FREE', 'ADMIN', 'SCHOLARSHIP']).default('ADMIN'),
+  notes: z.string().max(1000).optional(),
+  createFeeInvoice: z.boolean().default(true),
+  dueDays: z.coerce.number().int().min(0).max(365).default(14),
+});
+export type ApproveAdmissionInput = z.infer<typeof ApproveAdmissionSchema>;
+
+export const RejectAdmissionSchema = z.object({
+  reason: z.string().trim().min(3, 'Rejection reason must be at least 3 characters').max(1000),
+});
+export type RejectAdmissionInput = z.infer<typeof RejectAdmissionSchema>;
+
+export const PublicCreateOrderSchema = z.object({
+  instituteId: z.string().optional(),
+  instituteSlug: z.string().optional(),
+  courseIds: z.array(z.string().min(1)).min(1, 'At least one course is required').max(20),
+  couponCode: z.string().trim().max(40).optional(),
+  admissionId: z.string().optional(),
+  fullName: z.string().trim().min(2).max(120).optional(),
+  phoneNumber: z.string().trim().regex(/^\+[1-9]\d{6,14}$/).optional(),
+  email: z.string().trim().email().optional().or(z.literal('')),
+});
+export type PublicCreateOrderInput = z.infer<typeof PublicCreateOrderSchema>;
+
+export const VerifyRazorpayPaymentSchema = z.object({
+  razorpayOrderId: z.string().min(1, 'Razorpay order ID is required'),
+  razorpayPaymentId: z.string().min(1, 'Razorpay payment ID is required'),
+  razorpaySignature: z.string().min(1, 'Razorpay signature is required'),
+  method: z.string().optional(),
+});
+export type VerifyRazorpayPaymentInput = z.infer<typeof VerifyRazorpayPaymentSchema>;
+
+export const CreatePlanSchema = z.object({
+  code: z.string().trim().min(2).max(40).regex(/^[A-Z0-9_-]+$/, 'Plan code must be uppercase alphanumeric'),
+  name: z.string().trim().min(2).max(100),
+  priceMonthly: z.coerce.number().int().min(0),
+  priceYearly: z.coerce.number().int().min(0),
+  trialDays: z.coerce.number().int().min(0).max(90).default(14),
+  maxStudents: z.coerce.number().int().min(1).default(100),
+  maxTeachers: z.coerce.number().int().min(1).default(10),
+  maxCourses: z.coerce.number().int().min(1).default(20),
+  storageGb: z.coerce.number().int().min(1).default(10),
+  features: z.record(z.any()).optional(),
+  isActive: z.boolean().default(true),
+});
+export type CreatePlanInput = z.infer<typeof CreatePlanSchema>;
+
+// ==========================================
+// PHASE 9: FINANCE, FEES & GATEWAY SCHEMAS
+// ==========================================
+
+export const CreateFeeCategorySchema = z.object({
+  name: z.string().trim().min(2).max(100),
+  code: z.string().trim().min(2).max(32).regex(/^[A-Z0-9_-]+$/).optional(),
+  description: z.string().trim().max(500).optional(),
+  isActive: z.boolean().default(true),
+});
+export type CreateFeeCategoryInput = z.infer<typeof CreateFeeCategorySchema>;
+
+export const CreateFeeStructureSchema = z.object({
+  feeCategoryId: z.string().uuid().optional(),
+  categoryName: z.string().trim().min(2).max(100).optional(),
+  academicYearId: z.string().uuid().optional(),
+  name: z.string().trim().min(2).max(120),
+  code: z.string().trim().min(2).max(40).optional(),
+  periodType: z.enum(['ONE_TIME', 'MONTHLY', 'TERM', 'SEMESTER', 'ANNUAL']).default('ONE_TIME'),
+  amountPaise: z.coerce.number().int().positive().optional(),
+  amountInRupees: z.coerce.number().positive().optional(),
+  currency: z.string().trim().min(3).max(6).default('INR'),
+  description: z.string().trim().max(1000).optional(),
+});
+export type CreateFeeStructureInput = z.infer<typeof CreateFeeStructureSchema>;
+
+export const AllocateStudentFeeSchema = z.object({
+  studentProfileId: z.string().uuid(),
+  feeStructureId: z.string().uuid(),
+  academicYearId: z.string().uuid().optional(),
+  academicTermId: z.string().uuid().optional(),
+  billingPeriod: z.string().trim().min(2).max(60),
+  customAmountPaise: z.coerce.number().int().min(0).optional(),
+  remarks: z.string().trim().max(500).optional(),
+});
+export type AllocateStudentFeeInput = z.infer<typeof AllocateStudentFeeSchema>;
+
+export const GenerateInvoiceSchema = z.object({
+  studentProfileId: z.string().uuid(),
+  feeStructureId: z.string().uuid().optional(),
+  studentFeeAllocationId: z.string().uuid().optional(),
+  dueDate: z.string().optional(),
+  notes: z.string().trim().max(1000).optional(),
+  installments: z
+    .array(
+      z.object({
+        dueDate: z.string(),
+        amountPaise: z.coerce.number().int().positive(),
+      }),
+    )
+    .optional(),
+});
+export type GenerateInvoiceInput = z.infer<typeof GenerateInvoiceSchema>;
+
+export const RecordFeePaymentSchema = z.object({
+  invoiceId: z.string().uuid(),
+  installmentId: z.string().uuid().optional(),
+  amountPaise: z.coerce.number().int().positive().optional(),
+  amountInRupees: z.coerce.number().positive().optional(),
+  paymentMode: z.enum(['CASH', 'BANK_TRANSFER', 'UPI', 'CHEQUE', 'DD', 'ONLINE', 'CARD']).default('ONLINE'),
+  referenceNumber: z.string().trim().max(120).optional(),
+  remarks: z.string().trim().max(500).optional(),
+});
+export type RecordFeePaymentInput = z.infer<typeof RecordFeePaymentSchema>;
+
+export const ReversePaymentSchema = z.object({
+  reversedAmountPaise: z.coerce.number().int().positive().optional(),
+  reason: z.string().trim().min(3, 'Reversal reason must be at least 3 characters').max(500),
+});
+export type ReversePaymentInput = z.infer<typeof ReversePaymentSchema>;
+
+export const UpdateRazorpaySettingsSchema = z.object({
+  keyId: z.string().trim().min(8).max(120).regex(/^rzp_(test|live)_/, 'Key ID must start with rzp_test_ or rzp_live_'),
+  keySecret: z.string().trim().min(8).max(200),
+  webhookSecret: z.string().trim().max(200).optional(),
+});
+export type UpdateRazorpaySettingsInput = z.infer<typeof UpdateRazorpaySettingsSchema>;
 
 
 

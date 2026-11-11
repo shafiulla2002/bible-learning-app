@@ -8,7 +8,7 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { teacherApi, TeacherDetailDto, batchApi } from '@/lib/api';
+import { apiFetch, teacherApi, TeacherDetailDto, batchApi, resolveActiveInstituteId } from '@/lib/api';
 import {
   GraduationCap,
   Users,
@@ -101,7 +101,7 @@ export default function TeacherDetailPage({
   const teacherId = unwrappedParams.id;
   const router = useRouter();
 
-  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+  const [instituteId, setInstituteId] = useState<string>('');
   const [teacher, setTeacher] = useState<TeacherDetailDto | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'courses' | 'batches' | 'workload' | 'account'>('overview');
@@ -154,13 +154,14 @@ export default function TeacherDetailPage({
   const [isCheckingConflict, setIsCheckingConflict] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedId = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-      setInstituteId(storedId);
-    }
+    resolveActiveInstituteId().then((id) => {
+      if (id) setInstituteId(id);
+      else setIsLoading(false);
+    });
   }, []);
 
   const loadTeacher = useCallback(async () => {
+    if (!instituteId) return;
     setIsLoading(true);
     setErrorMsg(null);
     try {
@@ -248,24 +249,13 @@ export default function TeacherDetailPage({
   const openAssignCourse = async () => {
     setShowAssignCourseModal(true);
     try {
-      const res = await fetch(`/institutes/${instituteId}/courses`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
-        },
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const list = json.data || json || [];
-        setAvailableCourses(list);
-        if (list.length > 0) setSelectedCourseId(list[0].id);
-      }
-    } catch {
-      setAvailableCourses([
-        { id: 'c-101', title: 'Old Testament Survey', slug: 'ot-survey' },
-        { id: 'c-102', title: 'New Testament Greek Syntax', slug: 'greek-syntax' },
-        { id: 'c-103', title: 'Systematic Theology: Pneumatology & Soteriology', slug: 'systematic-theology' },
-      ]);
-      setSelectedCourseId('c-101');
+      const json = await apiFetch<any>(`/institutes/${instituteId}/courses`, { bypassCache: true });
+      const list = json?.data || json || [];
+      setAvailableCourses(list);
+      if (list.length > 0) setSelectedCourseId(list[0].id);
+    } catch (err: any) {
+      setAvailableCourses([]);
+      setErrorMsg(err?.message || 'Failed to load courses for assignment.');
     }
   };
 

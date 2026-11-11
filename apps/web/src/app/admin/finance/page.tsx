@@ -6,7 +6,13 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatCard } from '@/components/ui/stat-card';
-import { financeApi, studentApi, FinanceOverviewDto, StudentProfileSummaryDto } from '@/lib/api';
+import {
+  financeApi,
+  studentApi,
+  resolveActiveInstituteId,
+  FinanceOverviewDto,
+  StudentProfileSummaryDto,
+} from '@/lib/api';
 import { formatINR } from '@/components/dashboard/dashboard-charts';
 import {
   LayoutDashboard,
@@ -43,7 +49,7 @@ const adminNav = [
 ];
 
 export default function AdminFinancePage() {
-  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+  const [instituteId, setInstituteId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'structures'>('invoices');
   const [data, setData] = useState<FinanceOverviewDto | null>(null);
   const [students, setStudents] = useState<StudentProfileSummaryDto[]>([]);
@@ -55,7 +61,10 @@ export default function AdminFinancePage() {
   const [showStructureModal, setShowStructureModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showReversalModal, setShowReversalModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<FinanceOverviewDto['invoices'][0] | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<FinanceOverviewDto['payments'][0] | null>(null);
+  const [reversalForm, setReversalForm] = useState({ amountInRupees: 0, reason: '' });
 
   // Form states
   const [structForm, setStructForm] = useState({
@@ -81,13 +90,14 @@ export default function AdminFinancePage() {
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-      setInstituteId(stored);
-    }
+    resolveActiveInstituteId().then((id) => {
+      if (id) setInstituteId(id);
+      else setLoading(false);
+    });
   }, []);
 
   const loadFinanceData = useCallback(async () => {
+    if (!instituteId) return;
     setLoading(true);
     setErrorMsg(null);
     try {
@@ -167,6 +177,25 @@ export default function AdminFinancePage() {
       await loadFinanceData();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to record payment.');
+    }
+  };
+
+  const handleReversePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPayment || !instituteId) return;
+    setErrorMsg(null);
+    try {
+      await financeApi.reversePayment(instituteId, selectedPayment.id, {
+        reversedAmountPaise: Math.round(Number(reversalForm.amountInRupees) * 100),
+        reason: reversalForm.reason,
+      });
+      setSuccessMsg(`Payment ${selectedPayment.paymentNumber} reversed cleanly.`);
+      setShowReversalModal(false);
+      setSelectedPayment(null);
+      setReversalForm({ amountInRupees: 0, reason: '' });
+      await loadFinanceData();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to reverse payment.');
     }
   };
 
@@ -411,12 +440,13 @@ export default function AdminFinancePage() {
                     <th className="py-3.5 px-4">Net Amount</th>
                     <th className="py-3.5 px-4">Date</th>
                     <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {!data || data.payments.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-500">
+                      <td colSpan={9} className="py-12 text-center text-slate-500">
                         No payment records found in PostgreSQL.
                       </td>
                     </tr>
@@ -442,7 +472,28 @@ export default function AdminFinancePage() {
                           {p.paymentDate ? new Date(p.paymentDate).toLocaleDateString() : '—'}
                         </td>
                         <td className="py-3.5 px-4">
-                          <Badge variant="success">{p.status}</Badge>
+                          <Badge variant={p.status === 'REVERSED' ? 'danger' : p.status === 'PARTIALLY_REVERSED' ? 'warning' : 'success'}>
+                            {p.status}
+                          </Badge>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          {p.netAmount > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setSelectedPayment(p);
+                                setReversalForm({
+                                  amountInRupees: Math.round(p.netAmount / 100),
+                                  reason: '',
+                                });
+                                setShowReversalModal(true);
+                              }}
+                              className="text-xs h-7 px-2.5"
+                            >
+                              Reverse
+                            </Button>
+                          )}
                         </td>
                       </tr>
                     ))
@@ -692,6 +743,61 @@ export default function AdminFinancePage() {
                   </Button>
                   <Button type="submit" variant="primary" size="sm">
                     Confirm & Generate Receipt
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          </div>
+        )}
+
+        {/* Modal: Reverse Payment */}
+        {showReversalModal && selectedPayment && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <Card className="w-full max-w-md p-6 bg-white space-y-4 rounded-2xl">
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold text-slate-900">
+                  Reverse Payment ({selectedPayment.paymentNumber})
+                </h3>
+                <button onClick={() => setShowReversalModal(false)}>
+                  <X size={16} />
+                </button>
+              </div>
+              <form onSubmit={handleReversePayment} className="space-y-3 text-xs">
+                <p className="text-slate-500">
+                  Net Reversible Amount: <strong>{formatINR(selectedPayment.netAmount)}</strong> for {selectedPayment.studentName}
+                </p>
+                <div>
+                  <label className="block font-semibold mb-1">Reversal Amount (INR)</label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    max={Math.round(selectedPayment.netAmount / 100)}
+                    value={reversalForm.amountInRupees}
+                    onChange={(e) =>
+                      setReversalForm({ ...reversalForm, amountInRupees: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 border rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Audit Reason</label>
+                  <input
+                    type="text"
+                    required
+                    minLength={3}
+                    placeholder="e.g. Duplicate settlement / Cheque dishonored"
+                    value={reversalForm.reason}
+                    onChange={(e) => setReversalForm({ ...reversalForm, reason: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-xl"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-3">
+                  <Button type="button" variant="outline" size="sm" onClick={() => setShowReversalModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" variant="primary" size="sm">
+                    Confirm Reversal
                   </Button>
                 </div>
               </form>

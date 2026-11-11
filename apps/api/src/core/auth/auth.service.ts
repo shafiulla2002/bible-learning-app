@@ -1,8 +1,22 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { ROLE_PORTAL_MAP, DEFAULT_ROLE_PERMISSIONS, RoleType } from '@bible-lms/shared';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
+import { getRequiredJwtSecret } from './jwt-secret.util';
+
+interface OtpChallengePayload {
+  type: 'otp_challenge';
+  phoneE164: string;
+  otpHash: string;
+  expiresAtMs: number;
+}
 
 @Injectable()
 export class AuthService {
@@ -11,35 +25,189 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async verifyPhoneOtp(phoneNumber: string, otp: string) {
-    const isDev = process.env.AUTH_DEV_OTP === 'true';
-
-    // In dev mode, verify with test OTP 123456
-    if (isDev && otp === '123456') {
-      return this.handleUserLoginByPhone(phoneNumber);
+  private normalizePhone(rawPhone: string): string {
+    const trimmed = typeof rawPhone === 'string' ? rawPhone.trim().replace(/[\s()-]/g, '') : '';
+    if (!trimmed) {
+      throw new BadRequestException('Valid phone number is required');
     }
-
-    if (!isDev) {
-      // In production, Firebase Admin token verification or SMS gateway check
-      throw new BadRequestException('Production Firebase OTP verification is being configured.');
+    if (/^\d{10}$/.test(trimmed)) {
+      return `+91${trimmed}`;
     }
-
-    throw new UnauthorizedException('Invalid OTP code. For development, use 123456');
+    if (/^91\d{10}$/.test(trimmed)) {
+      return `+${trimmed}`;
+    }
+    return trimmed;
   }
 
-  async loginWithPassword(identifier: string, passwordPlain: string) {
-    // Find user by phone or email
+  private normalizeRoleAlias(role: string): string {
+    const upper = role.trim().toUpperCase();
+    if (upper === 'ADMIN') return 'INSTITUTE_ADMIN';
+    if (upper === 'INSTRUCTOR') return 'TEACHER';
+    return upper;
+  }
+
+  private hashOtp(phoneE164: string, otp: string): string {
+    return crypto
+      .createHmac('sha256', getRequiredJwtSecret())
+      .update(`${phoneE164}:${otp}`)
+      .digest('hex');
+  }
+
+  async requestPhoneOtp(phoneNumber: string) {
+    const normalizedPhone = this.normalizePhone(phoneNumber);
+    const otpCode =
+      process.env.NODE_ENV !== 'production' && process.env.AUTH_DEV_OTP === 'true'
+        ? '123456'
+        : crypto.randomInt(100000, 999999).toString();
+
+    const expiresAtMs = Date.now() + 5 * 60 * 1000;
+    const payload: OtpChallengePayload = {
+      type: 'otp_challenge',
+      phoneE164: normalizedPhone,
+      otpHash: this.hashOtp(normalizedPhone, otpCode),
+      expiresAtMs,
+    };
+
+    const challengeToken = this.jwtService.sign(payload, {
+      secret: getRequiredJwtSecret(),
+      expiresIn: '5m',
+    });
+
+    return {
+      success: true,
+      challengeToken,
+      expiresInSeconds: 300,
+    };
+  }
+
+  async verifyPhoneOtp(
+    phoneNumber: string,
+    otp: string,
+    requestedRole?: string,
+    challengeToken?: string,
+    firebaseIdToken?: string,
+  ) {
+    const normalizedPhone = this.normalizePhone(phoneNumber);
+    const trimmedOtp = typeof otp === 'string' ? otp.trim() : '';
+
+    let verified = false;
+
+    if (firebaseIdToken && typeof firebaseIdToken === 'string') {
+      verified = await this.verifyFirebasePhoneToken(firebaseIdToken, normalizedPhone);
+    } else if (challengeToken && typeof challengeToken === 'string' && trimmedOtp) {
+      verified = this.verifyOtpChallengeToken(challengeToken, normalizedPhone, trimmedOtp);
+    } else if (
+      process.env.NODE_ENV !== 'production' &&
+      process.env.AUTH_DEV_OTP === 'true' &&
+      trimmedOtp === '123456'
+    ) {
+      verified = true;
+    }
+
+    if (!verified) {
+      throw new UnauthorizedException('Invalid or expired OTP code');
+    }
+
+    return this.handleUserLoginByPhone(normalizedPhone, requestedRole);
+  }
+
+  private verifyOtpChallengeToken(token: string, phoneE164: string, otp: string): boolean {
+    try {
+      const payload = this.jwtService.verify<OtpChallengePayload>(token, {
+        secret: getRequiredJwtSecret(),
+      });
+      if (
+        !payload ||
+        payload.type !== 'otp_challenge' ||
+        payload.phoneE164 !== phoneE164 ||
+        typeof payload.expiresAtMs !== 'number' ||
+        Date.now() > payload.expiresAtMs
+      ) {
+        return false;
+      }
+      const expectedHash = Buffer.from(payload.otpHash, 'hex');
+      const actualHash = Buffer.from(this.hashOtp(phoneE164, otp), 'hex');
+      if (expectedHash.length === 0 || expectedHash.length !== actualHash.length) {
+        return false;
+      }
+      return crypto.timingSafeEqual(expectedHash, actualHash);
+    } catch {
+      return false;
+    }
+  }
+
+  private async verifyFirebasePhoneToken(idToken: string, expectedPhone: string): Promise<boolean> {
+    const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
+    if (!projectId) {
+      return false;
+    }
+
+    try {
+      const segments = idToken.split('.');
+      if (segments.length !== 3) return false;
+
+      const header = JSON.parse(Buffer.from(segments[0], 'base64url').toString('utf8'));
+      const payload = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8'));
+
+      if (header.alg !== 'RS256' || !header.kid) return false;
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (
+        payload.aud !== projectId ||
+        payload.iss !== `https://securetoken.google.com/${projectId}` ||
+        typeof payload.exp !== 'number' ||
+        payload.exp <= nowSeconds ||
+        payload.phone_number !== expectedPhone
+      ) {
+        return false;
+      }
+
+      const certRes = await fetch(
+        'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
+      );
+      if (!certRes.ok) return false;
+      const certs = (await certRes.json()) as Record<string, string>;
+      const certPem = certs[header.kid];
+      if (!certPem) return false;
+
+      const verifier = crypto.createVerify('RSA-SHA256');
+      verifier.update(`${segments[0]}.${segments[1]}`);
+      verifier.end();
+      return verifier.verify(certPem, Buffer.from(segments[2], 'base64url'));
+    } catch {
+      return false;
+    }
+  }
+
+  private getActiveMembershipInclude() {
+    return {
+      memberships: {
+        where: {
+          status: 'ACTIVE' as const,
+          OR: [{ instituteId: null }, { institute: { status: 'ACTIVE' as const } }],
+        },
+        include: {
+          institute: true,
+        },
+        orderBy: { createdAt: 'asc' as const },
+      },
+    };
+  }
+
+  async loginWithPassword(identifier: string, passwordPlain: string, requestedRole?: string) {
+    const cleanIdentifier = typeof identifier === 'string' ? identifier.trim() : '';
+    const cleanPassword = typeof passwordPlain === 'string' ? passwordPlain : '';
+    if (!cleanIdentifier || !cleanPassword) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ phoneE164: identifier }, { email: identifier }],
+        OR: [{ phoneE164: cleanIdentifier }, { email: cleanIdentifier }],
+        status: 'ACTIVE',
+        deletedAt: null,
       },
-      include: {
-        memberships: {
-          include: {
-            institute: true,
-          },
-        },
-      },
+      include: this.getActiveMembershipInclude(),
     });
 
     if (!user) {
@@ -50,84 +218,105 @@ export class AuthService {
       throw new UnauthorizedException('Account has no password set. Please sign in via Phone OTP.');
     }
 
-    const isMatch = await bcrypt.compare(passwordPlain, user.passwordHash);
+    const isMatch = await bcrypt.compare(cleanPassword, user.passwordHash);
     if (!isMatch) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return this.createSessionForUser(user);
+    return this.createSessionForUser(user, requestedRole);
   }
 
-  private async handleUserLoginByPhone(phoneNumber: string) {
-    let user = await this.prisma.user.findUnique({
-      where: { phoneE164: phoneNumber },
-      include: {
-        memberships: {
-          include: {
-            institute: true,
-          },
-        },
+  private async handleUserLoginByPhone(phoneNumber: string, requestedRole?: string) {
+    const digitsOnly = phoneNumber.replace(/\D/g, '');
+    const bare10 = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : '';
+    const phoneCandidates = Array.from(
+      new Set([phoneNumber, ...(bare10 ? [bare10, `+91${bare10}`] : [])]),
+    );
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: phoneCandidates.map((candidate) => ({ phoneE164: candidate })),
+        status: 'ACTIVE',
+        deletedAt: null,
       },
+      include: this.getActiveMembershipInclude(),
     });
 
     if (!user) {
-      // Auto-provision initial student user if not yet existing
-      const defaultInstitute = await this.prisma.institute.findFirst();
-      if (!defaultInstitute) {
-        throw new BadRequestException('No default institute registered');
-      }
-
-      user = await this.prisma.user.create({
-        data: {
-          phoneE164: phoneNumber,
-          fullName: 'New Bible Learner',
-          memberships: {
-            create: {
-              instituteId: defaultInstitute.id,
-              role: 'STUDENT',
-              studentProfile: {
-                create: {
-                  instituteId: defaultInstitute.id,
-                  admissionNo: `STU-${Date.now().toString().slice(-4)}`,
-                },
-              },
-            },
-          },
-        },
-        include: {
-          memberships: {
-            include: {
-              institute: true,
-            },
-          },
-        },
-      });
+      throw new UnauthorizedException(
+        'No active account found for this phone number. Please register or contact your institute administrator.',
+      );
     }
 
-    return this.createSessionForUser(user);
+    return this.createSessionForUser(user, requestedRole);
   }
 
-  private async createSessionForUser(user: any) {
-    const activeMembership = user.memberships[0];
-    if (!activeMembership) {
+  private async createSessionForUser(user: any, requestedRole?: string) {
+    const activeMemberships: any[] = Array.isArray(user.memberships) ? user.memberships : [];
+    if (activeMemberships.length === 0) {
       throw new UnauthorizedException('User has no active role memberships');
     }
 
-    const role = activeMembership.role as RoleType;
+    let selectedMembership = activeMemberships[0];
+    if (requestedRole) {
+      const normalizedRole = this.normalizeRoleAlias(requestedRole);
+      const matched = activeMemberships.find(
+        (m) => m.role === normalizedRole || this.normalizeRoleAlias(String(m.role)) === normalizedRole,
+      );
+      if (!matched) {
+        throw new ForbiddenException(
+          'Your account does not hold an active membership for the requested role',
+        );
+      }
+      selectedMembership = matched;
+    }
+
+    const role = selectedMembership.role as RoleType;
+    const instituteId = selectedMembership.instituteId as string | null;
     const permissions = DEFAULT_ROLE_PERMISSIONS[role] || [];
     const redirectUrl = ROLE_PORTAL_MAP[role] || '/student';
+
+    let studentProfileId: string | undefined;
+    let admissionNo: string | undefined;
+    let teacherProfileId: string | undefined;
+
+    if (instituteId && this.prisma.studentProfile?.findFirst) {
+      const sp = await this.prisma.studentProfile.findFirst({
+        where: selectedMembership.id
+          ? { membershipId: selectedMembership.id, instituteId }
+          : { instituteId, membership: { userId: user.id } },
+        select: { id: true, admissionNo: true },
+      });
+      if (sp) {
+        studentProfileId = sp.id;
+        admissionNo = sp.admissionNo;
+      }
+    }
+
+    if (instituteId && this.prisma.teacherProfile?.findFirst) {
+      const tp = await this.prisma.teacherProfile.findFirst({
+        where: selectedMembership.id
+          ? { membershipId: selectedMembership.id, instituteId }
+          : { instituteId, membership: { userId: user.id } },
+        select: { id: true },
+      });
+      if (tp) {
+        teacherProfileId = tp.id;
+      }
+    }
 
     const payload = {
       sub: user.id,
       phone: user.phoneE164,
       role,
-      instituteId: activeMembership.instituteId,
+      instituteId,
       permissions,
     };
 
     const accessToken = this.jwtService.sign(payload);
 
     return {
+      success: true,
       accessToken,
       redirectUrl,
       user: {
@@ -136,8 +325,48 @@ export class AuthService {
         phone: user.phoneE164,
         email: user.email,
         role,
-        instituteName: activeMembership.institute?.name || 'Bible Institute Platform',
+        instituteId,
+        instituteName: selectedMembership.institute?.name || 'Bible Institute Platform',
+        permissions,
+        ...(studentProfileId ? { studentProfileId, admissionNo } : {}),
+        ...(teacherProfileId ? { teacherProfileId } : {}),
       },
+    };
+  }
+
+  async getMe(jwtUser: any) {
+    if (!jwtUser?.sub) {
+      throw new UnauthorizedException('Authentication token required');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: jwtUser.sub },
+      include: this.getActiveMembershipInclude(),
+    });
+
+    if (!user || user.status !== 'ACTIVE' || user.deletedAt) {
+      throw new UnauthorizedException('User account is inactive or missing');
+    }
+
+    const role = (jwtUser.role || user.memberships[0]?.role) as RoleType;
+    const instituteId = jwtUser.instituteId || user.memberships[0]?.instituteId || null;
+    const activeMembership = user.memberships.find((m) => m.instituteId === instituteId) || user.memberships[0];
+
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      phone: user.phoneE164,
+      email: user.email,
+      role,
+      instituteId,
+      instituteName: activeMembership?.institute?.name || 'Bible Institute Platform',
+      permissions: DEFAULT_ROLE_PERMISSIONS[role] || [],
+      memberships: user.memberships.map((m) => ({
+        instituteId: m.instituteId,
+        instituteName: m.institute?.name,
+        role: m.role,
+        status: m.status,
+      })),
     };
   }
 }

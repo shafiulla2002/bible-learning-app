@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface TeacherCourseItem {
   id: string;
@@ -51,7 +52,7 @@ export function useTeacherCourses(initialLimit = 12) {
       if (search.trim()) params.set('search', search.trim());
       if (status && status !== 'ALL') params.set('status', status);
 
-      const res = await fetch(`/api/teachers/courses?${params.toString()}`, {
+      const res = await apiFetchResponse(`/teachers/courses?${params.toString()}`, {
         cache: 'no-store',
       });
 

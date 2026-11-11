@@ -56,13 +56,8 @@ export default function StudentDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const studentId = params.id as string;
 
-  const [instituteId, setInstituteId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id');
-      if (stored) return stored;
-    }
-    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-  });
+  const [instituteId, setInstituteId] = useState<string>('');
+  const [adminName, setAdminName] = useState<string>('Institute Admin');
 
   const [student, setStudent] = useState<StudentDetailDto | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -97,6 +92,7 @@ export default function StudentDetailPage() {
       .then((ctx) => {
         if (!active) return;
         if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+        if (ctx?.user?.fullName) setAdminName(ctx.user.fullName);
       })
       .catch(() => {});
     return () => {
@@ -192,7 +188,7 @@ export default function StudentDetailPage() {
       portalTitle="Institute Admin"
       portalRole="ADMIN"
       navItems={adminNav}
-      userName="Samuel Admin"
+      userName={adminName}
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6 max-w-6xl">

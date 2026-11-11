@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface ExamQuestionOption {
   id?: string;
@@ -55,7 +56,7 @@ export function useTeacherExamDetail(examId: string) {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/teachers/exams/${examId}`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}`, {
         cache: 'no-store',
       });
 
@@ -84,7 +85,7 @@ export function useTeacherExamDetail(examId: string) {
   const publishExam = async () => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`/api/teachers/exams/${examId}/publish`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}/publish`, {
         method: 'POST',
       });
       const json = await res.json();
@@ -110,9 +111,8 @@ export function useTeacherExamDetail(examId: string) {
   }) => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`/api/teachers/exams/${examId}`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = await res.json();
@@ -135,9 +135,8 @@ export function useTeacherExamDetail(examId: string) {
   }) => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`/api/teachers/exams/${examId}/questions`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}/questions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = await res.json();
@@ -163,9 +162,8 @@ export function useTeacherExamDetail(examId: string) {
   ) => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`/api/teachers/exams/${examId}/questions/${questionId}`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}/questions/${questionId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = await res.json();
@@ -182,7 +180,7 @@ export function useTeacherExamDetail(examId: string) {
   const deleteQuestion = async (questionId: string) => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`/api/teachers/exams/${examId}/questions/${questionId}`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}/questions/${questionId}`, {
         method: 'DELETE',
       });
       const json = await res.json();

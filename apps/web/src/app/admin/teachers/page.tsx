@@ -91,7 +91,7 @@ function compressImage(file: File, maxDim = 256, quality = 0.82): Promise<string
 }
 
 export default function TeachersDirectoryPage() {
-  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+  const [instituteId, setInstituteId] = useState<string>('');
   const [teachers, setTeachers] = useState<TeacherSummaryDto[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
@@ -162,8 +162,8 @@ export default function TeachersDirectoryPage() {
   // 1. Resolve Institute Context
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const storedId = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-      setInstituteId(storedId);
+      const storedId = localStorage.getItem('current_institute_id') || '';
+      if (storedId) setInstituteId(storedId);
     }
     resolveVerifiedAdminContext()
       .then((ctx) => {

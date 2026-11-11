@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   BookOpen,
   Search,
@@ -57,24 +58,7 @@ export default function StudentCoursesPage() {
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       if (sortBy) params.set('sort', sortBy);
 
-      const headers: Record<string, string> = {};
-      if (typeof window !== 'undefined') {
-        const token =
-          localStorage.getItem('token') ||
-          localStorage.getItem('access_token') ||
-          localStorage.getItem('auth_token');
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      if (profile?.studentProfileId) {
-        headers['x-dev-user-id'] = student?.id || '';
-        headers['x-dev-role'] = 'STUDENT';
-        headers['x-dev-institute-id'] = institute?.id || '';
-      }
-
-      const res = await fetch(`/api/students/courses?${params.toString()}`, {
-        headers,
-      });
+      const res = await apiFetchResponse(`/students/courses?${params.toString()}`);
 
       if (res.ok) {
         const json = await res.json();

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from './api';
 
 export interface TeacherMaterialItem {
   id: string;
@@ -45,7 +46,7 @@ export function useTeacherMaterials(initialLimit = 20) {
       if (courseId && courseId !== 'ALL') params.set('courseId', courseId);
       if (kind && kind !== 'ALL') params.set('kind', kind);
 
-      const res = await fetch(`/api/teachers/materials?${params.toString()}`, {
+      const res = await apiFetchResponse(`/teachers/materials?${params.toString()}`, {
         cache: 'no-store',
       });
 
@@ -84,9 +85,8 @@ export function useTeacherMaterials(initialLimit = 20) {
     sizeBytes?: number;
     downloadable?: boolean;
   }) => {
-    const res = await fetch('/api/teachers/materials', {
+    const res = await apiFetchResponse('/teachers/materials', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 

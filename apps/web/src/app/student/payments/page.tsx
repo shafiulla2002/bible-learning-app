@@ -5,6 +5,7 @@ import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { apiFetch } from '@/lib/api';
 import {
   CreditCard,
   Receipt,
@@ -105,71 +106,15 @@ export default function StudentPaymentsPage() {
     setLoading(true);
     setErrorMessage(null);
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      else headers['x-dev-role'] = 'STUDENT';
-
-      const res = await fetch('/api/students/payments', { headers });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.summary) setSummary(data.summary);
-        if (data.invoices) setInvoices(data.invoices);
-        if (data.recentPayments) setRecentPayments(data.recentPayments);
-      } else {
-        // Fallback demo data
-        setSummary({
-          totalFeesPaise: 3700000,
-          totalPaidPaise: 1850000,
-          outstandingBalancePaise: 1850000,
-          pendingInvoicesCount: 1,
-          overdueInvoicesCount: 0,
-          currency: 'INR',
-        });
-        setInvoices([
-          {
-            id: 'inv-1',
-            invoiceNumber: 'INV-2026-0001',
-            issueDate: '2026-09-01T09:00:00Z',
-            dueDate: '2026-10-31T00:00:00Z',
-            totalAmountPaise: 1850000,
-            paidAmountPaise: 1850000,
-            balanceAmountPaise: 0,
-            currency: 'INR',
-            status: 'PAID',
-            notes: 'Building Biblical Theology Tuition',
-          },
-          {
-            id: 'inv-2',
-            invoiceNumber: 'INV-2026-0002',
-            issueDate: '2026-10-15T09:00:00Z',
-            dueDate: '2026-11-30T00:00:00Z',
-            totalAmountPaise: 1850000,
-            paidAmountPaise: 0,
-            balanceAmountPaise: 1850000,
-            currency: 'INR',
-            status: 'ISSUED',
-            notes: 'Hermeneutics & Exegesis Tuition',
-          },
-        ]);
-        setRecentPayments([
-          {
-            id: 'pay-1',
-            paymentNumber: 'PAY-2026-0001',
-            invoiceId: 'inv-1',
-            invoiceNumber: 'INV-2026-0001',
-            amountPaise: 1850000,
-            paymentMode: 'ONLINE',
-            status: 'COMPLETED',
-            paymentDate: '2026-10-31T11:52:00Z',
-            referenceNumber: 'UTR-2026-1001',
-            receiptNumber: 'REC-2026-0001',
-          },
-        ]);
-      }
+      const data = await apiFetch<any>('/students/payments');
+      if (data.summary) setSummary(data.summary);
+      if (data.invoices) setInvoices(data.invoices);
+      if (data.recentPayments) setRecentPayments(data.recentPayments);
     } catch (err: any) {
       console.error('Fetch Payments Error:', err);
-      setErrorMessage('Could not connect to payment service. Showing cached records.');
+      setErrorMessage(err?.message || 'Could not retrieve payment records.');
+      setInvoices([]);
+      setRecentPayments([]);
     } finally {
       setLoading(false);
     }
@@ -178,6 +123,21 @@ export default function StudentPaymentsPage() {
   useEffect(() => {
     fetchPaymentsData();
   }, [fetchPaymentsData]);
+
+  const loadRazorpaySdk = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && (window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
 
   const handleOpenPayModal = (inv: Invoice) => {
     setPayingInvoice(inv);
@@ -191,33 +151,86 @@ export default function StudentPaymentsPage() {
     setErrorMessage(null);
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      else headers['x-dev-role'] = 'STUDENT';
-
-      const res = await fetch(`/api/students/invoices/${payingInvoice.id}/verify-payment`, {
+      const orderResp = await apiFetch<{
+        order: {
+          orderId: string;
+          keyId?: string;
+          invoiceId: string;
+          invoiceNumber: string;
+          amountPaise: number;
+          currency: string;
+          notes?: string;
+        };
+      }>(`/students/invoices/${payingInvoice.id}/pay`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify({
-          amountPaise: payAmountPaise,
-          paymentMode: 'ONLINE',
-          referenceNumber: `SIM-RAZORPAY-${Date.now()}`,
-        }),
+        body: JSON.stringify({ amountPaise: payAmountPaise }),
       });
 
-      if (res.ok) {
-        const result = await res.json();
-        setPaymentSuccessData(result);
-        fetchPaymentsData();
-      } else {
-        const err = await res.json().catch(() => ({ message: 'Payment gateway rejected request.' }));
-        setErrorMessage(err.message || 'Payment verification failed.');
+      const order = orderResp?.order;
+      if (!order?.orderId || !order?.keyId) {
+        setErrorMessage('Razorpay checkout key is missing from order response.');
+        setIsProcessingPayment(false);
+        return;
       }
+
+      const sdkLoaded = await loadRazorpaySdk();
+      const RazorpayCtor = typeof window !== 'undefined' ? (window as any).Razorpay : null;
+      if (!sdkLoaded || !RazorpayCtor) {
+        setErrorMessage('Unable to load Razorpay Checkout SDK. Check internet connectivity.');
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      const rzp = new RazorpayCtor({
+        key: order.keyId,
+        amount: order.amountPaise,
+        currency: order.currency || 'INR',
+        name: 'Bible Institute LMS',
+        description: order.notes || `Invoice ${order.invoiceNumber}`,
+        order_id: order.orderId,
+        handler: async (response: {
+          razorpay_order_id: string;
+          razorpay_payment_id: string;
+          razorpay_signature: string;
+        }) => {
+          try {
+            const verified = await apiFetch<any>(
+              `/students/invoices/${payingInvoice.id}/verify-payment`,
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  amountPaise: order.amountPaise,
+                  razorpayOrderId: response.razorpay_order_id,
+                  razorpayPaymentId: response.razorpay_payment_id,
+                  razorpaySignature: response.razorpay_signature,
+                }),
+              },
+            );
+            setPaymentSuccessData(verified);
+            await fetchPaymentsData();
+          } catch (verifyErr: any) {
+            setErrorMessage(verifyErr?.message || 'Payment verification failed on server.');
+          } finally {
+            setIsProcessingPayment(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessingPayment(false);
+          },
+        },
+        theme: { color: '#2563eb' },
+      });
+
+      rzp.on('payment.failed', (resp: any) => {
+        setErrorMessage(resp?.error?.description || 'Razorpay payment failed.');
+        setIsProcessingPayment(false);
+      });
+
+      rzp.open();
     } catch (err: any) {
       console.error('Payment Error:', err);
-      setErrorMessage(err.message || 'Network error during transaction processing.');
-    } finally {
+      setErrorMessage(err?.message || 'Unable to initialize online payment.');
       setIsProcessingPayment(false);
     }
   };
@@ -767,12 +780,20 @@ export default function StudentPaymentsPage() {
                 </Button>
                 <Button
                   onClick={() => {
-                    alert(`Receipt ${viewingReceipt.receiptNumber || 'REC'} downloaded.`);
+                    const num = viewingReceipt.receiptNumber || 'REC';
+                    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${num}</title><style>body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px}h1{font-size:20px;margin:0 0 8px}p{color:#475569;font-size:13px}.row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:14px}.total{font-weight:700;font-size:16px;border-bottom:0;margin-top:8px}</style></head><body><h1>Official Fee Payment Receipt</h1><p>Receipt #: ${num}</p><div class="row"><span>Invoice Number</span><strong>${viewingReceipt.invoiceNumber || 'N/A'}</strong></div><div class="row"><span>Payment Mode</span><strong>${viewingReceipt.paymentMode || 'ONLINE'}</strong></div><div class="row"><span>Reference</span><strong>${viewingReceipt.referenceNumber || 'N/A'}</strong></div><div class="row total"><span>Settled Amount</span><span>${formatPaiseToINR(viewingReceipt.amountPaise)}</span></div></body></html>`;
+                    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `receipt-${num}.html`;
+                    link.click();
+                    URL.revokeObjectURL(url);
                     setViewingReceipt(null);
                   }}
                   className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold h-9 gap-1.5"
                 >
-                  <Download size={14} /> Download PDF
+                  <Download size={14} /> Download Receipt
                 </Button>
               </div>
             </div>

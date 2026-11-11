@@ -307,7 +307,7 @@ export function TeacherShell({
                 role="TEACHER"
                 notificationsUrl="/teacher/notifications"
                 preferencesUrl="/teacher/settings"
-                apiPrefix="/api/teachers/notifications"
+                apiPrefix="/teachers/notifications"
               />
 
               {/* Institute Badge */}

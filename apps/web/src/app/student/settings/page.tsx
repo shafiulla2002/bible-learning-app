@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
+import { apiFetchResponse } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,16 +26,12 @@ export default function StudentSettingsPage() {
 
   const [saving, setSaving] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [securityNotice, setSecurityNotice] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadSettings() {
       try {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-        const headers: Record<string, string> = {};
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        else headers['x-dev-role'] = 'STUDENT';
-
-        const res = await fetch('/api/students/settings', { headers });
+        const res = await apiFetchResponse('/students/settings');
         if (res.ok) {
           const data = await res.json();
           if (data.settings) {
@@ -61,14 +58,8 @@ export default function StudentSettingsPage() {
     setSavedSuccess(false);
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      else headers['x-dev-role'] = 'STUDENT';
-
-      await fetch('/api/students/settings', {
+      await apiFetchResponse('/students/settings', {
         method: 'PATCH',
-        headers,
         body: JSON.stringify({
           preferredLanguage,
           notifications: {
@@ -215,20 +206,31 @@ export default function StudentSettingsPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs p-3 bg-blue-50/70 border border-blue-100 rounded-xl">
-              <div>
-                <span className="font-bold text-blue-900 block">Password Authentication</span>
-                <span className="text-[11px] text-blue-700">Protected with bcrypt hashing. Last updated upon enrollment.</span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs p-3 bg-blue-50/70 border border-blue-100 rounded-xl">
+                <div>
+                  <span className="font-bold text-blue-900 block">Password & OTP Authentication</span>
+                  <span className="text-[11px] text-blue-700">Sign in using your registered phone OTP or portal credentials managed by your institute admin.</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setSecurityNotice(
+                      'To rotate your password or update your verified phone/email, sign out and re-verify via Phone OTP or contact your institute administrator via Help & Support.',
+                    )
+                  }
+                  className="text-xs h-8 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 font-semibold"
+                >
+                  Security Info
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => alert('Password reset verification link sent to your registered email.')}
-                className="text-xs h-8 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 font-semibold"
-              >
-                Change Password
-              </Button>
+              {securityNotice && (
+                <div className="text-xs text-blue-800 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+                  {securityNotice}
+                </div>
+              )}
             </div>
           </Card>
 

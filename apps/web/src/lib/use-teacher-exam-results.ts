@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface ExamResultItem {
   studentProfileId: string;
@@ -91,7 +92,7 @@ export function useTeacherExamResults(examId: string) {
       if (statusFilter && statusFilter !== 'ALL') params.set('status', statusFilter);
       if (search.trim()) params.set('search', search.trim());
 
-      const res = await fetch(`/api/teachers/exams/${examId}/results?${params.toString()}`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}/results?${params.toString()}`, {
         cache: 'no-store',
       });
 
@@ -118,7 +119,7 @@ export function useTeacherExamResults(examId: string) {
   }, [fetchResults]);
 
   const fetchAttempt = async (attemptId: string): Promise<AttemptDetailData> => {
-    const res = await fetch(`/api/teachers/exams/${examId}/attempts/${attemptId}`, {
+    const res = await apiFetchResponse(`/teachers/exams/${examId}/attempts/${attemptId}`, {
       cache: 'no-store',
     });
     if (!res.ok) {
@@ -142,9 +143,8 @@ export function useTeacherExamResults(examId: string) {
   ) => {
     setIsActionLoading(true);
     try {
-      const res = await fetch(`/api/teachers/exams/${examId}/attempts/${attemptId}/evaluate`, {
+      const res = await apiFetchResponse(`/teachers/exams/${examId}/attempts/${attemptId}/evaluate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 

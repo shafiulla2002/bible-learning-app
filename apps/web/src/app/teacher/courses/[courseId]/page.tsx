@@ -35,6 +35,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
+import { apiFetchResponse, resolveApiUrl } from '@/lib/api';
 import {
   useTeacherCourseDetail,
   ModuleItem,
@@ -162,9 +163,8 @@ export default function TeacherCourseCurriculumPage() {
     setUploadSuccess(null);
 
     try {
-      const res = await fetch('/api/teachers/materials', {
+      const res = await apiFetchResponse('/teachers/materials', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           courseId,
           lessonId: targetLessonId,
@@ -209,7 +209,7 @@ export default function TeacherCourseCurriculumPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <a
-              href={`/api/teachers/courses/${courseId}/syllabus`}
+              href={resolveApiUrl(`/teachers/courses/${courseId}/syllabus`)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold text-white shadow-xs transition"
             >
               <Download size={14} />
@@ -657,7 +657,7 @@ export default function TeacherCourseCurriculumPage() {
                             const isPdf =
                               res.kind?.toUpperCase() === 'PDF' ||
                               res.mimeType?.toLowerCase().includes('pdf');
-                            const contentUrl = `/api/teachers/materials/${res.id}/content`;
+                            const contentUrl = resolveApiUrl(`/teachers/materials/${res.id}/content`);
                             return (
                               <div
                                 key={res.id}
@@ -910,16 +910,15 @@ export default function TeacherCourseCurriculumPage() {
           canAttachUrl={true}
           downloadHref={
             activeVideoResource?.downloadable
-              ? `/api/teachers/materials/${activeVideoResource.id}/content?download=1`
+              ? resolveApiUrl(`/teachers/materials/${activeVideoResource.id}/content?download=1`)
               : null
           }
           onSaveVideoUrl={async (newUrl) => {
             if (!activeVideoResource) return;
-            const res = await fetch(
-              `/api/teachers/materials/${activeVideoResource.id}/content`,
+            const res = await apiFetchResponse(
+              `/teachers/materials/${activeVideoResource.id}/content`,
               {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ videoStreamId: newUrl }),
               }
             );
@@ -947,11 +946,10 @@ export default function TeacherCourseCurriculumPage() {
           canAttachUrl={true}
           onSaveVideoUrl={async (newUrl) => {
             if (!activeRecordedSession) return;
-            const res = await fetch(
-              `/api/teachers/live-classes/${activeRecordedSession.id}`,
+            const res = await apiFetchResponse(
+              `/teachers/live-classes/${activeRecordedSession.id}`,
               {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ recordingUrl: newUrl }),
               }
             );

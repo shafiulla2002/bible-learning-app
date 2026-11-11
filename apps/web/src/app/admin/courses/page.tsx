@@ -92,13 +92,11 @@ const adminNav = [
 ];
 
 export default function AdminCoursesPage() {
-  const [instituteId, setInstituteId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id');
-      if (stored) return stored;
-    }
-    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-  });
+  const [instituteId, setInstituteId] = useState<string>('');
+  const [adminName, setAdminName] = useState<string>('Institute Admin');
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [categoryError, setCategoryError] = useState('');
 
   // Real Database State (Strict Zero-Mock: empty by default)
   const [courses, setCourses] = useState<CourseDto[]>([]);
@@ -114,13 +112,19 @@ export default function AdminCoursesPage() {
   const [levelFilter, setLevelFilter] = useState('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // New Course Form state
+  // New Course Form state (all monetary inputs in INR rupees -> converted to paise on submit)
   const [newTitle, setNewTitle] = useState('');
   const [newCategoryId, setNewCategoryId] = useState('');
   const [newLevel, setNewLevel] = useState<'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'>('BEGINNER');
+  const [newCourseType, setNewCourseType] = useState<'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE'>('COHORT');
+  const [newLearningMode, setNewLearningMode] = useState<'ONLINE' | 'OFFLINE' | 'HYBRID'>('ONLINE');
+  const [newDurationLabel, setNewDurationLabel] = useState('12 Weeks');
+  const [newEligibility, setNewEligibility] = useState('');
   const [newLanguage, setNewLanguage] = useState('English');
   const [newPricing, setNewPricing] = useState<'FREE' | 'PAID'>('PAID');
   const [newPrice, setNewPrice] = useState('18500');
+  const [newRegistrationFee, setNewRegistrationFee] = useState('0');
+  const [newRequiresApproval, setNewRequiresApproval] = useState(true);
   const [newDescription, setNewDescription] = useState('');
   const [newStatus, setNewStatus] = useState<'DRAFT' | 'PUBLISHED'>('PUBLISHED');
   const [formError, setFormError] = useState('');
@@ -140,28 +144,41 @@ export default function AdminCoursesPage() {
       .then((ctx) => {
         if (!active) return;
         if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+        else {
+          setIsLoading(false);
+          setErrorMessage('No active institute session found. Please log in to continue.');
+        }
+        if (ctx?.user?.fullName) setAdminName(ctx.user.fullName);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!active) return;
+        setIsLoading(false);
+        setErrorMessage('Unable to verify administrator session.');
+      });
     return () => {
       active = false;
     };
   }, []);
 
   // Fetch categories
-  useEffect(() => {
+  const fetchCategories = useCallback(async () => {
     if (!instituteId) return;
-    courseApi
-      .getCategories(instituteId)
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setCategories(data);
-          if (data.length > 0 && !newCategoryId) {
-            setNewCategoryId(data[0].id);
-          }
+    try {
+      const data = await courseApi.getCategories(instituteId);
+      if (Array.isArray(data)) {
+        setCategories(data);
+        if (data.length > 0 && !newCategoryId) {
+          setNewCategoryId(data[0].id);
         }
-      })
-      .catch(() => {});
-  }, [instituteId]);
+      }
+    } catch {
+      // Ignore transient category fetch errors
+    }
+  }, [instituteId, newCategoryId]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   // Fetch courses from PostgreSQL
   const fetchCourses = useCallback(async () => {
@@ -208,11 +225,46 @@ export default function AdminCoursesPage() {
   // KPIs
   const publishedCourses = courses.filter((c) => c.status === 'PUBLISHED').length;
   const draftCourses = courses.filter((c) => c.status === 'DRAFT').length;
-  const totalLessons = courses.reduce((acc, c) => acc + (c.lessonsCount || 0), 0);
+  const totalLessons = courses.reduce((acc, c) => acc + (c.lessonCount ?? c.lessonsCount ?? 0), 0);
+
+  // Handle Create Category
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instituteId || newCategoryName.trim().length < 2) {
+      setCategoryError('Category name must be at least 2 characters');
+      return;
+    }
+    setCategoryError('');
+    try {
+      const created = await courseApi.createCategory(instituteId, { name: newCategoryName.trim() });
+      setNewCategoryName('');
+      await fetchCategories();
+      if (created?.id) setNewCategoryId(created.id);
+      showToast(`Category "${created.name}" created.`);
+    } catch (err: any) {
+      setCategoryError(err?.message || 'Failed to create category');
+    }
+  };
+
+  // Handle Delete Category
+  const handleDeleteCategory = async (categoryId: string) => {
+    if (!instituteId) return;
+    try {
+      await courseApi.deleteCategory(instituteId, categoryId);
+      await fetchCategories();
+      showToast('Category deleted.');
+    } catch (err: any) {
+      setCategoryError(err?.message || 'Unable to delete category');
+    }
+  };
 
   // Handle Create Course
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!instituteId) {
+      setFormError('Active institute session required');
+      return;
+    }
     if (!newTitle.trim()) {
       setFormError('Please enter a valid course title');
       return;
@@ -226,15 +278,22 @@ export default function AdminCoursesPage() {
     setFormError('');
 
     try {
+      const priceRupees = parseFloat(newPrice) || 0;
+      const regFeeRupees = parseFloat(newRegistrationFee) || 0;
       const created = await courseApi.createCourse(instituteId, {
         title: newTitle.trim(),
         description: newDescription.trim(),
         categoryId: newCategoryId || undefined,
         level: newLevel,
+        courseType: newCourseType,
+        learningMode: newLearningMode,
+        durationLabel: newDurationLabel.trim() || undefined,
+        eligibility: newEligibility.trim() || undefined,
         language: newLanguage,
-        pricingType: newPricing,
-        price: newPricing === 'PAID' ? parseInt(newPrice, 10) || 0 : 0,
-        currency: 'INR',
+        pricing: newPricing,
+        price: newPricing === 'PAID' ? Math.round(priceRupees * 100) : 0,
+        registrationFee: Math.round(regFeeRupees * 100),
+        requiresApproval: newRequiresApproval,
         status: newStatus,
       });
 
@@ -242,11 +301,24 @@ export default function AdminCoursesPage() {
       setShowAddModal(false);
       setNewTitle('');
       setNewDescription('');
+      setNewEligibility('');
       fetchCourses();
     } catch (err: any) {
       setFormError(err?.message || 'Failed to create course');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Handle Delete Course (soft-archive)
+  const handleDeleteCourse = async (courseId: string, title: string) => {
+    if (!instituteId) return;
+    try {
+      await courseApi.deleteCourse(instituteId, courseId);
+      showToast(`Course "${title}" removed from active catalog.`);
+      fetchCourses();
+    } catch (err: any) {
+      showToast(`Failed to delete course: ${err?.message || 'Server error'}`);
     }
   };
 
@@ -266,7 +338,7 @@ export default function AdminCoursesPage() {
       portalTitle="Institute Admin"
       portalRole="ADMIN"
       navItems={adminNav}
-      userName="Samuel Admin"
+      userName={adminName}
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6">
@@ -307,6 +379,15 @@ export default function AdminCoursesPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowCategoryModal(true)}
+              className="gap-1.5"
+            >
+              <Layers size={15} />
+              Categories ({categories.length})
+            </Button>
             <Button
               variant="primary"
               size="sm"
@@ -475,7 +556,8 @@ export default function AdminCoursesPage() {
                       </Link>
                     </h3>
                     <p className={`text-xs ${theme.textSub} font-medium mt-1`}>
-                      {c.category?.name || 'General Theology'} · {formatLevel(c.level)}
+                      {c.categoryName || c.category?.name || 'General Theology'} · {formatLevel(c.level)}
+                      {c.durationLabel ? ` · ${c.durationLabel}` : ''}
                     </p>
 
                     {/* Overlapping Circular Avatar / Initial Badge */}
@@ -497,13 +579,13 @@ export default function AdminCoursesPage() {
                       <div className="flex items-center gap-6 pt-4 pb-1">
                         <div>
                           <span className="text-base sm:text-lg font-bold text-slate-900 block leading-tight">
-                            {c.modulesCount || 0}
+                            {c.moduleCount ?? c.modulesCount ?? 0}
                           </span>
                           <span className="text-xs text-slate-400 block mt-0.5">Modules</span>
                         </div>
                         <div>
                           <span className="text-base sm:text-lg font-bold text-slate-900 block leading-tight">
-                            {c.lessonsCount || 0}
+                            {c.lessonCount ?? c.lessonsCount ?? 0}
                           </span>
                           <span className="text-xs text-slate-400 block mt-0.5">Lessons</span>
                         </div>
@@ -535,7 +617,7 @@ export default function AdminCoursesPage() {
                         <div className="font-bold text-xs sm:text-sm text-slate-900">
                           {c.pricing === 'FREE' || c.price === 0
                             ? 'Free'
-                            : `₹${(c.price || 0).toLocaleString('en-IN')}`}
+                            : `₹${Math.round((c.price || 0) / 100).toLocaleString('en-IN')}`}
                         </div>
                       </div>
 
@@ -565,6 +647,18 @@ export default function AdminCoursesPage() {
                             Restore
                           </button>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Archive and remove "${c.title}" from the active catalog?`)) {
+                              handleDeleteCourse(c.id, c.title);
+                            }
+                          }}
+                          className="text-red-500 hover:text-red-700 transition cursor-pointer"
+                        >
+                          Remove
+                        </button>
 
                         <Link
                           href={`/admin/courses/${c.id}`}
@@ -655,6 +749,45 @@ export default function AdminCoursesPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Course Format</label>
+                    <select
+                      value={newCourseType}
+                      onChange={(e) => setNewCourseType(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="COHORT">Cohort Program</option>
+                      <option value="SELF_PACED">Self-Paced Online</option>
+                      <option value="LIVE">Live Seminar</option>
+                      <option value="DIPLOMA">Diploma Track</option>
+                      <option value="CERTIFICATE">Certificate Track</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Delivery Mode & Duration</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={newLearningMode}
+                        onChange={(e) => setNewLearningMode(e.target.value as any)}
+                        className="w-1/2 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="ONLINE">Online</option>
+                        <option value="HYBRID">Hybrid</option>
+                        <option value="OFFLINE">On-Campus</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="e.g. 12 Weeks"
+                        value={newDurationLabel}
+                        onChange={(e) => setNewDurationLabel(e.target.value)}
+                        className="w-1/2 px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">Pricing</label>
                     <select
                       value={newPricing}
@@ -673,12 +806,52 @@ export default function AdminCoursesPage() {
                       </label>
                       <input
                         type="number"
+                        min={0}
                         value={newPrice}
                         onChange={(e) => setNewPrice(e.target.value)}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
                   )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Registration Fee (₹ INR)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={newRegistrationFee}
+                      onChange={(e) => setNewRegistrationFee(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-end pb-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newRequiresApproval}
+                        onChange={(e) => setNewRequiresApproval(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      Require Admin Admission Approval
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Eligibility & Prerequisites
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. High School Diploma / Pastor Recommendation"
+                    value={newEligibility}
+                    onChange={(e) => setNewEligibility(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
 
                 <div>
@@ -724,6 +897,59 @@ export default function AdminCoursesPage() {
                   </Button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Manage Categories Modal */}
+        {showCategoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-base font-bold text-slate-900">Course Categories</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCategoryModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+                >
+                  ✕
+                </button>
+              </div>
+              {categoryError && (
+                <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
+                  {categoryError}
+                </div>
+              )}
+              <form onSubmit={handleCreateCategory} className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="New category name..."
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                />
+                <Button type="submit" variant="primary" size="sm">Add</Button>
+              </form>
+              <div className="max-h-60 overflow-y-auto divide-y divide-slate-100">
+                {categories.map((cat: any) => (
+                  <div key={cat.id} className="py-2.5 flex items-center justify-between text-xs">
+                    <div>
+                      <p className="font-semibold text-slate-800">{cat.name}</p>
+                      <p className="text-[11px] text-slate-400">{cat.slug}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCategory(cat.id)}
+                      className="text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))}
+                {categories.length === 0 && (
+                  <p className="text-xs text-slate-400 py-4 text-center">No categories found yet.</p>
+                )}
+              </div>
             </div>
           </div>
         )}

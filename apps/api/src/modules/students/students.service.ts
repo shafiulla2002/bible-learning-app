@@ -6,9 +6,16 @@ import {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { buildSyllabusPdfBuffer, safeFileName } from '../courses/pdf-syllabus.util';
+import {
+  resolveRazorpayConfig,
+  createRazorpayRemoteOrder,
+  verifyRazorpayPaymentSignature,
+} from '../../common/razorpay-crypto.util';
 import {
   CreateStudentAdmissionInput,
   UpdateStudentProfileInput,
@@ -19,7 +26,13 @@ import {
   StudentProfileSummary,
   PaginatedResult,
 } from '@bible-lms/shared';
-import { Role } from '@prisma/client';
+import {
+  Role,
+  FinancialSequenceType,
+  OrderStatus,
+  PaymentStatus,
+  InvoiceStatus,
+} from '@prisma/client';
 
 @Injectable()
 export class StudentsService {
@@ -690,7 +703,7 @@ export class StudentsService {
       throw new UnauthorizedException('Authentication token required');
     }
 
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException(
         `Access denied: Current role '${user.role}' is not authorized to access Student Portal. Only active STUDENT accounts may access this endpoint.`
       );
@@ -786,7 +799,7 @@ export class StudentsService {
       throw new UnauthorizedException('Authentication token required');
     }
 
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException(
         `Access denied: Current role '${user.role}' is not authorized to access Student Portal. Only active STUDENT accounts may access this endpoint.`
       );
@@ -1237,7 +1250,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access enrolled courses.');
     }
 
@@ -1405,7 +1418,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access course details.');
     }
 
@@ -1592,7 +1605,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access lessons.');
     }
 
@@ -1739,7 +1752,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may record lesson progress.');
     }
 
@@ -1907,7 +1920,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access live sessions.');
     }
 
@@ -2129,7 +2142,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access live sessions.');
     }
 
@@ -2258,6 +2271,131 @@ export class StudentsService {
   }
 
   /**
+   * Phase 8: Enforce join window & record live attendance when a student joins a live class
+   */
+  async joinStudentLiveSession(user: any, sessionId: string) {
+    const detail = await this.getStudentLiveSessionDetail(user, sessionId);
+    const session = detail.session;
+    if (session.rawStatus === 'CANCELLED' || session.status === 'CANCELLED') {
+      throw new BadRequestException('This live session has been cancelled.');
+    }
+    if (!session.joinUrl) {
+      throw new BadRequestException(
+        session.status === 'COMPLETED'
+          ? 'This live class has already concluded.'
+          : 'Live meeting link opens 15 minutes before scheduled start time.',
+      );
+    }
+
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    const startDate = new Date(session.startsAt);
+    const dateOnly = new Date(
+      Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate()),
+    );
+
+    const existing = await this.prisma.attendance.findFirst({
+      where: {
+        instituteId: studentProfile.instituteId,
+        batchId: session.batchId,
+        studentProfileId: studentProfile.id,
+        liveSessionId: session.id,
+      },
+    });
+
+    if (!existing) {
+      await this.prisma.attendance.create({
+        data: {
+          instituteId: studentProfile.instituteId,
+          batchId: session.batchId,
+          studentProfileId: studentProfile.id,
+          liveSessionId: session.id,
+          mode: 'LIVE_SESSION',
+          date: dateOnly,
+          status: 'PRESENT',
+          remarks: 'Joined live session via Student Portal',
+          markedById: studentProfile.membership?.userId || user.sub,
+          markedByRole: 'STUDENT',
+        },
+      });
+    }
+
+    return {
+      canJoin: true,
+      joinUrl: session.joinUrl,
+      attendanceRecorded: true,
+      sessionId: session.id,
+    };
+  }
+
+  /**
+   * Phase 7: Authorize enrolled student access to lesson resource / material
+   */
+  async getStudentMaterialContent(user: any, resourceId: string) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    const resource = await this.prisma.lessonResource.findFirst({
+      where: {
+        id: resourceId,
+        instituteId: studentProfile.instituteId,
+      },
+      include: {
+        mediaAsset: true,
+        lesson: {
+          include: {
+            chapter: {
+              include: {
+                module: {
+                  select: { courseId: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!resource) {
+      throw new NotFoundException('Learning resource not found in your institute.');
+    }
+
+    const courseId = resource.lesson?.chapter?.module?.courseId;
+    if (!courseId) {
+      throw new NotFoundException('Resource course mapping missing.');
+    }
+
+    const enrolment = await this.prisma.enrolment.findUnique({
+      where: {
+        studentProfileId_courseId: {
+          studentProfileId: studentProfile.id,
+          courseId,
+        },
+      },
+    });
+
+    if (!enrolment || !['ACTIVE', 'COMPLETED'].includes(enrolment.status)) {
+      if (!resource.lesson.isPreview) {
+        throw new ForbiddenException('Active course enrolment is required to access this material.');
+      }
+    }
+
+    const derivedName =
+      resource.mediaAsset?.storageKey?.split('/').pop() || resource.lesson.title;
+
+    return {
+      id: resource.id,
+      title: resource.lesson.title,
+      type: resource.mediaAsset.kind,
+      url: resource.mediaAsset.storageKey,
+      fileName: derivedName,
+      mimeType: resource.mediaAsset.mimeType,
+      fileSize: Number(resource.mediaAsset.sizeBytes),
+      videoStreamId: resource.mediaAsset.videoStreamId || undefined,
+      courseId,
+      lessonId: resource.lessonId,
+      canDownload: resource.downloadable,
+    };
+  }
+
+  /**
    * Phase 4: Student Attendance History & Summary
    */
   async getStudentAttendance(
@@ -2274,7 +2412,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access attendance records.');
     }
 
@@ -2509,7 +2647,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access assignments.');
     }
 
@@ -2554,7 +2692,7 @@ export class StudentsService {
     const whereClause: any = {
       instituteId: membership.instituteId,
       OR: [
-        { courseId: { in: enrolledCourseIds } },
+        { courseId: { in: enrolledCourseIds }, batchId: null },
         ...(enrolledBatchIds.length > 0 ? [{ batchId: { in: enrolledBatchIds } }] : []),
       ],
     };
@@ -2692,7 +2830,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access assignment details.');
     }
 
@@ -2762,9 +2900,9 @@ export class StudentsService {
       throw new NotFoundException('Assignment not found in your institute.');
     }
 
-    const isAuthorized =
-      enrolledCourseIds.includes(assignment.courseId) ||
-      (assignment.batchId && enrolledBatchIds.includes(assignment.batchId));
+    const isAuthorized = assignment.batchId
+      ? enrolledBatchIds.includes(assignment.batchId)
+      : enrolledCourseIds.includes(assignment.courseId);
 
     if (!isAuthorized) {
       throw new ForbiddenException('Access denied: You are not enrolled in the course or batch for this assignment.');
@@ -2824,7 +2962,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may submit assignments.');
     }
 
@@ -2869,9 +3007,9 @@ export class StudentsService {
       throw new NotFoundException('Assignment not found in your institute.');
     }
 
-    const isAuthorized =
-      enrolledCourseIds.includes(assignment.courseId) ||
-      (assignment.batchId && enrolledBatchIds.includes(assignment.batchId));
+    const isAuthorized = assignment.batchId
+      ? enrolledBatchIds.includes(assignment.batchId)
+      : enrolledCourseIds.includes(assignment.courseId);
 
     if (!isAuthorized) {
       throw new ForbiddenException('Access denied: You are not enrolled in the course or batch for this assignment.');
@@ -2940,7 +3078,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access examinations.');
     }
 
@@ -3110,7 +3248,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access examinations.');
     }
 
@@ -3221,7 +3359,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may take examinations.');
     }
 
@@ -3327,7 +3465,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access examinations.');
     }
 
@@ -3422,7 +3560,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may save exam answers.');
     }
 
@@ -3490,7 +3628,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may submit examinations.');
     }
 
@@ -3617,7 +3755,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may view results.');
     }
 
@@ -3718,7 +3856,7 @@ export class StudentsService {
     if (!user || !user.sub || user.sub === 'dev-admin-user') {
       throw new UnauthorizedException('Authentication token required');
     }
-    if (user.role && user.role !== 'STUDENT') {
+    if (!user.role || user.role !== 'STUDENT') {
       throw new ForbiddenException('Only active STUDENT accounts may access this resource.');
     }
 
@@ -3975,7 +4113,7 @@ export class StudentsService {
   }
 
   /**
-   * 4. Create server-side payment order
+   * 4. Create server-side Razorpay payment order for a student invoice
    */
   async createPaymentOrder(user: any, invoiceId: string, body?: { amountPaise?: number }) {
     const studentProfile = await this.resolveStudentProfileOrThrow(user);
@@ -3996,37 +4134,116 @@ export class StudentsService {
       throw new BadRequestException('Invoice is already fully paid');
     }
 
-    const payableAmount = body?.amountPaise && body.amountPaise > 0
-      ? Math.min(body.amountPaise, invoice.balanceAmount)
-      : invoice.balanceAmount;
+    const settings = await this.prisma.instituteSettings.findUnique({
+      where: { instituteId: studentProfile.instituteId },
+    });
+    const config = resolveRazorpayConfig(settings?.razorpayKeyEncrypted);
 
-    const orderId = `PAY-ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    if (config.mode === 'UNCONFIGURED' || !config.keyId || !config.keySecret) {
+      throw new ServiceUnavailableException(
+        'Online payment gateway is not configured for this institute yet. Please contact the institute finance desk.',
+      );
+    }
+
+    const payableAmount =
+      body?.amountPaise && body.amountPaise > 0
+        ? Math.min(Math.round(body.amountPaise), invoice.balanceAmount)
+        : invoice.balanceAmount;
+
+    const orderNumber = `ORD-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    const remoteOrder = await createRazorpayRemoteOrder({
+      keyId: config.keyId,
+      keySecret: config.keySecret,
+      amountPaise: payableAmount,
+      currency: invoice.currency || 'INR',
+      receipt: invoice.invoiceNumber,
+      notes: {
+        instituteId: studentProfile.instituteId,
+        invoiceId: invoice.id,
+        studentProfileId: studentProfile.id,
+      },
+    });
+
+    const localOrder = await this.prisma.order.create({
+      data: {
+        instituteId: studentProfile.instituteId,
+        studentProfileId: studentProfile.id,
+        orderNumber,
+        subtotal: payableAmount,
+        discount: 0,
+        total: payableAmount,
+        status: OrderStatus.PENDING,
+        providerOrderId: remoteOrder.id,
+        invoiceId: invoice.id,
+      },
+    });
 
     return {
       order: {
-        orderId,
+        orderId: remoteOrder.id,
+        localOrderId: localOrder.id,
+        orderNumber: localOrder.orderNumber,
+        keyId: config.keyId,
+        mode: config.mode,
         invoiceId: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
         amountPaise: payableAmount,
         currency: invoice.currency || 'INR',
-        gateway: 'RAZORPAY_SANDBOX',
+        gateway: 'RAZORPAY',
         notes: `Fee payment for invoice ${invoice.invoiceNumber}`,
       },
     };
   }
 
   /**
-   * 5. Verify & process server-authoritative fee payment (Idempotent)
+   * 5. Verify Razorpay Checkout HMAC signature & process atomic fee payment
    */
   async verifyAndProcessPayment(
     user: any,
     invoiceId: string,
-    body: { amountPaise: number; paymentMode?: string; referenceNumber?: string; idempotencyKey?: string }
+    body: {
+      amountPaise?: number;
+      razorpayOrderId?: string;
+      razorpay_order_id?: string;
+      razorpayPaymentId?: string;
+      razorpay_payment_id?: string;
+      razorpaySignature?: string;
+      razorpay_signature?: string;
+      method?: string;
+    },
   ) {
     const studentProfile = await this.resolveStudentProfileOrThrow(user);
 
-    if (!body?.amountPaise || body.amountPaise <= 0) {
-      throw new BadRequestException('Valid payment amount in paise is required');
+    const razorpayOrderId = (body?.razorpayOrderId || body?.razorpay_order_id || '').trim();
+    const razorpayPaymentId = (body?.razorpayPaymentId || body?.razorpay_payment_id || '').trim();
+    const razorpaySignature = (body?.razorpaySignature || body?.razorpay_signature || '').trim();
+
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      throw new BadRequestException(
+        'Razorpay order ID, payment ID, and HMAC signature are required to verify payment.',
+      );
+    }
+
+    const settings = await this.prisma.instituteSettings.findUnique({
+      where: { instituteId: studentProfile.instituteId },
+    });
+    const config = resolveRazorpayConfig(settings?.razorpayKeyEncrypted);
+
+    if (config.mode === 'UNCONFIGURED' || !config.keySecret) {
+      throw new ServiceUnavailableException(
+        'Payment gateway signature verification is not configured on the server.',
+      );
+    }
+
+    const validSignature = verifyRazorpayPaymentSignature({
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
+      keySecret: config.keySecret,
+    });
+
+    if (!validSignature) {
+      throw new ForbiddenException('Invalid Razorpay payment signature');
     }
 
     return await this.prisma.$transaction(async (tx) => {
@@ -4042,51 +4259,123 @@ export class StudentsService {
         throw new NotFoundException('Invoice not found or unauthorized');
       }
 
-      if (invoice.balanceAmount <= 0) {
+      if (invoice.balanceAmount <= 0 || invoice.status === InvoiceStatus.PAID) {
         throw new BadRequestException('Invoice is already fully paid');
       }
 
-      if (body.amountPaise > invoice.balanceAmount) {
+      const matchingOrder = await tx.order.findFirst({
+        where: {
+          instituteId: invoice.instituteId,
+          providerOrderId: razorpayOrderId,
+          invoiceId: invoice.id,
+          studentProfileId: studentProfile.id,
+        },
+      });
+
+      const resolvedAmount =
+        body.amountPaise && body.amountPaise > 0
+          ? Math.round(body.amountPaise)
+          : matchingOrder?.total || invoice.balanceAmount;
+
+      if (resolvedAmount <= 0) {
+        throw new BadRequestException('Valid positive payment amount is required');
+      }
+
+      if (resolvedAmount > invoice.balanceAmount) {
         throw new BadRequestException(
-          `Payment amount (${body.amountPaise} paise) exceeds outstanding balance (${invoice.balanceAmount} paise)`
+          `Payment amount (${resolvedAmount} paise) exceeds outstanding balance (${invoice.balanceAmount} paise)`,
         );
       }
 
-      // Check for duplicate reference
-      if (body.referenceNumber) {
-        const existingTxn = await tx.feePayment.findFirst({
-          where: {
-            instituteId: invoice.instituteId,
-            referenceNumber: body.referenceNumber,
-          },
-        });
-        if (existingTxn) {
-          throw new ConflictException('A transaction with this reference number has already been processed');
-        }
+      const existingTxn = await tx.feePayment.findFirst({
+        where: {
+          instituteId: invoice.instituteId,
+          referenceNumber: razorpayPaymentId,
+        },
+      });
+      if (existingTxn) {
+        throw new ConflictException('This payment transaction has already been verified and recorded');
       }
 
-      const totalPaymentsCount = await tx.feePayment.count({
-        where: { instituteId: invoice.instituteId },
-      });
+      const year = new Date().getFullYear();
+      const [paySeq, recSeq] = await Promise.all([
+        tx.financialSequence.upsert({
+          where: {
+            instituteId_year_type: {
+              instituteId: invoice.instituteId,
+              year,
+              type: FinancialSequenceType.PAYMENT,
+            },
+          },
+          create: {
+            instituteId: invoice.instituteId,
+            year,
+            type: FinancialSequenceType.PAYMENT,
+            currentSeq: 1,
+          },
+          update: { currentSeq: { increment: 1 } },
+        }),
+        tx.financialSequence.upsert({
+          where: {
+            instituteId_year_type: {
+              instituteId: invoice.instituteId,
+              year,
+              type: FinancialSequenceType.RECEIPT,
+            },
+          },
+          create: {
+            instituteId: invoice.instituteId,
+            year,
+            type: FinancialSequenceType.RECEIPT,
+            currentSeq: 1,
+          },
+          update: { currentSeq: { increment: 1 } },
+        }),
+      ]);
 
-      const nextPayIndex = totalPaymentsCount + 1;
-      const paymentNumber = `PAY-2026-${String(nextPayIndex).padStart(4, '0')}`;
-      const receiptNumber = `REC-2026-${String(nextPayIndex).padStart(4, '0')}`;
-      const referenceNumber = body.referenceNumber || `ONLINE-${Date.now()}`;
+      const paymentNumber = `PAY-${year}-${String(paySeq.currentSeq).padStart(4, '0')}`;
+      const receiptNumber = `REC-${year}-${String(recSeq.currentSeq).padStart(4, '0')}`;
+      const actorUserId = user?.sub || user?.userId || user?.id || 'student';
+
+      if (matchingOrder) {
+        await tx.order.update({
+          where: { id: matchingOrder.id },
+          data: { status: OrderStatus.PAID, signatureVerified: true },
+        });
+        await tx.payment.upsert({
+          where: { providerPaymentId: razorpayPaymentId },
+          create: {
+            instituteId: invoice.instituteId,
+            orderId: matchingOrder.id,
+            amount: resolvedAmount,
+            providerOrderId: razorpayOrderId,
+            providerPaymentId: razorpayPaymentId,
+            providerSignature: razorpaySignature,
+            signatureVerified: true,
+            status: PaymentStatus.CAPTURED,
+            method: body.method || 'razorpay',
+          },
+          update: {
+            providerSignature: razorpaySignature,
+            signatureVerified: true,
+            status: PaymentStatus.CAPTURED,
+          },
+        });
+      }
 
       const feePayment = await tx.feePayment.create({
         data: {
           instituteId: invoice.instituteId,
           invoiceId: invoice.id,
           paymentNumber,
-          amount: body.amountPaise,
+          amount: resolvedAmount,
           reversedAmount: 0,
-          netAmount: body.amountPaise,
+          netAmount: resolvedAmount,
           paymentMode: 'ONLINE',
           status: 'COMPLETED',
-          referenceNumber,
-          recordedByUserId: user.sub || user.userId || user.id,
-          remarks: 'Online student fee payment verified and completed',
+          referenceNumber: razorpayPaymentId,
+          recordedByUserId: actorUserId,
+          remarks: `Verified Razorpay Checkout (${razorpayOrderId})`,
         },
       });
 
@@ -4095,13 +4384,13 @@ export class StudentsService {
           instituteId: invoice.instituteId,
           paymentId: feePayment.id,
           receiptNumber,
-          issuedByUserId: user.sub || user.userId || user.id,
+          issuedByUserId: actorUserId,
         },
       });
 
-      const updatedPaidAmount = invoice.paidAmount + body.amountPaise;
-      const updatedBalanceAmount = invoice.totalAmount - updatedPaidAmount;
-      const updatedStatus = updatedBalanceAmount === 0 ? 'PAID' : 'PARTIALLY_PAID';
+      const updatedPaidAmount = invoice.paidAmount + resolvedAmount;
+      const updatedBalanceAmount = Math.max(0, invoice.totalAmount - updatedPaidAmount);
+      const updatedStatus = updatedBalanceAmount === 0 ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
 
       await tx.invoice.update({
         where: { id: invoice.id },
@@ -4114,15 +4403,16 @@ export class StudentsService {
 
       return {
         success: true,
-        message: 'Payment verified and processed successfully',
+        message: 'Payment signature verified and processed successfully',
         payment: {
           id: feePayment.id,
           paymentNumber,
           receiptNumber,
-          amountPaise: body.amountPaise,
+          receiptId: receipt.id,
+          amountPaise: resolvedAmount,
           status: feePayment.status,
           paymentDate: feePayment.paymentDate.toISOString(),
-          referenceNumber,
+          referenceNumber: razorpayPaymentId,
         },
         invoice: {
           id: invoice.id,
@@ -4289,6 +4579,66 @@ export class StudentsService {
         status: cert.revokedAt ? 'REVOKED' : 'ISSUED',
         completionDate: cert.enrolment.completedAt?.toISOString() || cert.issuedAt.toISOString(),
       },
+    };
+  }
+
+  /**
+   * 8b. Printable / Downloadable Institutional Certificate Document
+   */
+  async getStudentCertificateDocument(user: any, certificateId: string) {
+    const { certificate } = await this.getStudentCertificateDetail(user, certificateId);
+    const issuedDate = new Date(certificate.issuedAt).toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const esc = (s: string) =>
+      String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Certificate ${esc(certificate.certificateNo)}</title>
+  <style>
+    body { font-family: Georgia, serif; background: #f8f5ef; margin: 0; padding: 32px; color: #1e293b; }
+    .frame { max-width: 820px; margin: 0 auto; background: #fff; border: 8px double #7c2d12; padding: 48px; text-align: center; box-shadow: 0 12px 32px rgba(0,0,0,0.08); }
+    .inst { font-size: 14px; letter-spacing: 3px; text-transform: uppercase; color: #7c2d12; font-weight: bold; }
+    h1 { font-size: 36px; margin: 16px 0 8px; color: #1e1b4b; }
+    .recipient { font-size: 28px; font-weight: bold; color: #7c2d12; margin: 20px 0 10px; border-bottom: 1px solid #d4af37; display: inline-block; padding: 4px 24px; }
+    .course { font-size: 20px; font-weight: bold; color: #0f172a; margin: 12px 0; }
+    .meta { margin-top: 36px; display: flex; justify-content: space-between; font-size: 12px; color: #475569; font-family: sans-serif; border-top: 1px solid #e2e8f0; padding-top: 16px; }
+    @media print { body { background: #fff; padding: 0; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="inst">${esc(certificate.instituteName)}</div>
+    <h1>Certificate of Completion</h1>
+    <p>This certifies that</p>
+    <div class="recipient">${esc(certificate.studentName)}</div>
+    <p>Admission No: ${esc(certificate.admissionNo)}</p>
+    <p>has satisfactorily completed all academic requirements for</p>
+    <div class="course">${esc(certificate.courseTitle)}</div>
+    <p>Issued on ${esc(issuedDate)} • Status: ${esc(certificate.status)}</p>
+    <div class="meta">
+      <div>Certificate No: <strong>${esc(certificate.certificateNo)}</strong></div>
+      <div>Verify Token: <strong>${esc(certificate.verifyToken)}</strong></div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    return {
+      certificateNo: certificate.certificateNo,
+      verifyToken: certificate.verifyToken,
+      fileName: `${certificate.certificateNo}.html`,
+      html,
     };
   }
 
@@ -4508,6 +4858,56 @@ export class StudentsService {
     );
   }
 
+  async deleteStudent(instituteId: string, studentId: string) {
+    const student = await this.prisma.studentProfile.findFirst({
+      where: { id: studentId, instituteId },
+      include: {
+        _count: { select: { invoices: true, feeAllocations: true } },
+      },
+    });
+    if (!student) {
+      throw new NotFoundException('Student not found in this institute');
+    }
+
+    if ((student._count?.invoices || 0) > 0 || (student._count?.feeAllocations || 0) > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.studentProfile.update({
+          where: { id: student.id },
+          data: { status: 'INACTIVE' },
+        });
+        await tx.membership.update({
+          where: { id: student.membershipId },
+          data: { status: 'SUSPENDED' },
+        });
+        await tx.enrolment.updateMany({
+          where: { studentProfileId: student.id, instituteId, status: 'ACTIVE' },
+          data: { status: 'REVOKED' },
+        });
+      });
+      return {
+        success: true,
+        id: student.id,
+        message: 'Student archived safely (financial records preserved).',
+      };
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.enrolment.deleteMany({ where: { studentProfileId: student.id, instituteId } });
+      await tx.admission.deleteMany({ where: { studentProfileId: student.id, instituteId } });
+      await tx.studentProfile.delete({ where: { id: student.id } });
+      await tx.membership.update({
+        where: { id: student.membershipId },
+        data: { status: 'SUSPENDED' },
+      });
+    });
+
+    return {
+      success: true,
+      id: student.id,
+      message: 'Student profile deleted cleanly.',
+    };
+  }
+
   async markAllStudentNotificationsRead(user: any, body?: any) {
     const studentProfile = await this.resolveStudentProfileOrThrow(user);
     if (!this.notificationsService) {
@@ -4518,6 +4918,142 @@ export class StudentsService {
       studentProfile.membership.userId,
       body?.category,
     );
+  }
+
+  async getStudentMaterialContentForStreaming(
+    user: any,
+    resourceId: string,
+    requireDownloadable: boolean,
+  ) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const resource = await this.prisma.lessonResource.findFirst({
+      where: { id: resourceId, instituteId: studentProfile.instituteId },
+      include: {
+        mediaAsset: true,
+        lesson: {
+          include: {
+            chapter: {
+              include: {
+                module: {
+                  include: {
+                    course: {
+                      include: {
+                        institute: { select: { name: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!resource) {
+      throw new NotFoundException('Learning material not found');
+    }
+
+    const course = resource.lesson.chapter.module.course;
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+        courseId: course.id,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+    });
+
+    if (!enrolment) {
+      throw new ForbiddenException('You are not enrolled in the course for this material.');
+    }
+
+    if (requireDownloadable && !resource.downloadable) {
+      throw new ForbiddenException('This study material is stream-only and cannot be downloaded.');
+    }
+
+    const storageKey = resource.mediaAsset?.storageKey || '';
+    const title = storageKey ? storageKey.split('/').pop() || resource.lesson.title : resource.lesson.title;
+
+    return {
+      id: resource.id,
+      title,
+      kind: resource.mediaAsset?.kind || 'FILE',
+      mimeType: resource.mediaAsset?.mimeType || 'application/octet-stream',
+      storageKey,
+      downloadable: resource.downloadable,
+      lessonTitle: resource.lesson.title,
+      lessonBody: resource.lesson.body || null,
+      courseId: course.id,
+      courseTitle: course.title,
+      instituteName: course.institute?.name || undefined,
+    };
+  }
+
+  async getStudentCourseSyllabusPdf(user: any, courseId: string) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+        courseId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+    });
+
+    if (!enrolment) {
+      throw new ForbiddenException('You are not enrolled in this course.');
+    }
+
+    const course = await this.prisma.course.findFirst({
+      where: { id: courseId, instituteId: studentProfile.instituteId, deletedAt: null },
+      include: {
+        institute: { select: { name: true } },
+        modules: {
+          orderBy: { position: 'asc' },
+          include: {
+            chapters: {
+              orderBy: { position: 'asc' },
+              include: {
+                lessons: {
+                  orderBy: { position: 'asc' },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    const buffer = buildSyllabusPdfBuffer({
+      instituteName: course.institute?.name || undefined,
+      courseTitle: course.title,
+      courseCode: course.slug,
+      description: course.description,
+      modules: course.modules.map((mod) => ({
+        title: mod.title,
+        orderIndex: mod.position,
+        lessons: mod.chapters.flatMap((ch) =>
+          ch.lessons.map((l) => ({
+            title: `${ch.title}: ${l.title}`,
+            lessonType: l.type,
+            durationMinutes: l.durationSec ? Math.round(l.durationSec / 60) : null,
+            summary: l.body,
+          })),
+        ),
+      })),
+    });
+
+    return {
+      fileName: `${safeFileName(course.slug || course.title, 'course')}-syllabus.pdf`,
+      buffer,
+    };
   }
 }
 

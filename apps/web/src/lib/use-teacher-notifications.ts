@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { apiFetchResponse } from '@/lib/api';
 
 export type NotificationCategory =
   | 'STUDENT'
@@ -64,7 +65,7 @@ export function useTeacherNotifications(
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await fetch('/api/teachers/notifications/unread-count', {
+      const res = await apiFetchResponse('/teachers/notifications/unread-count', {
         headers: { Accept: 'application/json' },
       });
       if (!res.ok) return;
@@ -100,9 +101,9 @@ export function useTeacherNotifications(
           queryParams.set('search', search.trim());
         }
 
-        const res = await fetch(
-          `/api/teachers/notifications?${queryParams.toString()}`,
-          { credentials: 'same-origin', headers: { Accept: 'application/json' } },
+        const res = await apiFetchResponse(
+          `/teachers/notifications?${queryParams.toString()}`,
+          { headers: { Accept: 'application/json' } },
         );
 
         if (!res.ok) {
@@ -178,9 +179,8 @@ export function useTeacherNotifications(
     setUnreadCount((c) => Math.max(0, c - 1));
 
     try {
-      await fetch(`/api/teachers/notifications/${notificationId}/read`, {
+      await apiFetchResponse(`/teachers/notifications/${notificationId}/read`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
       });
       window.dispatchEvent(new CustomEvent('bible-lms:notifications-updated'));
     } catch {
@@ -203,9 +203,8 @@ export function useTeacherNotifications(
     }
 
     try {
-      const res = await fetch('/api/teachers/notifications', {
+      const res = await apiFetchResponse('/teachers/notifications/mark-all-read', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: selectedCategory || 'ALL' }),
       });
       if (res.ok) {

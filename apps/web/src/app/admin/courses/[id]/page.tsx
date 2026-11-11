@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { courseApi, resolveVerifiedAdminContext } from '@/lib/api';
+import { courseApi, teacherApi, resolveVerifiedAdminContext } from '@/lib/api';
 import {
   BookOpen,
   ChevronLeft,
@@ -86,30 +86,46 @@ export default function CourseCurriculumBuilderPage() {
   const params = useParams();
   const courseId = params?.id as string;
 
-  const [instituteId, setInstituteId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id');
-      if (stored) return stored;
-    }
-    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-  });
+  const [instituteId, setInstituteId] = useState<string>('');
+  const [adminName, setAdminName] = useState<string>('Institute Admin');
 
   const [activeTab, setActiveTab] = useState<'curriculum' | 'settings' | 'pricing' | 'faculty' | 'enrolled'>('curriculum');
   const [courseStatus, setCourseStatus] = useState<'DRAFT' | 'PUBLISHED' | 'ARCHIVED'>('PUBLISHED');
-  const [saveToast, setSaveToast] = useState(false);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Course Metadata State
+  // Course Metadata State (prices displayed in INR rupees in form, converted to/from paise for API)
   const [courseTitle, setCourseTitle] = useState('Course Curriculum');
+  const [categoryId, setCategoryId] = useState('');
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [category, setCategory] = useState('Biblical Studies');
   const [level, setLevel] = useState('BEGINNER');
+  const [courseType, setCourseType] = useState<'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE'>('COHORT');
+  const [learningMode, setLearningMode] = useState<'ONLINE' | 'OFFLINE' | 'HYBRID'>('ONLINE');
+  const [durationLabel, setDurationLabel] = useState('');
+  const [eligibility, setEligibility] = useState('');
   const [language, setLanguage] = useState('English');
   const [price, setPrice] = useState('0');
+  const [registrationFee, setRegistrationFee] = useState('0');
   const [pricingType, setPricingType] = useState<'FREE' | 'PAID'>('FREE');
+  const [requiresApproval, setRequiresApproval] = useState(true);
   const [description, setDescription] = useState('');
+
+  // Completion Rule state
+  const [minProgressPct, setMinProgressPct] = useState(100);
+  const [allMandatory, setAllMandatory] = useState(true);
+  const [minExamPct, setMinExamPct] = useState(60);
+  const [minAttendancePct, setMinAttendancePct] = useState(75);
 
   // Curriculum Hierarchy State (Course -> Modules -> Chapters -> Lessons -> Resources)
   const [modules, setModules] = useState<ModuleItem[]>([]);
+
+  const showToastMessage = (msg: string) => {
+    setSaveToast(msg);
+    setActionError(null);
+    setTimeout(() => setSaveToast(null), 3500);
+  };
 
   // Resolve admin context
   useEffect(() => {
@@ -118,28 +134,98 @@ export default function CourseCurriculumBuilderPage() {
       .then((ctx) => {
         if (!active) return;
         if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+        else {
+          setIsLoading(false);
+          setActionError('Active institute session not found. Please log in again.');
+        }
+        if (ctx?.user?.fullName) setAdminName(ctx.user.fullName);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!active) return;
+        setIsLoading(false);
+        setActionError('Unable to verify administrator session.');
+      });
     return () => {
       active = false;
     };
   }, []);
 
-  // Fetch course from PostgreSQL
+  // Fetch course, categories, instructors & enrolments from PostgreSQL
   const loadCourseFromDatabase = useCallback(async () => {
     if (!instituteId || !courseId) return;
     setIsLoading(true);
     try {
-      const data = await courseApi.getCourse(instituteId, courseId);
+      const [data, cats, teachersRes, enrolmentsRes] = await Promise.all([
+        courseApi.getCourse(instituteId, courseId),
+        courseApi.getCategories(instituteId).catch(() => []),
+        teacherApi.getTeachers(instituteId, { limit: 100 }).catch(() => ({ data: [] })),
+        courseApi.getCourseEnrolments(instituteId, courseId).catch(() => []),
+      ]);
+
+      if (Array.isArray(cats)) {
+        setCategories(cats);
+      }
+      if (Array.isArray(teachersRes?.data)) {
+        setAvailableTeachers(
+          teachersRes.data.map((t: any) => ({
+            id: t.id,
+            name: t.fullName || t.name || 'Instructor',
+            email: t.email || '',
+            spec: t.specialization || 'Faculty Member',
+          })),
+        );
+      }
+      if (Array.isArray(enrolmentsRes)) {
+        setEnrolledStudents(
+          enrolmentsRes.map((e: any) => ({
+            id: e.id,
+            name: e.studentName || 'Student',
+            admissionNo: e.admissionNo || '',
+            email: e.email || '—',
+            phone: e.phoneNumber || '—',
+            batchName: e.batchName || 'Unassigned',
+            progress: e.progressPct ?? 0,
+            status: e.status || 'ACTIVE',
+            enrolledAt: e.enrolledAt ? new Date(e.enrolledAt).toLocaleDateString('en-IN') : '—',
+          })),
+        );
+      }
+
       if (data) {
         setCourseTitle(data.title || 'Course Curriculum');
-        setCategory(data.category?.name || 'Biblical Studies');
+        setCategoryId(data.categoryId || '');
+        setCategory(data.categoryName || data.category?.name || 'Biblical Studies');
         setLevel(data.level || 'BEGINNER');
+        setCourseType(data.courseType || 'COHORT');
+        setLearningMode(data.learningMode || 'ONLINE');
+        setDurationLabel(data.durationLabel || '');
+        setEligibility(data.eligibility || '');
         setLanguage(data.language || 'English');
-        setPrice(String(data.price || 0));
-        setPricingType(data.price && data.price > 0 ? 'PAID' : 'FREE');
+        setPrice(String(Math.round((data.price || 0) / 100)));
+        setRegistrationFee(String(Math.round((data.registrationFee || 0) / 100)));
+        setPricingType((data.pricing as 'FREE' | 'PAID') || (data.price && data.price > 0 ? 'PAID' : 'FREE'));
+        setRequiresApproval(data.requiresApproval ?? true);
         setDescription(data.description || '');
         setCourseStatus(data.status as any);
+
+        if (data.completionRule) {
+          setMinProgressPct(data.completionRule.minProgressPct ?? 100);
+          setAllMandatory(Boolean(data.completionRule.allMandatory));
+          setMinExamPct(data.completionRule.minExamPct ?? 60);
+          setMinAttendancePct(data.completionRule.minAttendancePct ?? 75);
+        }
+
+        setAssignedTeachers(
+          Array.isArray(data.instructors)
+            ? data.instructors.map((ins: any) => ({
+                id: ins.teacherProfileId || ins.id,
+                name: ins.teacherName || 'Instructor',
+                role: (ins.role || 'LEAD') as 'LEAD' | 'ASSISTANT',
+                email: ins.teacherEmail || '',
+                spec: ins.role === 'LEAD' ? 'Lead Faculty' : 'Teaching Assistant',
+              }))
+            : [],
+        );
 
         if (Array.isArray(data.modules)) {
           setModules(
@@ -153,25 +239,25 @@ export default function CourseCurriculumBuilderPage() {
                   id: l.id,
                   title: l.title,
                   type: l.type || 'VIDEO',
-                  durationMinutes: l.durationMinutes || 15,
+                  durationMinutes: l.durationSec ? Math.max(1, Math.round(l.durationSec / 60)) : (l.durationMinutes || 15),
                   isPreview: Boolean(l.isPreview),
                   isMandatory: Boolean(l.isMandatory),
                   body: l.body || '',
                   resources: (l.resources || []).map((r: any) => ({
                     id: r.id,
-                    title: r.title,
-                    kind: r.type || 'PDF',
-                    size: r.fileSize ? `${Math.round(r.fileSize / 1024)} KB` : '1 MB',
-                    downloadable: true,
+                    title: r.storageKey || r.title || 'Resource',
+                    kind: r.kind || r.type || 'PDF',
+                    size: r.sizeBytes ? `${Math.max(1, Math.round(Number(r.sizeBytes) / 1024))} KB` : '1 MB',
+                    downloadable: Boolean(r.downloadable),
                   })),
                 })),
               })),
-            }))
+            })),
           );
         }
       }
-    } catch (err) {
-      console.error('Failed to load course from database:', err);
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to load course from database');
     } finally {
       setIsLoading(false);
     }
@@ -204,23 +290,34 @@ export default function CourseCurriculumBuilderPage() {
   const [newResourceKind, setNewResourceKind] = useState<'PDF' | 'VIDEO' | 'AUDIO' | 'FILE'>('PDF');
   const [newResourceDownloadable, setNewResourceDownloadable] = useState(false);
 
-  // Faculty state
-  const [assignedTeachers, setAssignedTeachers] = useState([
-    { id: 'fac-1', name: 'Dr. Samuel Mathew', role: 'LEAD', email: 'samuel.m@example.com', spec: 'Theology & Hermeneutics' },
-    { id: 'fac-2', name: 'Dr. Mary Thomas', role: 'ASSISTANT', email: 'mary.t@example.com', spec: 'Biblical Studies' },
-  ]);
+  // Live Faculty & Enrolments state (Zero-Mock)
+  const [assignedTeachers, setAssignedTeachers] = useState<
+    Array<{ id: string; name: string; role: 'LEAD' | 'ASSISTANT'; email: string; spec: string }>
+  >([]);
+  const [availableTeachers, setAvailableTeachers] = useState<
+    Array<{ id: string; name: string; email: string; spec: string }>
+  >([]);
+  const [selectedTeacherToAssign, setSelectedTeacherToAssign] = useState('');
+  const [selectedTeacherRole, setSelectedTeacherRole] = useState<'LEAD' | 'ASSISTANT'>('LEAD');
 
-  // Enrolled students demo data
-  const enrolledStudents = [
-    { id: 'stu-1', name: 'John Doe', email: 'john.doe@example.com', phone: '+919876543210', progress: 68, status: 'ACTIVE', enrolledAt: '2026-09-01' },
-    { id: 'stu-2', name: 'Grace Philip', email: 'grace.p@example.com', phone: '+919876543211', progress: 92, status: 'ACTIVE', enrolledAt: '2026-09-05' },
-    { id: 'stu-3', name: 'Mathew Thomas', email: 'mathew.t@example.com', phone: '+919876543212', progress: 35, status: 'ACTIVE', enrolledAt: '2026-09-12' },
-  ];
+  const [enrolledStudents, setEnrolledStudents] = useState<
+    Array<{
+      id: string;
+      name: string;
+      admissionNo: string;
+      email: string;
+      phone: string;
+      batchName: string;
+      progress: number;
+      status: string;
+      enrolledAt: string;
+    }>
+  >([]);
 
-  // Handlers for Curriculum Management
+  // Handlers for Curriculum Management (all persisted to PostgreSQL)
   const handleAddModule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newModuleTitle.trim()) return;
+    if (!newModuleTitle.trim() || !instituteId) return;
 
     try {
       await courseApi.createModule(instituteId, courseId, {
@@ -228,62 +325,73 @@ export default function CourseCurriculumBuilderPage() {
         position: modules.length,
       });
       await loadCourseFromDatabase();
-    } catch (err) {
-      console.error('Failed to create module:', err);
+      showToastMessage('Module created and saved.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to create module');
     }
 
     setNewModuleTitle('');
     setShowAddModuleModal(false);
   };
 
-  const handleDeleteModule = (moduleId: string) => {
-    setModules(modules.filter((m) => m.id !== moduleId));
+  const handleDeleteModule = async (moduleId: string) => {
+    if (!instituteId) return;
+    try {
+      await courseApi.deleteModule(instituteId, courseId, moduleId);
+      await loadCourseFromDatabase();
+      showToastMessage('Module deleted.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to delete module');
+    }
   };
 
   const handleAddChapter = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!showAddChapterModal || !newChapterTitle.trim()) return;
+    if (!showAddChapterModal || !newChapterTitle.trim() || !instituteId) return;
 
     try {
       await courseApi.createChapter(instituteId, courseId, showAddChapterModal, {
         title: newChapterTitle.trim(),
       });
       await loadCourseFromDatabase();
-    } catch (err) {
-      console.error('Failed to create chapter:', err);
+      showToastMessage('Chapter added.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to create chapter');
     }
 
     setNewChapterTitle('');
     setShowAddChapterModal(null);
   };
 
-  const handleDeleteChapter = (moduleId: string, chapterId: string) => {
-    setModules(
-      modules.map((m) => {
-        if (m.id === moduleId) {
-          return { ...m, chapters: m.chapters.filter((ch) => ch.id !== chapterId) };
-        }
-        return m;
-      }),
-    );
+  const handleDeleteChapter = async (_moduleId: string, chapterId: string) => {
+    if (!instituteId) return;
+    try {
+      await courseApi.deleteChapter(instituteId, courseId, chapterId);
+      await loadCourseFromDatabase();
+      showToastMessage('Chapter deleted.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to delete chapter');
+    }
   };
 
   const handleAddLesson = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!showAddLessonModal || !newLessonTitle.trim()) return;
+    if (!showAddLessonModal || !newLessonTitle.trim() || !instituteId) return;
 
     try {
+      const minutes = parseInt(newLessonDuration, 10) || 15;
       await courseApi.createLesson(instituteId, courseId, showAddLessonModal.chapterId, {
         title: newLessonTitle.trim(),
         type: newLessonType,
-        durationMinutes: parseInt(newLessonDuration, 10) || 15,
+        durationSec: minutes * 60,
         isPreview: newLessonPreview,
         isMandatory: true,
-        body: newLessonBody.trim(),
+        body: newLessonBody.trim() || undefined,
       });
       await loadCourseFromDatabase();
-    } catch (err) {
-      console.error('Failed to create lesson:', err);
+      showToastMessage('Lesson added to chapter.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to create lesson');
     }
 
     setNewLessonTitle('');
@@ -291,148 +399,157 @@ export default function CourseCurriculumBuilderPage() {
     setShowAddLessonModal(null);
   };
 
-  const handleDeleteLesson = (moduleId: string, chapterId: string, lessonId: string) => {
-    setModules(
-      modules.map((m) => {
-        if (m.id === moduleId) {
-          return {
-            ...m,
-            chapters: m.chapters.map((ch) => {
-              if (ch.id === chapterId) {
-                return { ...ch, lessons: ch.lessons.filter((l) => l.id !== lessonId) };
-              }
-              return ch;
-            }),
-          };
-        }
-        return m;
-      }),
-    );
+  const handleDeleteLesson = async (_moduleId: string, _chapterId: string, lessonId: string) => {
+    if (!instituteId) return;
+    try {
+      await courseApi.deleteLesson(instituteId, courseId, lessonId);
+      await loadCourseFromDatabase();
+      showToastMessage('Lesson deleted.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to delete lesson');
+    }
   };
 
-  const handleAddResource = (e: React.FormEvent) => {
+  const handleAddResource = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!showAddResourceModal || !newResourceTitle.trim()) return;
+    if (!showAddResourceModal || !newResourceTitle.trim() || !instituteId) return;
 
-    const newRes: ResourceItem = {
-      id: `res-${Date.now().toString().slice(-4)}`,
-      title: newResourceTitle.trim(),
-      kind: newResourceKind,
-      size: '2.5 MB',
-      downloadable: newResourceDownloadable,
+    const mimeByKind: Record<string, string> = {
+      PDF: 'application/pdf',
+      VIDEO: 'video/mp4',
+      AUDIO: 'audio/mpeg',
+      FILE: 'application/octet-stream',
     };
 
-    setModules(
-      modules.map((m) => {
-        if (m.id === showAddResourceModal.moduleId) {
-          return {
-            ...m,
-            chapters: m.chapters.map((ch) => {
-              if (ch.id === showAddResourceModal.chapterId) {
-                return {
-                  ...ch,
-                  lessons: ch.lessons.map((l) => {
-                    if (l.id === showAddResourceModal.lessonId) {
-                      return { ...l, resources: [...l.resources, newRes] };
-                    }
-                    return l;
-                  }),
-                };
-              }
-              return ch;
-            }),
-          };
-        }
-        return m;
-      }),
-    );
+    try {
+      await courseApi.attachResource(instituteId, courseId, showAddResourceModal.lessonId, {
+        kind: newResourceKind,
+        storageKey: newResourceTitle.trim(),
+        mimeType: mimeByKind[newResourceKind] || 'application/octet-stream',
+        sizeBytes: '1048576',
+        downloadable: newResourceDownloadable,
+      });
+      await loadCourseFromDatabase();
+      showToastMessage('Resource attached and persisted.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to attach resource');
+    }
 
     setNewResourceTitle('');
     setShowAddResourceModal(null);
   };
 
-  const handleDeleteResource = (moduleId: string, chapterId: string, lessonId: string, resourceId: string) => {
-    setModules(
-      modules.map((m) => {
-        if (m.id === moduleId) {
-          return {
-            ...m,
-            chapters: m.chapters.map((ch) => {
-              if (ch.id === chapterId) {
-                return {
-                  ...ch,
-                  lessons: ch.lessons.map((l) => {
-                    if (l.id === lessonId) {
-                      return { ...l, resources: l.resources.filter((r) => r.id !== resourceId) };
-                    }
-                    return l;
-                  }),
-                };
-              }
-              return ch;
-            }),
-          };
-        }
-        return m;
-      }),
-    );
+  const handleDeleteResource = async (
+    _moduleId: string,
+    _chapterId: string,
+    _lessonId: string,
+    resourceId: string,
+  ) => {
+    if (!instituteId) return;
+    try {
+      await courseApi.removeResource(instituteId, courseId, resourceId);
+      await loadCourseFromDatabase();
+      showToastMessage('Resource removed.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to remove resource');
+    }
   };
 
-  const handleToggleDownloadable = (moduleId: string, chapterId: string, lessonId: string, resourceId: string) => {
-    setModules(
-      modules.map((m) => {
-        if (m.id === moduleId) {
-          return {
-            ...m,
-            chapters: m.chapters.map((ch) => {
-              if (ch.id === chapterId) {
-                return {
-                  ...ch,
-                  lessons: ch.lessons.map((l) => {
-                    if (l.id === lessonId) {
-                      return {
-                        ...l,
-                        resources: l.resources.map((r) =>
-                          r.id === resourceId ? { ...r, downloadable: !r.downloadable } : r,
-                        ),
-                      };
-                    }
-                    return l;
-                  }),
-                };
-              }
-              return ch;
-            }),
-          };
+  const handleToggleDownloadable = async (
+    _moduleId: string,
+    _chapterId: string,
+    _lessonId: string,
+    resourceId: string,
+  ) => {
+    if (!instituteId) return;
+    let currentDownloadable = false;
+    for (const mod of modules) {
+      for (const ch of mod.chapters) {
+        for (const les of ch.lessons) {
+          const found = les.resources.find((r) => r.id === resourceId);
+          if (found) currentDownloadable = found.downloadable;
         }
-        return m;
-      }),
-    );
+      }
+    }
+    try {
+      await courseApi.updateResource(instituteId, courseId, resourceId, {
+        downloadable: !currentDownloadable,
+      });
+      await loadCourseFromDatabase();
+      showToastMessage(!currentDownloadable ? 'Offline download enabled.' : 'DRM protection enforced.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to update DRM setting');
+    }
+  };
+
+  const handleAssignFaculty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instituteId || !selectedTeacherToAssign) return;
+    try {
+      await courseApi.assignInstructor(instituteId, courseId, {
+        teacherProfileId: selectedTeacherToAssign,
+        role: selectedTeacherRole,
+      });
+      setSelectedTeacherToAssign('');
+      await loadCourseFromDatabase();
+      showToastMessage('Faculty member assigned to course.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to assign instructor');
+    }
+  };
+
+  const handleRemoveFaculty = async (teacherProfileId: string) => {
+    if (!instituteId) return;
+    try {
+      await courseApi.removeInstructor(instituteId, courseId, teacherProfileId);
+      await loadCourseFromDatabase();
+      showToastMessage('Instructor removed from course.');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to remove instructor');
+    }
   };
 
   const handleSave = async () => {
+    if (!instituteId) return;
     try {
+      const priceRupees = parseFloat(price) || 0;
+      const regFeeRupees = parseFloat(registrationFee) || 0;
       await courseApi.updateCourse(instituteId, courseId, {
-        title: courseTitle,
+        title: courseTitle.trim(),
+        categoryId: categoryId || undefined,
         description,
-        price: pricingType === 'PAID' ? parseInt(price, 10) || 0 : 0,
-        pricingType,
+        pricing: pricingType,
+        price: pricingType === 'PAID' ? Math.round(priceRupees * 100) : 0,
+        registrationFee: Math.round(regFeeRupees * 100),
+        courseType,
+        learningMode,
+        durationLabel: durationLabel.trim() || undefined,
+        eligibility: eligibility.trim() || undefined,
+        requiresApproval,
         level: level as any,
         language,
       });
-      setSaveToast(true);
-      setTimeout(() => setSaveToast(false), 3000);
-    } catch (err) {
-      console.error('Failed to update course in database:', err);
+      await courseApi.upsertCompletionRule(instituteId, courseId, {
+        minProgressPct: Number(minProgressPct) || 100,
+        allMandatory,
+        minExamPct: Number(minExamPct) || 60,
+        minAttendancePct: Number(minAttendancePct) || 75,
+      });
+      await loadCourseFromDatabase();
+      showToastMessage('Curriculum, settings, pricing, and completion rules saved to PostgreSQL!');
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to update course in database');
     }
   };
 
   const handleUpdateStatus = async (newStatus: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED') => {
+    if (!instituteId) return;
     try {
       await courseApi.updateStatus(instituteId, courseId, newStatus);
       setCourseStatus(newStatus);
-    } catch (err) {
-      console.error('Failed to update status:', err);
+      showToastMessage(`Course status updated to ${newStatus}.`);
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to update course status');
     }
   };
 
@@ -456,7 +573,7 @@ export default function CourseCurriculumBuilderPage() {
       portalTitle="Institute Admin"
       portalRole="ADMIN"
       navItems={adminNav}
-      userName="Samuel Admin"
+      userName={adminName}
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6">
@@ -492,7 +609,8 @@ export default function CourseCurriculumBuilderPage() {
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              {modules.length} Modules • {totalLessons} Lessons • ~{Math.round(totalDurationMin / 60)} Study Hours • Assigned to {assignedTeachers[0]?.name}
+              {modules.length} Modules • {totalLessons} Lessons • ~{Math.round(totalDurationMin / 60)} Study Hours • Assigned to{' '}
+              {assignedTeachers[0]?.name || 'Unassigned'}
             </p>
           </div>
 
@@ -501,12 +619,22 @@ export default function CourseCurriculumBuilderPage() {
               variant="outline"
               size="sm"
               onClick={() =>
-                setCourseStatus((prev) => (prev === 'PUBLISHED' ? 'DRAFT' : 'PUBLISHED'))
+                handleUpdateStatus(courseStatus === 'PUBLISHED' ? 'DRAFT' : 'PUBLISHED')
               }
               className="text-xs"
             >
               {courseStatus === 'PUBLISHED' ? 'Unpublish to Draft' : 'Publish Course'}
             </Button>
+            {courseStatus !== 'ARCHIVED' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleUpdateStatus('ARCHIVED')}
+                className="text-xs text-slate-600"
+              >
+                Archive
+              </Button>
+            )}
             <Button variant="primary" size="sm" onClick={handleSave} className="gap-1.5 shadow-sm shadow-blue-500/20">
               <Save size={14} />
               Save Changes
@@ -514,13 +642,22 @@ export default function CourseCurriculumBuilderPage() {
           </div>
         </div>
 
+        {actionError && (
+          <div className="p-3 bg-red-50 text-red-800 border border-red-200 text-xs rounded-lg flex items-center justify-between">
+            <span>{actionError}</span>
+            <button onClick={() => setActionError(null)} className="text-red-700 font-bold">
+              ✕
+            </button>
+          </div>
+        )}
+
         {saveToast && (
           <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs rounded-lg flex items-center justify-between animate-in fade-in duration-200">
             <div className="flex items-center gap-2">
               <CheckCircle size={16} className="text-emerald-600" />
-              <span>Curriculum and course updates saved successfully!</span>
+              <span>{saveToast}</span>
             </div>
-            <button onClick={() => setSaveToast(false)} className="text-emerald-700 font-bold">
+            <button onClick={() => setSaveToast(null)} className="text-emerald-700 font-bold">
               ✕
             </button>
           </div>
@@ -826,12 +963,22 @@ export default function CourseCurriculumBuilderPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Academic Category</label>
-                  <input
-                    type="text"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  <select
+                    value={categoryId}
+                    onChange={(e) => {
+                      setCategoryId(e.target.value);
+                      const found = categories.find((c) => c.id === e.target.value);
+                      if (found) setCategory(found.name);
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {categories.length === 0 && <option value={categoryId}>{category}</option>}
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Academic Level</label>
@@ -845,6 +992,56 @@ export default function CourseCurriculumBuilderPage() {
                     <option value="ADVANCED">Advanced</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Course Format</label>
+                  <select
+                    value={courseType}
+                    onChange={(e) => setCourseType(e.target.value as any)}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white"
+                  >
+                    <option value="COHORT">Cohort</option>
+                    <option value="SELF_PACED">Self-Paced</option>
+                    <option value="LIVE">Live Seminar</option>
+                    <option value="DIPLOMA">Diploma</option>
+                    <option value="CERTIFICATE">Certificate</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Delivery Mode</label>
+                  <select
+                    value={learningMode}
+                    onChange={(e) => setLearningMode(e.target.value as any)}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-white"
+                  >
+                    <option value="ONLINE">Online</option>
+                    <option value="HYBRID">Hybrid</option>
+                    <option value="OFFLINE">On-Campus</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Duration</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 12 Weeks"
+                    value={durationLabel}
+                    onChange={(e) => setDurationLabel(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Eligibility & Prerequisites</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Open to all ministry candidates"
+                  value={eligibility}
+                  onChange={(e) => setEligibility(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200"
+                />
               </div>
 
               <div>
@@ -898,23 +1095,78 @@ export default function CourseCurriculumBuilderPage() {
                 </button>
               </div>
 
-              {pricingType === 'PAID' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {pricingType === 'PAID' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Standard Tuition Fee (₹ INR)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={price}
+                      onChange={(e) => setPrice(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Standard Tuition Fee (₹ INR)</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Registration Fee (₹ INR)</label>
                   <input
                     type="number"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
+                    min={0}
+                    value={registrationFee}
+                    onChange={(e) => setRegistrationFee(e.target.value)}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-              )}
+              </div>
 
-              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={requiresApproval}
+                  onChange={(e) => setRequiresApproval(e.target.checked)}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                Require Administrator Admission Approval before Activation
+              </label>
+
+              <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-3">
                 <div className="font-semibold text-slate-800">Completion Rule & Certificate Criteria</div>
-                <p className="text-[11px] text-slate-500">
-                  Minimum 100% of mandatory lessons watched/read, passing mark of 60% on assignments, and 75% attendance in live classes.
-                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Min Progress %</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={minProgressPct}
+                      onChange={(e) => setMinProgressPct(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-200 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Min Exam %</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={minExamPct}
+                      onChange={(e) => setMinExamPct(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-200 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">Min Attendance %</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={minAttendancePct}
+                      onChange={(e) => setMinAttendancePct(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 text-xs rounded border border-slate-200 bg-white"
+                    />
+                  </div>
+                </div>
               </div>
 
               <Button variant="primary" size="sm" onClick={handleSave} className="gap-1.5 mt-2">
@@ -928,13 +1180,38 @@ export default function CourseCurriculumBuilderPage() {
         {/* TAB 4: FACULTY & TEACHERS */}
         {activeTab === 'faculty' && (
           <Card className="p-6 bg-white border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900">Assigned Instructors & Faculty</h3>
                 <p className="text-xs text-slate-500">
-                  Faculty members assigned to instruct, assess submissions, and lead discussions.
+                  Faculty members persisted in PostgreSQL to instruct, assess submissions, and lead classes.
                 </p>
               </div>
+              <form onSubmit={handleAssignFaculty} className="flex flex-wrap items-center gap-2">
+                <select
+                  value={selectedTeacherToAssign}
+                  onChange={(e) => setSelectedTeacherToAssign(e.target.value)}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white"
+                >
+                  <option value="">Select faculty member...</option>
+                  {availableTeachers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.spec})
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={selectedTeacherRole}
+                  onChange={(e) => setSelectedTeacherRole(e.target.value as any)}
+                  className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white"
+                >
+                  <option value="LEAD">Lead</option>
+                  <option value="ASSISTANT">Assistant</option>
+                </select>
+                <Button type="submit" variant="primary" size="sm" disabled={!selectedTeacherToAssign}>
+                  Assign
+                </Button>
+              </form>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -949,21 +1226,36 @@ export default function CourseCurriculumBuilderPage() {
                     </div>
                     <div>
                       <div className="text-xs font-bold text-slate-900">{teacher.name}</div>
-                      <div className="text-[11px] text-slate-500">{teacher.email}</div>
+                      <div className="text-[11px] text-slate-500">{teacher.email || '—'}</div>
                       <div className="text-[10px] text-blue-600 font-medium">{teacher.spec}</div>
                     </div>
                   </div>
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      teacher.role === 'LEAD'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-slate-200 text-slate-700'
-                    }`}
-                  >
-                    {teacher.role} INSTRUCTOR
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        teacher.role === 'LEAD'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {teacher.role}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFaculty(teacher.id)}
+                      className="text-slate-400 hover:text-red-600 p-1"
+                      title="Remove Instructor"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
               ))}
+              {assignedTeachers.length === 0 && (
+                <p className="text-xs text-slate-400 col-span-2 py-6 text-center">
+                  No instructors assigned to this course yet. Use the selector above to assign faculty.
+                </p>
+              )}
             </div>
           </Card>
         )}

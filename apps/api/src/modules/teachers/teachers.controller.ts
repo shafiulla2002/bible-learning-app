@@ -12,9 +12,12 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { TeachersService } from './teachers.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import {
   CreateTeacherSchema,
   UpdateTeacherProfileSchema,
@@ -26,7 +29,8 @@ import {
 } from '@bible-lms/shared';
 
 @Controller('institutes/:instituteId/teachers')
-@UseGuards(JwtAuthGuard, InstituteTenantGuard)
+@UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
+@Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
 export class TeachersController {
   constructor(private readonly teachersService: TeachersService) {}
 
@@ -38,7 +42,7 @@ export class TeachersController {
     @Request() req: any,
   ) {
     const validated = CreateTeacherSchema.parse(body);
-    const actorUserId = req.user?.userId;
+    const actorUserId = req.user?.sub || req.user?.userId;
     return this.teachersService.createTeacher(instituteId, validated, actorUserId);
   }
 
@@ -69,6 +73,14 @@ export class TeachersController {
     return this.teachersService.findOne(instituteId, id);
   }
 
+  @Get(':id/workload')
+  async getTeacherWorkload(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+  ) {
+    return this.teachersService.getTeacherWorkload(instituteId, id);
+  }
+
   @Patch(':id')
   async updateTeacher(
     @Param('instituteId') instituteId: string,
@@ -77,7 +89,7 @@ export class TeachersController {
     @Request() req: any,
   ) {
     const validated = UpdateTeacherProfileSchema.parse(body);
-    const actorUserId = req.user?.userId;
+    const actorUserId = req.user?.sub || req.user?.userId;
     return this.teachersService.update(instituteId, id, validated, actorUserId);
   }
 
@@ -89,7 +101,7 @@ export class TeachersController {
     @Request() req: any,
   ) {
     const validated = UpdateTeacherStatusSchema.parse(body);
-    const actorUserId = req.user?.userId;
+    const actorUserId = req.user?.sub || req.user?.userId;
     return this.teachersService.updateStatus(
       instituteId,
       id,
@@ -108,7 +120,7 @@ export class TeachersController {
     @Request() req: any,
   ) {
     const validated = AssignTeacherCourseSchema.parse(body);
-    const actorUserId = req.user?.userId;
+    const actorUserId = req.user?.sub || req.user?.userId;
     return this.teachersService.assignCourse(
       instituteId,
       id,
@@ -124,7 +136,7 @@ export class TeachersController {
     @Param('courseId') courseId: string,
     @Request() req: any,
   ) {
-    const actorUserId = req.user?.userId;
+    const actorUserId = req.user?.sub || req.user?.userId;
     return this.teachersService.removeCourse(
       instituteId,
       id,
@@ -142,7 +154,7 @@ export class TeachersController {
     @Request() req: any,
   ) {
     const validated = AssignTeacherBatchSchema.parse(body);
-    const actorUserId = req.user?.userId;
+    const actorUserId = req.user?.sub || req.user?.userId;
     return this.teachersService.assignBatch(
       instituteId,
       id,
@@ -158,7 +170,7 @@ export class TeachersController {
     @Param('batchId') batchId: string,
     @Request() req: any,
   ) {
-    const actorUserId = req.user?.userId;
+    const actorUserId = req.user?.sub || req.user?.userId;
     return this.teachersService.removeBatch(
       instituteId,
       id,

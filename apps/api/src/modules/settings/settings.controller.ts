@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
+import { RolesGuard } from '../../core/auth/guards/roles.guard';
+import { Roles } from '../../core/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../core/auth/decorators/current-user.decorator';
 import { SettingsService } from './settings.service';
 import {
@@ -20,11 +22,13 @@ import {
   UpdateFinancialSettingsDto,
   UpdateSecurityPreferencesDto,
   UpdateUserStatusDto,
+  UpdatePaymentGatewayDto,
 } from './settings.dto';
 import { Role } from '@prisma/client';
 
 @Controller('institutes/:instituteId/settings')
-@UseGuards(JwtAuthGuard, InstituteTenantGuard)
+@UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
+@Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
 export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 
@@ -185,6 +189,32 @@ export class SettingsController {
     return this.settingsService.getAuditLogs(
       instituteId,
       limit ? parseInt(limit, 10) : 25,
+    );
+  }
+
+  // 11. GET PAYMENT GATEWAY SETTINGS (Masked)
+  @Get('payment-gateway')
+  async getPaymentGatewaySettings(
+    @Param('instituteId') instituteId: string,
+    @CurrentUser() user: any,
+  ) {
+    this.verifyAdminRole(user);
+    return this.settingsService.getPaymentGatewaySettings(instituteId);
+  }
+
+  // 12. UPDATE PAYMENT GATEWAY SETTINGS (AES-256-GCM encrypted)
+  @Patch('payment-gateway')
+  @Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN)
+  async updatePaymentGatewaySettings(
+    @Param('instituteId') instituteId: string,
+    @Body() dto: UpdatePaymentGatewayDto,
+    @CurrentUser() user: any,
+  ) {
+    this.verifyAdminRole(user);
+    return this.settingsService.updatePaymentGatewaySettings(
+      instituteId,
+      dto,
+      user.userId || user.sub || 'system',
     );
   }
 }

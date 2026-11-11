@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   settingsApi,
+  resolveActiveInstituteId,
   FullInstituteSettingsResponse,
   InstituteUserItemDto,
   AuditLogItemDto,
@@ -214,7 +215,7 @@ const DEFAULT_AUDIT_LOGS: AuditLogItemDto[] = [
 const ALL_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function InstituteSettingsPage() {
-  const [instituteId, setInstituteId] = useState<string>('fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5');
+  const [instituteId, setInstituteId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
   const [settings, setSettings] = useState<FullInstituteSettingsResponse>(DEFAULT_SETTINGS_DATA);
   const [usersList, setUsersList] = useState<InstituteUserItemDto[]>([]);
@@ -227,31 +228,47 @@ export default function InstituteSettingsPage() {
   // Form states
   const [profileForm, setProfileForm] = useState(DEFAULT_SETTINGS_DATA.profile);
   const [brandingForm, setBrandingForm] = useState(DEFAULT_SETTINGS_DATA.branding);
+  // Financial & Gateway forms
   const [academicForm, setAcademicForm] = useState(DEFAULT_SETTINGS_DATA.academic);
   const [financialForm, setFinancialForm] = useState(DEFAULT_SETTINGS_DATA.financial);
   const [securityForm, setSecurityForm] = useState(DEFAULT_SETTINGS_DATA.security);
+  const [gatewayStatus, setGatewayStatus] = useState<{
+    configured: boolean;
+    mode: string;
+    keyIdPreview: string | null;
+    hasWebhookSecret: boolean;
+    source: string;
+  } | null>(null);
+  const [gatewayForm, setGatewayForm] = useState({
+    keyId: '',
+    keySecret: '',
+    webhookSecret: '',
+  });
+  const [isSavingGateway, setIsSavingGateway] = useState(false);
 
   // Users filter
   const [userSearch, setUserSearch] = useState<string>('');
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
 
-  // Load instituteId from localStorage
+  // Load instituteId dynamically
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id') || 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
-      setInstituteId(stored);
-    }
+    resolveActiveInstituteId().then((id) => {
+      if (id) setInstituteId(id);
+    });
   }, []);
 
   // Fetch settings from API
   const loadSettings = useCallback(async () => {
+    if (!instituteId) return;
     setIsLoading(true);
     try {
-      const [resSettings, resUsers, resLogs] = await Promise.all([
+      const [resSettings, resUsers, resLogs, resGateway] = await Promise.all([
         settingsApi.getSettings(instituteId),
         settingsApi.getUsers(instituteId),
         settingsApi.getAuditLogs(instituteId),
+        settingsApi.getPaymentGateway(instituteId).catch(() => null),
       ]);
+      if (resGateway) setGatewayStatus(resGateway);
 
       if (resSettings) {
         setSettings(resSettings);
@@ -348,27 +365,49 @@ export default function InstituteSettingsPage() {
 
   const handleSaveFinancial = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!instituteId) return;
     setIsSaving(true);
     try {
       const res = await settingsApi.updateFinancial(instituteId, financialForm);
       setFinancialForm(res);
       showFeedback('success', 'Financial preferences and invoice settings saved!');
-    } catch {
-      showFeedback('success', 'Financial preferences and invoice settings saved!');
+    } catch (err: any) {
+      showFeedback('error', err?.message || 'Failed to save financial preferences.');
     } finally {
       setIsSaving(false);
     }
   };
 
+  const handleSaveGateway = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instituteId) return;
+    setIsSavingGateway(true);
+    try {
+      const updated = await settingsApi.updatePaymentGateway(instituteId, {
+        keyId: gatewayForm.keyId.trim(),
+        keySecret: gatewayForm.keySecret.trim(),
+        webhookSecret: gatewayForm.webhookSecret.trim() || undefined,
+      });
+      setGatewayStatus(updated);
+      setGatewayForm({ keyId: '', keySecret: '', webhookSecret: '' });
+      showFeedback('success', `Razorpay gateway keys encrypted and saved (${updated.mode} mode).`);
+    } catch (err: any) {
+      showFeedback('error', err?.message || 'Failed to save Razorpay gateway settings.');
+    } finally {
+      setIsSavingGateway(false);
+    }
+  };
+
   const handleSaveSecurity = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!instituteId) return;
     setIsSaving(true);
     try {
       const res = await settingsApi.updateSecurity(instituteId, securityForm);
       setSecurityForm(res);
       showFeedback('success', 'Security and notification preferences updated!');
-    } catch {
-      showFeedback('success', 'Security and notification preferences updated!');
+    } catch (err: any) {
+      showFeedback('error', err?.message || 'Failed to save security preferences.');
     } finally {
       setIsSaving(false);
     }
@@ -1277,6 +1316,69 @@ export default function InstituteSettingsPage() {
                 <Button variant="primary" type="submit" isLoading={isSaving} className="gap-2 px-6">
                   <Save size={15} />
                   <span>Save Financial Preferences</span>
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Razorpay Payment Gateway (AES-256 Encrypted)</h3>
+                  <p className="text-xs text-slate-500">
+                    Configure per-institute Razorpay credentials for student fee checkout and server webhooks.
+                  </p>
+                </div>
+                <Badge variant={gatewayStatus?.configured ? 'success' : 'warning'}>
+                  {gatewayStatus?.configured ? `${gatewayStatus.mode} (${gatewayStatus.keyIdPreview})` : 'Not Configured'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Razorpay Key ID</label>
+                  <input
+                    type="text"
+                    placeholder="rzp_test_... or rzp_live_..."
+                    value={gatewayForm.keyId}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, keyId: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Razorpay Key Secret (Write-Only)</label>
+                  <input
+                    type="password"
+                    placeholder="Enter Key Secret to update"
+                    value={gatewayForm.keySecret}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, keySecret: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Webhook Secret {gatewayStatus?.hasWebhookSecret ? '(Configured)' : '(Optional)'}
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Enter Webhook Secret"
+                    value={gatewayForm.webhookSecret}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, webhookSecret: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  isLoading={isSavingGateway}
+                  disabled={!gatewayForm.keyId || !gatewayForm.keySecret}
+                  onClick={handleSaveGateway}
+                  className="gap-2"
+                >
+                  <ShieldCheck size={15} />
+                  <span>Save Encrypted Razorpay Keys</span>
                 </Button>
               </div>
             </Card>

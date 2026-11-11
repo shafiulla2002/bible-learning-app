@@ -171,7 +171,7 @@ export class AttendanceService {
     batchId: string,
     dateStr: string,
     liveSessionId?: string,
-    teacherUser?: { role: string; userId: string; teacherProfileId?: string },
+    teacherUser?: { role: string; sub?: string; userId?: string; id?: string; teacherProfileId?: string },
   ) {
     const batch = await this.prisma.batch.findFirst({
       where: { id: batchId, instituteId },
@@ -183,7 +183,8 @@ export class AttendanceService {
 
     // Teacher authorization check
     if (teacherUser?.role === 'TEACHER') {
-      await this.verifyTeacherBatchAssignment(instituteId, batchId, teacherUser.userId);
+      const teacherUserId = teacherUser.sub || teacherUser.userId || teacherUser.id || '';
+      await this.verifyTeacherBatchAssignment(instituteId, batchId, teacherUserId);
     }
 
     const targetDate = new Date(dateStr);
@@ -488,10 +489,11 @@ export class AttendanceService {
     instituteId: string,
     batchId: string,
     query: AttendanceFilterQueryInput,
-    teacherUser?: { role: string; userId: string },
+    teacherUser?: { role: string; sub?: string; userId?: string; id?: string },
   ) {
     if (teacherUser?.role === 'TEACHER') {
-      await this.verifyTeacherBatchAssignment(instituteId, batchId, teacherUser.userId);
+      const teacherUserId = teacherUser.sub || teacherUser.userId || teacherUser.id || '';
+      await this.verifyTeacherBatchAssignment(instituteId, batchId, teacherUserId);
     }
 
     const whereClause: any = { instituteId, batchId };
@@ -567,15 +569,16 @@ export class AttendanceService {
     instituteId: string,
     studentProfileId: string,
     query: AttendanceFilterQueryInput,
-    callerUser?: { role: string; userId: string; studentProfileId?: string },
+    callerUser?: { role: string; sub?: string; userId?: string; id?: string; studentProfileId?: string },
   ) {
     // If caller is a STUDENT, strictly verify they are only requesting their own record
     if (callerUser?.role === 'STUDENT') {
+      const callerUserId = callerUser.sub || callerUser.userId || callerUser.id || '';
       const studentProfile = await this.prisma.studentProfile.findFirst({
         where: { id: studentProfileId, instituteId },
         include: { membership: true },
       });
-      if (!studentProfile || studentProfile.membership.userId !== callerUser.userId) {
+      if (!studentProfile || !callerUserId || studentProfile.membership.userId !== callerUserId) {
         throw new ForbiddenException('You are not authorized to view another student attendance record');
       }
     }
@@ -741,13 +744,25 @@ export class AttendanceService {
   async exportAttendanceReport(
     instituteId: string,
     query: AttendanceFilterQueryInput,
-    user?: { role: string; userId: string },
+    user?: { role: string; sub?: string; userId?: string; id?: string },
   ) {
+    const teacherUserId = user?.sub || user?.userId || user?.id || '';
     if (user?.role === 'TEACHER' && query.batchId) {
-      await this.verifyTeacherBatchAssignment(instituteId, query.batchId, user.userId);
+      await this.verifyTeacherBatchAssignment(instituteId, query.batchId, teacherUserId);
     }
 
     const whereClause: any = { instituteId };
+    if (user?.role === 'TEACHER' && !query.batchId) {
+      whereClause.batch = {
+        teachers: {
+          some: {
+            teacherProfile: {
+              membership: { userId: teacherUserId, status: 'ACTIVE' },
+            },
+          },
+        },
+      };
+    }
     if (query.batchId) whereClause.batchId = query.batchId;
     if (query.studentProfileId) whereClause.studentProfileId = query.studentProfileId;
     if (query.mode) whereClause.mode = query.mode;
@@ -812,6 +827,9 @@ export class AttendanceService {
     batchId: string,
     userId: string,
   ) {
+    if (!userId) {
+      throw new ForbiddenException('Authenticated teacher identity required');
+    }
     const teacherProfile = await this.prisma.teacherProfile.findFirst({
       where: {
         instituteId,
@@ -836,5 +854,74 @@ export class AttendanceService {
     }
 
     return teacherProfile;
+  }
+
+  async getRecords(instituteId: string, query: AttendanceFilterQueryInput) {
+    const whereClause: any = { instituteId };
+    if (query.batchId) whereClause.batchId = query.batchId;
+    if (query.mode) whereClause.mode = query.mode;
+    if (query.status) whereClause.status = query.status;
+    if (query.startDate || query.endDate) {
+      whereClause.date = {};
+      if (query.startDate) whereClause.date.gte = new Date(query.startDate);
+      if (query.endDate) whereClause.date.lte = new Date(query.endDate);
+    }
+
+    const page = query.page || 1;
+    const limit = query.limit || 25;
+    const skip = (page - 1) * limit;
+
+    const [records, total] = await Promise.all([
+      this.prisma.attendance.findMany({
+        where: whereClause,
+        include: {
+          studentProfile: {
+            include: {
+              membership: {
+                include: { user: { select: { fullName: true } } },
+              },
+            },
+          },
+          batch: {
+            include: {
+              course: { select: { title: true } },
+            },
+          },
+        },
+        orderBy: [{ date: 'desc' }, { markedAt: 'desc' }],
+        skip,
+        take: limit,
+      }),
+      this.prisma.attendance.count({ where: whereClause }),
+    ]);
+
+    return {
+      data: records.map((r) => ({
+        id: r.id,
+        date: r.date.toISOString().slice(0, 10),
+        status: r.status,
+        mode: r.mode,
+        remarks: r.remarks || undefined,
+        markedAt: r.markedAt.toISOString(),
+        student: {
+          id: r.studentProfileId,
+          admissionNo: r.studentProfile.admissionNo,
+          fullName: r.studentProfile.membership?.user?.fullName || 'Student',
+        },
+        batch: {
+          id: r.batchId,
+          name: r.batch.name,
+        },
+        course: {
+          title: r.batch.course?.title || 'Course',
+        },
+      })),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
   }
 }

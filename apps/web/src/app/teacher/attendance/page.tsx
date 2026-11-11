@@ -19,6 +19,7 @@ import {
   Info,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
+import { apiFetchResponse } from '@/lib/api';
 
 interface TeacherBatchItem {
   id: string;
@@ -85,9 +86,7 @@ export default function TeacherAttendancePage() {
     setIsLoadingBatches(true);
     setError(null);
     try {
-      const res = await fetch('/api/teachers/attendance/batches', {
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetchResponse('/teachers/attendance/batches');
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.error || errJson.message || `Failed to load batches (${res.status})`);
@@ -114,9 +113,7 @@ export default function TeacherAttendancePage() {
     setError(null);
     setSuccessMessage(null);
     try {
-      const res = await fetch(`/api/teachers/attendance/roster?batchId=${batchId}&date=${date}`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetchResponse(`/teachers/attendance/roster?batchId=${batchId}&date=${date}`);
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.error || errJson.message || `Failed to load roster (${res.status})`);
@@ -185,9 +182,8 @@ export default function TeacherAttendancePage() {
         })),
       };
 
-      const res = await fetch('/api/teachers/attendance/mark', {
+      const res = await apiFetchResponse('/teachers/attendance/mark', {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(payload),
       });
 

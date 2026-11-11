@@ -27,6 +27,7 @@ import {
   PlayCircle,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
+import { apiFetchResponse } from '@/lib/api';
 import { useTeacherLiveClasses, TeacherLiveClassItem } from '@/lib/use-teacher-live-classes';
 import { MediaPlayerModal } from '@/components/shared/MediaPlayerModal';
 
@@ -1082,11 +1083,10 @@ export default function TeacherLiveClassesPage() {
           canAttachUrl={true}
           onSaveVideoUrl={async (newUrl) => {
             if (!activeRecordingSession) return;
-            const res = await fetch(
-              `/api/teachers/live-classes/${activeRecordingSession.id}`,
+            const res = await apiFetchResponse(
+              `/teachers/live-classes/${activeRecordingSession.id}`,
               {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ recordingUrl: newUrl }),
               }
             );

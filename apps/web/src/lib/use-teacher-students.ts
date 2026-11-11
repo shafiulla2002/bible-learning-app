@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiFetchResponse } from '@/lib/api';
 
 export interface TeacherStudentItem {
   id: string;
@@ -62,20 +63,6 @@ export function useTeacherStudents(options: UseTeacherStudentsOptions = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-
-      if (typeof window !== 'undefined') {
-        const storedToken =
-          localStorage.getItem('token') ||
-          localStorage.getItem('auth_token') ||
-          localStorage.getItem('access_token');
-        if (storedToken) {
-          headers['Authorization'] = `Bearer ${storedToken}`;
-        }
-      }
-
       const params = new URLSearchParams();
       if (search.trim()) params.set('search', search.trim());
       if (batchId && batchId !== 'ALL') params.set('batchId', batchId);
@@ -83,7 +70,7 @@ export function useTeacherStudents(options: UseTeacherStudentsOptions = {}) {
       params.set('page', page.toString());
       params.set('limit', limit.toString());
 
-      const res = await fetch(`/api/teachers/students?${params.toString()}`, { headers });
+      const res = await apiFetchResponse(`/teachers/students?${params.toString()}`);
 
       if (!res.ok) {
         if (res.status === 401) {

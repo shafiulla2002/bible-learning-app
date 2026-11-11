@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { apiFetchResponse } from '@/lib/api';
 import {
   FileText,
   Clock,
@@ -53,47 +54,8 @@ interface AssignmentsResponse {
   courses: Array<{ id: string; title: string }>;
 }
 
-const fallbackAssignments: AssignmentItem[] = [
-  {
-    id: 'demo-assign-1',
-    title: 'Theological Essay: Covenant & Dispensational Frameworks',
-    instructions: 'Submit a 1,500-word critical evaluation comparing Covenant Theology and Progressive Dispensationalism.',
-    courseId: 'c1',
-    courseTitle: 'Building Biblical Theology',
-    batchId: 'b1',
-    batchName: 'Batch 2026-A Diploma',
-    dueAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-    maxMarks: 100,
-    status: 'PENDING',
-    isOverdue: false,
-    submission: null,
-  },
-  {
-    id: 'demo-assign-2',
-    title: 'Pauline Exegesis: Romans 8 Exegetical Paper',
-    instructions: 'Verse-by-verse structural analysis of Romans 8:28-39 with practical pastoral application points.',
-    courseId: 'c1',
-    courseTitle: 'Building Biblical Theology',
-    batchId: 'b1',
-    batchName: 'Batch 2026-A Diploma',
-    dueAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    maxMarks: 100,
-    status: 'GRADED',
-    isOverdue: false,
-    submission: {
-      id: 'sub-demo-1',
-      submittedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      answerText: 'Submitted paper on Pauline structure and theological analysis of glorification.',
-      fileUrl: 'https://example.com/romans8-paper.pdf',
-      marksAwarded: 94,
-      feedback: 'Excellent historical context and textual grounding throughout your exegesis.',
-      status: 'GRADED',
-    },
-  },
-];
-
 export default function StudentAssignmentsPage() {
-  const { student, profile, institute } = useStudentAuth();
+  const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const [data, setData] = useState<AssignmentsResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -106,36 +68,25 @@ export default function StudentAssignmentsPage() {
     async function fetchAssignments() {
       try {
         setIsLoading(true);
-        const headers: Record<string, string> = {};
-        if (typeof window !== 'undefined') {
-          const token =
-            localStorage.getItem('token') ||
-            localStorage.getItem('access_token') ||
-            localStorage.getItem('auth_token');
-          if (token) headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        if (profile?.studentProfileId) {
-          headers['x-dev-user-id'] = student?.id || '';
-          headers['x-dev-role'] = 'STUDENT';
-          headers['x-dev-institute-id'] = institute?.id || '';
-        }
-
         const params = new URLSearchParams();
         if (selectedCourse !== 'ALL') params.append('courseId', selectedCourse);
         if (searchQuery.trim()) params.append('q', searchQuery.trim());
         if (activeTab !== 'ALL') params.append('status', activeTab);
 
-        const res = await fetch(`/api/students/assignments?${params.toString()}`, { headers });
+        const res = await apiFetchResponse(`/students/assignments?${params.toString()}`);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
+        }
         if (!res.ok) throw new Error('Failed to load assignments');
         const json = await res.json();
         setData(json);
       } catch (err: any) {
-        console.warn('Assignments fallback notice:', err.message);
+        console.error('Failed to load assignments:', err?.message || err);
         setData({
-          assignments: fallbackAssignments,
-          summary: { total: 2, pending: 1, submitted: 0, graded: 1, overdue: 0 },
-          courses: [{ id: 'c1', title: 'Building Biblical Theology' }],
+          assignments: [],
+          summary: { total: 0, pending: 0, submitted: 0, graded: 0, overdue: 0 },
+          courses: [],
         });
       } finally {
         setIsLoading(false);

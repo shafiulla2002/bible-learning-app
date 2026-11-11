@@ -74,10 +74,9 @@ export interface BatchItem {
 export default function BatchesPage() {
   const [instituteId, setInstituteId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('current_institute_id');
-      if (stored) return stored;
+      return localStorage.getItem('current_institute_id') || '';
     }
-    return 'fef8c1d5-53d5-45ac-9f94-bb0be5cb39d5';
+    return '';
   });
 
   // Database State (Strict Zero-Mock: empty by default)
