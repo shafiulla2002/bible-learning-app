@@ -166,21 +166,28 @@ export async function GET(
 
     // Attached resources
     const resourceRows = await queryDb(
-      `SELECT lr.id, lr.downloadable, ma.kind, ma."mimeType", ma."sizeBytes"
+      `SELECT lr.id, lr.downloadable, ma.kind, ma."mimeType", ma."sizeBytes", ma."storageKey", ma."videoStreamId"
        FROM "LessonResource" lr
        JOIN "MediaAsset" ma ON ma.id = lr."mediaAssetId"
        WHERE lr."lessonId" = $1 AND lr."instituteId" = $2`,
       [lessonId, resolvedInstituteId]
     );
 
-    const resources = resourceRows.map((r: any) => ({
-      id: r.id,
-      title: `${r.kind || 'Resource'} Document`,
-      kind: r.kind || 'FILE',
-      mimeType: r.mimeType || 'application/pdf',
-      sizeBytes: Number(r.sizeBytes || 0),
-      downloadable: r.downloadable,
-    }));
+    const resources = resourceRows.map((r: any) => {
+      const fileName = r.storageKey
+        ? String(r.storageKey).split('/').pop() || `${r.kind || 'Resource'} Document`
+        : `${r.kind || 'Resource'} Document`;
+      return {
+        id: r.id,
+        title: fileName,
+        storageKey: r.storageKey || '',
+        videoStreamId: r.videoStreamId || null,
+        kind: r.kind || 'FILE',
+        mimeType: r.mimeType || 'application/pdf',
+        sizeBytes: Number(r.sizeBytes || 0),
+        downloadable: r.downloadable,
+      };
+    });
 
     return NextResponse.json({
       lesson: {
