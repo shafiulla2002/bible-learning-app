@@ -16,6 +16,7 @@ import {
   CourseDto,
   BatchDto,
   resolveVerifiedAdminContext,
+  resolveActiveInstituteId,
   getCached,
   setCached,
 } from '@/lib/api';
@@ -135,6 +136,7 @@ export default function StudentsDirectoryPage() {
   // Add Student Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [newStudent, setNewStudent] = useState({
     avatarUrl: '',
@@ -142,7 +144,7 @@ export default function StudentsDirectoryPage() {
     phoneNumber: '+91 ',
     email: '',
     dateOfBirth: '',
-    gender: 'Male',
+    gender: 'MALE',
     church: '',
     preferredLanguage: 'English',
     addressStreet: '',
@@ -338,41 +340,81 @@ export default function StudentsDirectoryPage() {
   // Handle Add Student Submit
   const handleAddStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudent.fullName || !newStudent.phoneNumber) {
+    if (!newStudent.fullName?.trim() || !newStudent.phoneNumber?.trim()) {
+      setFormError('Please enter full name and phone number');
       showToast('Please enter full name and phone number');
       return;
     }
 
+    let activeId = instituteId;
+    if (!activeId && typeof window !== 'undefined') {
+      activeId = localStorage.getItem('current_institute_id') || '';
+    }
+    if (!activeId) {
+      try {
+        activeId = await resolveActiveInstituteId();
+        if (activeId) setInstituteId(activeId);
+      } catch {}
+    }
+    if (!activeId) {
+      setFormError('Active institute session required. Please refresh or sign in again.');
+      return;
+    }
+
+    let cleanPhone = (newStudent.phoneNumber || '').trim().replace(/[\s\-()]/g, '');
+    if (cleanPhone.length === 10 && !cleanPhone.startsWith('+')) {
+      cleanPhone = `+91${cleanPhone}`;
+    } else if (cleanPhone.startsWith('91') && cleanPhone.length === 12 && !cleanPhone.startsWith('+')) {
+      cleanPhone = `+${cleanPhone}`;
+    }
+
+    const genderVal = (newStudent.gender || 'MALE').toUpperCase();
+
+    const addressVal =
+      newStudent.addressStreet?.trim() || newStudent.addressCity?.trim()
+        ? {
+            street: newStudent.addressStreet?.trim() || undefined,
+            city: newStudent.addressCity?.trim() || undefined,
+            country: 'India',
+          }
+        : undefined;
+
+    const guardianVal =
+      newStudent.guardianName?.trim() ||
+      newStudent.guardianPhone?.trim() ||
+      newStudent.guardianEmail?.trim()
+        ? {
+            name: newStudent.guardianName?.trim() || undefined,
+            phone: newStudent.guardianPhone?.trim() || undefined,
+            email: newStudent.guardianEmail?.trim() || undefined,
+          }
+        : undefined;
+
     setIsSubmitting(true);
+    setFormError(null);
     try {
-      const created = await studentApi.createStudent(instituteId, {
-        fullName: newStudent.fullName,
-        phoneNumber: newStudent.phoneNumber,
-        avatarUrl: newStudent.avatarUrl || undefined,
-        email: newStudent.email || undefined,
-        dateOfBirth: newStudent.dateOfBirth || undefined,
-        gender: newStudent.gender,
-        church: newStudent.church || undefined,
-        preferredLanguage: newStudent.preferredLanguage,
-        address: {
-          street: newStudent.addressStreet || undefined,
-          city: newStudent.addressCity || undefined,
-        },
-        guardian: {
-          name: newStudent.guardianName || undefined,
-          phone: newStudent.guardianPhone || undefined,
-          email: newStudent.guardianEmail || undefined,
-        },
+      const created = await studentApi.createStudent(activeId, {
+        fullName: newStudent.fullName.trim(),
+        phoneNumber: cleanPhone,
+        avatarUrl: newStudent.avatarUrl?.trim() || undefined,
+        email: newStudent.email?.trim() || undefined,
+        dateOfBirth: newStudent.dateOfBirth?.trim() || undefined,
+        gender: genderVal as any,
+        church: newStudent.church?.trim() || undefined,
+        preferredLanguage: newStudent.preferredLanguage || 'English',
+        address: addressVal,
+        guardian: guardianVal,
         courseId: newStudent.courseId || undefined,
         batchId: newStudent.batchId || undefined,
         admissionDate: newStudent.admissionDate || undefined,
-        username: newStudent.username || undefined,
+        username: newStudent.username?.trim() || undefined,
         password: newStudent.password || undefined,
-        status: newStudent.status,
+        status: newStudent.status || 'ACTIVE',
       });
 
-      showToast(`Student ${created.fullName} registered successfully with admission ID ${created.admissionNo}!`);
+      showToast(`Student ${created?.fullName || newStudent.fullName} registered successfully!`);
       setIsAddModalOpen(false);
+      setFormError(null);
       setPhotoPreview(null);
       setNewStudent({
         avatarUrl: '',
@@ -380,7 +422,7 @@ export default function StudentsDirectoryPage() {
         phoneNumber: '+91 ',
         email: '',
         dateOfBirth: '',
-        gender: 'Male',
+        gender: 'MALE',
         church: '',
         preferredLanguage: 'English',
         addressStreet: '',
@@ -398,7 +440,10 @@ export default function StudentsDirectoryPage() {
       });
       fetchStudents();
     } catch (err: any) {
-      showToast(`Registration failed: ${err?.message || 'Server error'}`);
+      console.error('Student registration error:', err);
+      const errMsg = err?.message || 'Server validation error';
+      setFormError(errMsg);
+      showToast(`Registration failed: ${errMsg}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -1087,6 +1132,13 @@ export default function StudentsDirectoryPage() {
               </div>
 
               <form onSubmit={handleAddStudentSubmit} className="space-y-5">
+                {formError && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
+                    <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                    <span className="font-medium">{formError}</span>
+                  </div>
+                )}
+
                 {/* Student Photo Upload */}
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 mb-4">
                   <label className="block text-xs font-bold text-slate-800 mb-2">
@@ -1213,9 +1265,9 @@ export default function StudentsDirectoryPage() {
                         onChange={(e) => setNewStudent({ ...newStudent, gender: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
                       >
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
+                        <option value="MALE">Male</option>
+                        <option value="FEMALE">Female</option>
+                        <option value="OTHER">Other</option>
                       </select>
                     </div>
 

@@ -42,10 +42,17 @@ export const CreateStudentAdmissionSchema = z.object({
   fullName: z.string().min(2, 'Full name is required'),
   phoneNumber: z
     .string()
-    .min(10, 'Phone number must be at least 10 digits')
-    .regex(/^\+?[1-9]\d{7,14}$/, 'Invalid phone number format (e.g. +919876543210)'),
+    .transform((val) => val.trim().replace(/[\s\-()]/g, ''))
+    .refine((val) => /^\+?[1-9]\d{7,14}$/.test(val), {
+      message: 'Invalid phone number format (e.g. +919876543210)',
+    }),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
-  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
+  gender: z
+    .preprocess(
+      (val) => (typeof val === 'string' ? val.toUpperCase() : val),
+      z.enum(['MALE', 'FEMALE', 'OTHER']),
+    )
+    .optional(),
   dateOfBirth: z.string().optional(), // YYYY-MM-DD
   admissionDate: z.string().optional(), // YYYY-MM-DD
   preferredLanguage: z.string().default('English'),
