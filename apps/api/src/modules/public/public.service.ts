@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   PublicCourseCatalogQuery,
@@ -831,50 +832,39 @@ export class PublicService {
 
     // Direct checkout when total === 0 or when Razorpay credentials are not configured (demo/sandbox checkout)
     if (total === 0 || !rzpConfigured) {
-      const completedOrder = await this.prisma.$transaction(async (tx) => {
-        const order = await tx.order.create({
-          data: {
-            instituteId,
-            studentProfileId: studentProfile.id,
-            orderNumber,
-            subtotal,
-            discount,
-            total,
-            status: OrderStatus.PAID,
-            ...(migrationsApplied
-              ? {
-                  admissionId: input.admissionId || null,
-                  signatureVerified: true,
-                }
-              : {}),
-            items: {
-              create: courses.map((c) => ({
-                instituteId,
-                courseId: c.id,
-                titleSnapshot: c.title,
-                price: c.pricing === 'PAID' ? (c.salePrice ?? c.price) : 0,
-              })),
-            },
-            receipt: {
-              create: {
-                instituteId,
-                receiptNumber: `REC-${Date.now()}`,
-              },
-            },
-            ...(total > 0
-              ? {
-                  payments: {
-                    create: {
-                      instituteId,
-                      amount: total,
-                      status: PaymentStatus.CAPTURED,
-                      method: 'DEMO_CHECKOUT',
-                    },
-                  },
-                }
-              : {}),
-          },
-        });
+      const orderId = crypto.randomUUID();
+      const receiptId = crypto.randomUUID();
+      const receiptNumber = `REC-${Date.now()}`;
+      const now = new Date();
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          INSERT INTO "Order" ("id", "instituteId", "studentProfileId", "orderNumber", "subtotal", "discount", "total", "status", "createdAt", "updatedAt")
+          VALUES (${orderId}, ${instituteId}, ${studentProfile.id}, ${orderNumber}, ${subtotal}, ${discount}, ${total}, 'PAID'::"OrderStatus", ${now}, ${now})
+        `;
+
+        for (const c of courses) {
+          const itemId = crypto.randomUUID();
+          const itemPrice = c.pricing === 'PAID' ? (c.salePrice ?? c.price) : 0;
+          await tx.$executeRaw`
+            INSERT INTO "OrderItem" ("id", "instituteId", "orderId", "courseId", "titleSnapshot", "price")
+            VALUES (${itemId}, ${instituteId}, ${orderId}, ${c.id}, ${c.title}, ${itemPrice})
+          `;
+        }
+
+        await tx.$executeRaw`
+          INSERT INTO "Receipt" ("id", "instituteId", "orderId", "receiptNumber", "issuedAt")
+          VALUES (${receiptId}, ${instituteId}, ${orderId}, ${receiptNumber}, ${now})
+        `;
+
+        if (total > 0) {
+          const paymentId = crypto.randomUUID();
+          const mockProviderPaymentId = `mock_pay_${Date.now()}`;
+          await tx.$executeRaw`
+            INSERT INTO "Payment" ("id", "instituteId", "orderId", "amount", "providerPaymentId", "status", "method", "createdAt", "updatedAt")
+            VALUES (${paymentId}, ${instituteId}, ${orderId}, ${total}, ${mockProviderPaymentId}, 'CAPTURED'::"PaymentStatus", 'MOCK_GATEWAY', ${now}, ${now})
+          `;
+        }
 
         if (couponRecord) {
           await tx.coupon.update({
@@ -882,7 +872,7 @@ export class PublicService {
             data: { usedCount: { increment: 1 } },
           });
           await tx.couponRedemption.create({
-            data: { couponId: couponRecord.id, orderId: order.id },
+            data: { couponId: couponRecord.id, orderId },
           });
         }
 
@@ -914,16 +904,22 @@ export class PublicService {
             },
           });
         }
-        return order;
       });
 
       return {
-        orderId: completedOrder.id,
-        orderNumber: completedOrder.orderNumber,
+        orderId,
+        orderNumber,
+        receiptNumber,
         amountPaise: total,
         currency: institute.currency || 'INR',
-        status: completedOrder.status,
+        status: OrderStatus.PAID,
         paymentRequired: false,
+        gatewayMode: !rzpConfigured && total > 0 ? 'MOCK' : 'FREE',
+        mockPayment: !rzpConfigured && total > 0,
+        mockPaymentMessage:
+          !rzpConfigured && total > 0
+            ? 'Razorpay keys are not added yet — Mock Payment completed. No amount will be debited from your account.'
+            : undefined,
       };
     }
 
@@ -940,45 +936,40 @@ export class PublicService {
       },
     });
 
-    const createdOrder = await this.prisma.order.create({
-      data: {
-        instituteId,
-        studentProfileId: studentProfile.id,
-        orderNumber,
-        subtotal,
-        discount,
-        total,
-        status: OrderStatus.AWAITING_PAYMENT,
-        providerOrderId: rzpOrder.id,
-        ...(migrationsApplied ? { admissionId: input.admissionId || null } : {}),
-        items: {
-          create: courses.map((c) => ({
-            instituteId,
-            courseId: c.id,
-            titleSnapshot: c.title,
-            price: (c.salePrice ?? c.price) + (c.registrationFee ?? 0),
-          })),
-        },
-        payments: {
-          create: {
-            instituteId,
-            amount: total,
-            ...(migrationsApplied ? { providerOrderId: rzpOrder.id } : {}),
-            status: PaymentStatus.CREATED,
-          },
-        },
-      },
+    const createdOrderId = crypto.randomUUID();
+    const createdPaymentId = crypto.randomUUID();
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO "Order" ("id", "instituteId", "studentProfileId", "orderNumber", "subtotal", "discount", "total", "status", "providerOrderId", "createdAt", "updatedAt")
+        VALUES (${createdOrderId}, ${instituteId}, ${studentProfile.id}, ${orderNumber}, ${subtotal}, ${discount}, ${total}, 'AWAITING_PAYMENT'::"OrderStatus", ${rzpOrder.id}, ${now}, ${now})
+      `;
+
+      for (const c of courses) {
+        const itemId = crypto.randomUUID();
+        const itemPrice = c.pricing === 'PAID' ? (c.salePrice ?? c.price) : 0;
+        await tx.$executeRaw`
+          INSERT INTO "OrderItem" ("id", "instituteId", "orderId", "courseId", "titleSnapshot", "price")
+          VALUES (${itemId}, ${instituteId}, ${createdOrderId}, ${c.id}, ${c.title}, ${itemPrice})
+        `;
+      }
+
+      await tx.$executeRaw`
+        INSERT INTO "Payment" ("id", "instituteId", "orderId", "amount", "status", "createdAt", "updatedAt")
+        VALUES (${createdPaymentId}, ${instituteId}, ${createdOrderId}, ${total}, 'CREATED'::"PaymentStatus", ${now}, ${now})
+      `;
     });
 
     return {
-      orderId: createdOrder.id,
-      orderNumber: createdOrder.orderNumber,
+      orderId: createdOrderId,
+      orderNumber,
       providerOrderId: rzpOrder.id,
       razorpayKeyId: rzpConfig.keyId,
       gatewayMode: rzpConfig.mode,
       amountPaise: total,
       currency: institute.currency || 'INR',
-      status: createdOrder.status,
+      status: OrderStatus.AWAITING_PAYMENT,
       paymentRequired: true,
     };
   }
@@ -986,10 +977,16 @@ export class PublicService {
   async verifyOrderPayment(input: VerifyRazorpayPaymentInput) {
     const order = await this.prisma.order.findFirst({
       where: { providerOrderId: input.razorpayOrderId },
-      include: {
-        items: { include: { course: true } },
-        institute: { include: { settings: true } },
-        payments: true,
+      select: {
+        id: true,
+        instituteId: true,
+        studentProfileId: true,
+        orderNumber: true,
+        total: true,
+        status: true,
+        items: { select: { id: true, courseId: true } },
+        institute: { select: { id: true, settings: { select: { razorpayKeyEncrypted: true } } } },
+        payments: { select: { id: true, status: true } },
       },
     });
     if (!order) {
@@ -1013,7 +1010,10 @@ export class PublicService {
     }
 
     if (order.status === OrderStatus.PAID) {
-      const existingReceipt = await this.prisma.receipt.findUnique({ where: { orderId: order.id } });
+      const existingReceipt = await this.prisma.receipt.findUnique({
+        where: { orderId: order.id },
+        select: { receiptNumber: true },
+      });
       return {
         verified: true,
         alreadyProcessed: true,
@@ -1025,52 +1025,40 @@ export class PublicService {
     }
 
     const receiptNumber = `REC-${Date.now()}`;
+    const receiptId = crypto.randomUUID();
+    const now = new Date();
     await this.prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          status: OrderStatus.PAID,
-          signatureVerified: true,
-        },
-      });
+      await tx.$executeRaw`
+        UPDATE "Order"
+        SET "status" = 'PAID'::"OrderStatus", "updatedAt" = ${now}
+        WHERE "id" = ${order.id}
+      `;
 
       const pendingPayment = order.payments?.[0];
       if (pendingPayment) {
-        await tx.payment.update({
-          where: { id: pendingPayment.id },
-          data: {
-            providerPaymentId: input.razorpayPaymentId,
-            providerSignature: input.razorpaySignature,
-            signatureVerified: true,
-            status: PaymentStatus.CAPTURED,
-            method: input.method || 'RAZORPAY',
-          },
-        });
+        const payMethod = input.method || 'RAZORPAY';
+        await tx.$executeRaw`
+          UPDATE "Payment"
+          SET "providerPaymentId" = ${input.razorpayPaymentId},
+              "status" = 'CAPTURED'::"PaymentStatus",
+              "method" = ${payMethod},
+              "updatedAt" = ${now}
+          WHERE "id" = ${pendingPayment.id}
+        `;
       } else {
-        await tx.payment.create({
-          data: {
-            instituteId: order.instituteId,
-            orderId: order.id,
-            amount: order.total,
-            providerOrderId: input.razorpayOrderId,
-            providerPaymentId: input.razorpayPaymentId,
-            providerSignature: input.razorpaySignature,
-            signatureVerified: true,
-            status: PaymentStatus.CAPTURED,
-            method: input.method || 'RAZORPAY',
-          },
-        });
+        const newPayId = crypto.randomUUID();
+        const payMethod = input.method || 'RAZORPAY';
+        await tx.$executeRaw`
+          INSERT INTO "Payment" ("id", "instituteId", "orderId", "amount", "providerPaymentId", "status", "method", "createdAt", "updatedAt")
+          VALUES (${newPayId}, ${order.instituteId}, ${order.id}, ${order.total}, ${input.razorpayPaymentId}, 'CAPTURED'::"PaymentStatus", ${payMethod}, ${now}, ${now})
+        `;
       }
 
-      await tx.receipt.upsert({
-        where: { orderId: order.id },
-        update: {},
-        create: {
-          instituteId: order.instituteId,
-          orderId: order.id,
-          receiptNumber,
-        },
-      });
+      await tx.$executeRaw`
+        INSERT INTO "Receipt" ("id", "instituteId", "orderId", "receiptNumber", "issuedAt")
+        VALUES (${receiptId}, ${order.instituteId}, ${order.id}, ${receiptNumber}, ${now})
+        ON CONFLICT ("orderId") DO NOTHING
+      `;
 
       for (const item of order.items) {
         await tx.enrolment.upsert({
@@ -1080,7 +1068,10 @@ export class PublicService {
               courseId: item.courseId,
             },
           },
-          update: { status: EnrolmentStatus.ACTIVE },
+          update: {
+            source: EnrolmentSource.PURCHASE,
+            status: EnrolmentStatus.ACTIVE,
+          },
           create: {
             instituteId: order.instituteId,
             studentProfileId: order.studentProfileId,
