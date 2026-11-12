@@ -1382,6 +1382,7 @@ export class StudentsService {
         completedLessons,
         progressPct: e.progressPct || 0,
         status: e.status,
+        source: e.source,
         batchName: e.batch?.name || null,
         enrolledAt: e.createdAt,
       };
