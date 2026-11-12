@@ -18,9 +18,15 @@ import {
   VerifyRazorpayPaymentSchema,
 } from '@bible-lms/shared';
 
+import { getRequiredJwtSecret } from '../../core/auth/jwt-secret.util';
+import { JwtService } from '@nestjs/jwt';
+
 @Controller('public')
 export class PublicController {
-  constructor(private readonly publicService: PublicService) {}
+  constructor(
+    private readonly publicService: PublicService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   @Get('institutes')
   async listInstitutes() {
@@ -94,7 +100,18 @@ export class PublicController {
   @HttpCode(HttpStatus.CREATED)
   async createOrder(@Body() body: any, @Req() req: any) {
     const validated = PublicCreateOrderSchema.parse(body);
-    return this.publicService.createOrder(validated, req?.user?.sub);
+    let authenticatedUserId: string | undefined = req?.user?.sub;
+    if (!authenticatedUserId && req.headers?.authorization) {
+      try {
+        const token = req.headers.authorization.replace(/^Bearer\s+/i, '').trim();
+        const secret = getRequiredJwtSecret();
+        const payload: any = this.jwtService.verify(token, { secret });
+        if (payload?.sub) {
+          authenticatedUserId = payload.sub;
+        }
+      } catch (e) {}
+    }
+    return this.publicService.createOrder(validated, authenticatedUserId);
   }
 
   @Post('payments/verify')

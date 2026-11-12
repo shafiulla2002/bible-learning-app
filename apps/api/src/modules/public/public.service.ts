@@ -906,6 +906,25 @@ export class PublicService {
         }
       });
 
+      const studentUserRecord = await this.prisma.user.findFirst({
+        where: { memberships: { some: { studentProfile: { id: studentProfile.id } } } },
+        select: { id: true, fullName: true, phoneE164: true, email: true },
+      });
+
+      let studentAccessToken: string | undefined;
+      if (studentUserRecord) {
+        studentAccessToken = this.jwtService.sign(
+          {
+            sub: studentUserRecord.id,
+            phone: studentUserRecord.phoneE164,
+            role: Role.STUDENT,
+            instituteId,
+            permissions: DEFAULT_ROLE_PERMISSIONS[Role.STUDENT] || [],
+          },
+          { expiresIn: '30d' },
+        );
+      }
+
       return {
         orderId,
         orderNumber,
@@ -920,6 +939,18 @@ export class PublicService {
           !rzpConfigured && total > 0
             ? 'Razorpay keys are not added yet — Mock Payment completed. No amount will be debited from your account.'
             : undefined,
+        accessToken: studentAccessToken,
+        student: studentUserRecord
+          ? {
+              id: studentUserRecord.id,
+              studentId: studentProfile.admissionNo || studentUserRecord.id.slice(0, 8).toUpperCase(),
+              fullName: studentUserRecord.fullName,
+              email: studentUserRecord.email || '',
+              phone: studentUserRecord.phoneE164,
+              role: 'Student',
+              status: studentProfile.status || 'ACTIVE',
+            }
+          : undefined,
       };
     }
 
