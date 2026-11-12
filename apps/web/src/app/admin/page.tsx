@@ -434,7 +434,21 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    const activeId = instituteId || (typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : null);
+    let activeId = instituteId || (typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : null);
+    if (!activeId) {
+      try {
+        const ctx = await resolveVerifiedAdminContext();
+        if (ctx?.instituteId) {
+          activeId = ctx.instituteId;
+          setInstituteId(ctx.instituteId);
+          if (ctx.displayName) setInstituteDisplayName(ctx.displayName);
+          if (ctx.user?.fullName) setViewerName(ctx.user.fullName);
+        }
+      } catch {
+        // Handled below if activeId remains empty
+      }
+    }
+
     if (!activeId) {
       setOverview(null);
       setIsLiveConnected(false);
@@ -448,7 +462,13 @@ export default function AdminDashboardPage() {
 
     try {
       const presetParam = dateFilter === 'ALL' ? undefined : (dateFilter as DateRangePreset);
-      const data = await dashboardApi.getOverview(activeId, { preset: presetParam });
+      let data: DashboardOverviewDto;
+      try {
+        data = await dashboardApi.getOverview(activeId, { preset: presetParam });
+      } catch {
+        await new Promise((r) => setTimeout(r, 700));
+        data = await dashboardApi.getOverview(activeId, { preset: presetParam });
+      }
       setOverview(data);
       setIsLiveConnected(true);
       if (data.institute?.displayName) setInstituteDisplayName(data.institute.displayName);

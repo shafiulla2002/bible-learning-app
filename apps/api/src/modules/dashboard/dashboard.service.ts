@@ -725,6 +725,8 @@ export class DashboardService {
     filter?: DashboardFilterQueryDto,
     viewer?: { userId: string; fullName: string; role: string },
   ): Promise<DashboardOverviewDto> {
+    await this.prisma.reapIdleConnections();
+
     const institute = await this.prisma.institute.findUnique({
       where: { id: instituteId },
       include: { settings: true },

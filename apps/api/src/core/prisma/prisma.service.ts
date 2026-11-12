@@ -4,18 +4,20 @@ import { PrismaClient } from '@prisma/client';
 function withSingleConnectionPool(rawUrl: string): string {
   try {
     const parsed = new URL(rawUrl);
-    parsed.searchParams.set('connection_limit', '5');
+    parsed.searchParams.set('connection_limit', '2');
     parsed.searchParams.set('pool_timeout', '60');
+    parsed.searchParams.set('connect_timeout', '15');
     return parsed.toString();
   } catch {
     const sep = rawUrl.includes('?') ? '&' : '?';
-    return `${rawUrl}${sep}connection_limit=5&pool_timeout=60`;
+    return `${rawUrl}${sep}connection_limit=2&pool_timeout=60&connect_timeout=15`;
   }
 }
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private static initPromise: Promise<void> | null = null;
+  private static lastReapAt = 0;
 
   constructor() {
     const existingSingleton = (globalThis as any).__bibleLmsPrismaService as
@@ -24,7 +26,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
     const omitUnmigratedColumns = process.env.PRISMA_MIGRATIONS_APPLIED !== 'true';
     const defaultCloudDbUrl =
-      'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=5&pool_timeout=60';
+      'postgresql://bible_app:bible%23123@8.231.106.67:5432/bible_lms_dev?sslmode=require&connection_limit=2&pool_timeout=60&connect_timeout=15';
     const rawEnvUrl = process.env.DATABASE_URL?.trim();
     const effectiveDbUrl = withSingleConnectionPool(rawEnvUrl ? rawEnvUrl : defaultCloudDbUrl);
 
@@ -93,12 +95,34 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     (globalThis as any).__bibleLmsPrismaService = this;
   }
 
+  async reapIdleConnections(force = false) {
+    const now = Date.now();
+    if (!force && now - PrismaService.lastReapAt < 5000) {
+      return;
+    }
+    PrismaService.lastReapAt = now;
+    try {
+      await this.$queryRawUnsafe(`
+        SELECT pg_terminate_backend(pid)
+        FROM pg_stat_activity
+        WHERE usename = current_user
+          AND state = 'idle'
+          AND state_change < now() - interval '12 seconds'
+          AND pid <> pg_backend_pid()
+      `);
+    } catch {
+      // Ignore non-fatal connection cleanup warnings
+    }
+  }
+
   async onModuleInit() {
     if (!PrismaService.initPromise) {
-      PrismaService.initPromise = this.$connect().catch((err: any) => {
-        PrismaService.initPromise = null;
-        console.warn('PrismaService initial connect warning (will retry on query):', err?.message);
-      });
+      PrismaService.initPromise = this.$connect()
+        .then(() => this.reapIdleConnections(true))
+        .catch((err: any) => {
+          PrismaService.initPromise = null;
+          console.warn('PrismaService initial connect warning (will retry on query):', err?.message);
+        });
     }
     await PrismaService.initPromise;
   }
