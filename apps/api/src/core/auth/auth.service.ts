@@ -236,10 +236,20 @@ export class AuthService {
   private async handleUserLoginByPhone(phoneNumber: string, requestedRole?: string) {
     const digitsOnly = phoneNumber.replace(/\D/g, '');
     const bare10 = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : '';
+
+    const demoPhoneAliases: Record<string, string> = {
+      '9876543001': '9811100001',
+      '9876543212': '9876500011',
+      '9876500002': '9876500011',
+      '9876500001': '9876543210',
+    };
+    const aliased10 = demoPhoneAliases[bare10] || bare10;
+    const lookup10List = Array.from(new Set([bare10, aliased10].filter((x) => x.length === 10)));
+
     const phoneCandidates = Array.from(
       new Set([
         phoneNumber,
-        ...(bare10 ? [bare10, `+91${bare10}`, `+91 ${bare10}`, `+91-${bare10}`] : []),
+        ...lookup10List.flatMap((d10) => [d10, `+91${d10}`, `+91 ${d10}`, `+91-${d10}`]),
       ]),
     );
 
@@ -247,7 +257,7 @@ export class AuthService {
       where: {
         OR: [
           ...phoneCandidates.map((candidate) => ({ phoneE164: candidate })),
-          ...(bare10.length === 10 ? [{ phoneE164: { endsWith: bare10 } }] : []),
+          ...lookup10List.map((d10) => ({ phoneE164: { endsWith: d10 } })),
         ],
         status: 'ACTIVE',
         deletedAt: null,
@@ -255,10 +265,44 @@ export class AuthService {
       include: this.getActiveMembershipInclude(),
     });
 
-    // If one of the standard portal login numbers is used and either not found or missing the requested role,
-    // resolve an active database user holding that role in the primary institute.
-    const isStandardPortalPhone = ['9642402639', '9876500011', '9876543210'].includes(bare10);
-    const targetRole = requestedRole ? this.normalizeRoleAlias(requestedRole) : undefined;
+    // Dedicated single-role demo numbers should always resolve to their intrinsic role even if the UI tab was not switched
+    const intrinsicRoleByPhone: Record<string, string> = {
+      '9876543001': 'STUDENT',
+      '9811100001': 'STUDENT',
+      '9876543212': 'TEACHER',
+      '9876500011': 'TEACHER',
+      '9876500002': 'TEACHER',
+      '9876543210': 'INSTITUTE_ADMIN',
+      '9876500001': 'INSTITUTE_ADMIN',
+    };
+
+    const isStandardPortalPhone = [
+      '9642402639',
+      '9876543001',
+      '9811100001',
+      '9876543212',
+      '9876500011',
+      '9876500002',
+      '9876543210',
+      '9876500001',
+    ].includes(bare10);
+
+    let effectiveRequestedRole = requestedRole;
+    if (intrinsicRoleByPhone[bare10]) {
+      const intrinsicRole = intrinsicRoleByPhone[bare10];
+      const userHasIntrinsic =
+        Array.isArray(user?.memberships) &&
+        user.memberships.some(
+          (m: any) => m.role === intrinsicRole || this.normalizeRoleAlias(String(m.role)) === intrinsicRole,
+        );
+      if (userHasIntrinsic || !user) {
+        effectiveRequestedRole = intrinsicRole;
+      }
+    }
+
+    const targetRole = effectiveRequestedRole
+      ? this.normalizeRoleAlias(effectiveRequestedRole)
+      : undefined;
     const hasRequestedRole =
       !targetRole ||
       (Array.isArray(user?.memberships) &&
@@ -298,7 +342,7 @@ export class AuthService {
       );
     }
 
-    return this.createSessionForUser(user, requestedRole);
+    return this.createSessionForUser(user, effectiveRequestedRole);
   }
 
   private async createSessionForUser(user: any, requestedRole?: string) {

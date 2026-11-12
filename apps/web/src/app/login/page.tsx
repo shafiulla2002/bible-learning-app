@@ -38,6 +38,20 @@ export default function LoginPage() {
     setOtp('');
   };
 
+  const handlePhoneInputChange = (rawVal: string) => {
+    setPhone(rawVal);
+    setErrorMessage(null);
+    const digits = rawVal.replace(/\D/g, '');
+    const last10 = digits.length >= 10 ? digits.slice(-10) : '';
+    if (['9876543212', '9876500011', '9876500002', '9876500012', '9876500013'].includes(last10)) {
+      setSelectedRole('TEACHER');
+    } else if (['9876543210', '9876500001'].includes(last10)) {
+      setSelectedRole('ADMIN');
+    } else if (['9876543001', '9811100001'].includes(last10)) {
+      setSelectedRole('STUDENT');
+    }
+  };
+
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!phone || phone.replace(/\D/g, '').length < 10) {
@@ -122,6 +136,9 @@ export default function LoginPage() {
     if (data.user?.studentProfileId) {
       localStorage.setItem('current_student_profile_id', data.user.studentProfileId);
     }
+    if (data.user?.teacherProfileId) {
+      localStorage.setItem('current_teacher_profile_id', data.user.teacherProfileId);
+    }
   };
 
   const handleLoginSubmit = async (e?: React.FormEvent) => {
@@ -149,7 +166,12 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      setErrorMessage(err?.message || 'Authentication failed. Please check your OTP and registered role.');
+      const msg = err?.message || 'Authentication failed. Please check your OTP and registered role.';
+      setErrorMessage(msg);
+      if (!/invalid or expired otp/i.test(msg)) {
+        setOtpSent(false);
+        setChallengeToken(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -317,7 +339,7 @@ export default function LoginPage() {
                   <input
                     type="tel"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => handlePhoneInputChange(e.target.value)}
                     placeholder="Enter registered 10-digit mobile number"
                     required
                     className="w-full pl-12 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
@@ -345,7 +367,12 @@ export default function LoginPage() {
                   <label className="text-xs font-bold text-slate-700">Enter 6-Digit Code</label>
                   <button
                     type="button"
-                    onClick={() => setOtpSent(false)}
+                    onClick={() => {
+                      setOtpSent(false);
+                      setChallengeToken(null);
+                      setOtp('');
+                      setErrorMessage(null);
+                    }}
                     className="text-[11px] text-blue-600 font-semibold hover:underline"
                   >
                     Change number ({phone})
