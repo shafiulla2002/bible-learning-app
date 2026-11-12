@@ -22,7 +22,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { NotificationBell } from '@/components/notifications/notification-bell';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, resolveVerifiedAdminContext } from '@/lib/api';
 
 export interface NavItem {
   label: string;
@@ -52,7 +52,36 @@ export function PortalShell({
 }: PortalShellProps) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [authStatus, setAuthStatus] = useState<'checking' | 'authorized' | 'unauthorized'>('checking');
+
+  const isInitiallyAuthorized = () => {
+    if (typeof window === 'undefined') return true;
+    const token =
+      localStorage.getItem('access_token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('auth_token');
+    const role = (localStorage.getItem('current_user_role') || '').toUpperCase();
+    if (!token) return false;
+    if (portalRole === 'ADMIN') {
+      return (
+        !role ||
+        ['SUPER_ADMIN', 'INSTITUTE_ADMIN', 'ACADEMIC_COORDINATOR', 'FINANCE_OFFICER'].includes(role)
+      );
+    }
+    if (portalRole === 'SUPER_ADMIN') {
+      return !role || ['SUPER_ADMIN', 'PLATFORM_SUPPORT'].includes(role);
+    }
+    if (portalRole === 'TEACHER') {
+      return !role || ['TEACHER', 'INSTRUCTOR'].includes(role);
+    }
+    if (portalRole === 'STUDENT') {
+      return !role || role === 'STUDENT';
+    }
+    return true;
+  };
+
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authorized' | 'unauthorized'>(() => {
+    return isInitiallyAuthorized() ? 'authorized' : 'checking';
+  });
 
   const clearClientSession = () => {
     try {
@@ -75,31 +104,37 @@ export function PortalShell({
     } catch {}
   };
 
-  // Enforce server-verified session and portal role on mount and route navigation
+  // Enforce server-verified session and portal role in background without blocking UI
   useEffect(() => {
     let cancelled = false;
 
     const verifyPortalAccess = async () => {
       if (typeof window === 'undefined') return;
-      setAuthStatus('checking');
+
+      const token =
+        localStorage.getItem('access_token') ||
+        localStorage.getItem('token') ||
+        localStorage.getItem('auth_token');
+
+      if (!token) {
+        clearClientSession();
+        if (!cancelled) {
+          setAuthStatus('unauthorized');
+          window.location.href = '/login';
+        }
+        return;
+      }
 
       try {
-        const res = await apiFetchResponse('/dashboard/context', {
-          method: 'GET',
-          cache: 'no-store',
-        });
-
-        if (!res.ok) {
-          clearClientSession();
-          if (!cancelled) {
-            setAuthStatus('unauthorized');
-            window.location.href = '/login';
-          }
-          return;
-        }
-
-        const ctx = await res.json().catch(() => null);
+        const ctx = await resolveVerifiedAdminContext();
         const verifiedRole = String(ctx?.user?.role || '').toUpperCase();
+
+        if (ctx?.instituteId) {
+          localStorage.setItem('current_institute_id', ctx.instituteId);
+        }
+        if (verifiedRole) {
+          localStorage.setItem('current_user_role', verifiedRole);
+        }
 
         const isAllowedForPortal =
           portalRole === 'SUPER_ADMIN'
@@ -124,11 +159,13 @@ export function PortalShell({
         if (!cancelled) {
           setAuthStatus('authorized');
         }
-      } catch {
-        clearClientSession();
-        if (!cancelled) {
-          setAuthStatus('unauthorized');
-          window.location.href = '/login';
+      } catch (err: any) {
+        if (err?.status === 401 || err?.status === 403) {
+          clearClientSession();
+          if (!cancelled) {
+            setAuthStatus('unauthorized');
+            window.location.href = '/login';
+          }
         }
       }
     };

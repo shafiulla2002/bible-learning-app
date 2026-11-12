@@ -466,8 +466,13 @@ export default function AdminDashboardPage() {
       try {
         data = await dashboardApi.getOverview(activeId, { preset: presetParam });
       } catch {
-        await new Promise((r) => setTimeout(r, 700));
-        data = await dashboardApi.getOverview(activeId, { preset: presetParam });
+        await new Promise((r) => setTimeout(r, 800));
+        try {
+          data = await dashboardApi.getOverview(activeId, { preset: presetParam });
+        } catch {
+          await new Promise((r) => setTimeout(r, 1500));
+          data = await dashboardApi.getOverview(activeId, { preset: presetParam });
+        }
       }
       setOverview(data);
       setIsLiveConnected(true);

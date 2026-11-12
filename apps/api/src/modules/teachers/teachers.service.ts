@@ -496,6 +496,38 @@ export class TeachersService {
       weeklyHours,
     };
 
+    const mappedCourses = assignedCourses.map((c) => ({
+      courseId: c.courseId,
+      id: c.id,
+      title: c.title,
+      slug: c.slug,
+      role: c.role,
+      categoryName: (c as any).categoryName || 'Theology Curriculum',
+      assignedAt: c.createdAt || new Date().toISOString(),
+      createdAt: c.createdAt || new Date().toISOString(),
+    }));
+
+    const mappedBatches = assignedBatches.map((b) => ({
+      batchId: b.batchId,
+      id: b.id,
+      name: b.name,
+      code: b.name,
+      courseTitle: b.courseTitle,
+      role: b.role,
+      batchStatus: b.status,
+      startDate: b.startDate,
+      endDate: b.endDate,
+      capacity: b.capacity,
+    }));
+
+    const workload = {
+      totalCourses: workloadSummary.totalCourses,
+      totalBatches: workloadSummary.totalBatches,
+      upcomingSessionsCount: workloadSummary.upcomingLiveSessionsCount,
+      weeklyScheduledHours: workloadSummary.weeklyHours,
+      sessionsThisWeek: recentLiveSessions,
+    };
+
     return {
       id: teacher.id,
       instituteId: teacher.instituteId,
@@ -515,13 +547,16 @@ export class TeachersService {
       status: (teacher.status as TeacherStatus) || 'ACTIVE',
       assignedCoursesCount: assignedCourses.length,
       assignedBatchesCount: assignedBatches.length,
+      courses: mappedCourses as any,
       assignedCourses,
+      batches: mappedBatches as any,
       assignedBatches,
+      workload: workload as any,
       workloadSummary,
       recentLiveSessions,
       createdAt: teacher.createdAt.toISOString(),
       updatedAt: teacher.updatedAt.toISOString(),
-    };
+    } as any;
   }
 
   /**

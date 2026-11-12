@@ -725,7 +725,9 @@ export class DashboardService {
     filter?: DashboardFilterQueryDto,
     viewer?: { userId: string; fullName: string; role: string },
   ): Promise<DashboardOverviewDto> {
-    await this.prisma.reapIdleConnections();
+    try {
+      await this.prisma.reapIdleConnections();
+    } catch {}
 
     const institute = await this.prisma.institute.findUnique({
       where: { id: instituteId },
@@ -1005,9 +1007,9 @@ export class DashboardService {
         WHERE e."instituteId" = ${instituteId}
           AND e."createdAt" >= ${trendStartDate}
           AND e."createdAt" <= ${anchorEnd}
-        GROUP BY month
-        ORDER BY month ASC
-      `,
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `.catch(() => []),
 
       // 21. Monthly student registrations aggregation
       this.prisma.$queryRaw<{ month: string; count: bigint }[]>`
@@ -1018,9 +1020,9 @@ export class DashboardService {
         WHERE sp."instituteId" = ${instituteId}
           AND sp."createdAt" >= ${trendStartDate}
           AND sp."createdAt" <= ${anchorEnd}
-        GROUP BY month
-        ORDER BY month ASC
-      `,
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `.catch(() => []),
 
       // 22. Monthly net fee collections from FeePayment
       this.prisma.$queryRaw<{ month: string; collected: bigint }[]>`
@@ -1032,9 +1034,9 @@ export class DashboardService {
           AND fp."paymentDate" >= ${trendStartDate}
           AND fp."paymentDate" <= ${anchorEnd}
           AND fp.status IN ('COMPLETED', 'PARTIALLY_REVERSED')
-        GROUP BY month
-        ORDER BY month ASC
-      `,
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `.catch(() => []),
 
       // 23. Monthly invoiced & pending balances from non-DRAFT/non-CANCELLED Invoice
       this.prisma.$queryRaw<
@@ -1049,9 +1051,9 @@ export class DashboardService {
           AND i."createdAt" >= ${trendStartDate}
           AND i."createdAt" <= ${anchorEnd}
           AND i.status NOT IN ('DRAFT', 'CANCELLED')
-        GROUP BY month
-        ORDER BY month ASC
-      `,
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `.catch(() => []),
 
       // 24. Course enrollment distribution (top 10 courses)
       this.prisma.course.findMany({
@@ -1115,9 +1117,9 @@ export class DashboardService {
         WHERE a."instituteId" = ${instituteId}
           AND a."date" >= ${trendStartDate}
           AND a."date" <= ${anchorEnd}
-        GROUP BY month
-        ORDER BY month ASC
-      `,
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `.catch(() => []),
 
       // 28. Teacher workload summary
       this.prisma.teacherProfile.findMany({
@@ -1233,11 +1235,13 @@ export class DashboardService {
       }),
 
       // 33. Recent administrative audit logs (top 6 for activity feed)
-      this.prisma.auditLog.findMany({
-        where: { instituteId },
-        take: 6,
-        orderBy: { createdAt: 'desc' },
-      }),
+      this.prisma.auditLog
+        .findMany({
+          where: { instituteId },
+          take: 6,
+          orderBy: { createdAt: 'desc' },
+        })
+        .catch(() => []),
 
       // 34. Upcoming scheduled live sessions (next 8)
       this.prisma.liveSession.findMany({

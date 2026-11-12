@@ -417,6 +417,40 @@ export default function TeacherDetailPage({
     .join('');
   const isActive = teacher.status === 'ACTIVE';
 
+  const teacherCourses = (teacher.courses && teacher.courses.length > 0)
+    ? teacher.courses
+    : (teacher as any).assignedCourses?.map((c: any) => ({
+        courseId: c.courseId,
+        id: c.id,
+        title: c.title,
+        slug: c.slug,
+        role: c.role,
+        categoryName: c.categoryName || 'Theology Curriculum',
+        assignedAt: c.assignedAt || c.createdAt || new Date().toISOString(),
+      })) || [];
+
+  const teacherBatches = (teacher.batches && teacher.batches.length > 0)
+    ? teacher.batches
+    : (teacher as any).assignedBatches?.map((b: any) => ({
+        batchId: b.batchId,
+        id: b.id,
+        name: b.name,
+        code: b.code || b.name,
+        courseTitle: b.courseTitle,
+        role: b.role,
+        batchStatus: b.batchStatus || b.status,
+        startDate: b.startDate,
+        endDate: b.endDate,
+        capacity: b.capacity,
+      })) || [];
+
+  const teacherWorkload = teacher.workload || {
+    weeklyScheduledHours: (teacher as any).workloadSummary?.weeklyHours || 0,
+    totalCourses: teacherCourses.length,
+    totalBatches: teacherBatches.length,
+    upcomingSessionsCount: (teacher as any).workloadSummary?.upcomingLiveSessionsCount || 0,
+  };
+
   return (
     <PortalShell
       portalTitle="Bible Institute"
@@ -604,15 +638,15 @@ export default function TeacherDetailPage({
             {/* Right: Integrated Metric Tiles */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-3 w-full lg:w-auto shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-6">
               <div className="bg-white/5 backdrop-blur-xs p-3.5 rounded-2xl border border-white/10 text-center min-w-[100px]">
-                <p className="text-2xl font-black text-white">{teacher.courses?.length || 0}</p>
+                <p className="text-2xl font-black text-white">{teacherCourses.length}</p>
                 <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mt-0.5">Courses</p>
               </div>
               <div className="bg-white/5 backdrop-blur-xs p-3.5 rounded-2xl border border-white/10 text-center min-w-[100px]">
-                <p className="text-2xl font-black text-white">{teacher.batches?.length || 0}</p>
+                <p className="text-2xl font-black text-white">{teacherBatches.length}</p>
                 <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mt-0.5">Cohorts</p>
               </div>
               <div className="bg-white/5 backdrop-blur-xs p-3.5 rounded-2xl border border-white/10 text-center min-w-[100px]">
-                <p className="text-2xl font-black text-white">{teacher.workload?.weeklyScheduledHours || 0} hrs</p>
+                <p className="text-2xl font-black text-white">{teacherWorkload.weeklyScheduledHours || 0} hrs</p>
                 <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mt-0.5">Weekly Load</p>
               </div>
               <div className="bg-white/5 backdrop-blur-xs p-3.5 rounded-2xl border border-white/10 text-center min-w-[100px]">
@@ -629,8 +663,8 @@ export default function TeacherDetailPage({
         <div className="bg-white p-1.5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-1.5 overflow-x-auto">
           {[
             { id: 'overview', label: 'Overview & Bio', icon: <FileText className="h-4 w-4" /> },
-            { id: 'courses', label: `Courses (${teacher.courses?.length || 0})`, icon: <BookOpen className="h-4 w-4" /> },
-            { id: 'batches', label: `Batches & Cohorts (${teacher.batches?.length || 0})`, icon: <Calendar className="h-4 w-4" /> },
+            { id: 'courses', label: `Courses (${teacherCourses.length})`, icon: <BookOpen className="h-4 w-4" /> },
+            { id: 'batches', label: `Batches & Cohorts (${teacherBatches.length})`, icon: <Calendar className="h-4 w-4" /> },
             { id: 'workload', label: 'Workload & Schedule', icon: <Clock className="h-4 w-4" /> },
             { id: 'account', label: 'Account & Safety', icon: <ShieldCheck className="h-4 w-4" /> },
           ].map((tab) => (
@@ -871,7 +905,7 @@ export default function TeacherDetailPage({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {teacher.courses?.length === 0 ? (
+                    {teacherCourses.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="px-6 py-14 text-center text-slate-500">
                           <BookOpen className="h-10 w-10 mx-auto text-slate-300 mb-3" />
@@ -885,7 +919,7 @@ export default function TeacherDetailPage({
                         </td>
                       </tr>
                     ) : (
-                      teacher.courses?.map((c) => (
+                      teacherCourses.map((c: any) => (
                         <tr key={c.courseId} className="hover:bg-slate-50/60 transition">
                           <td className="px-6 py-4">
                             <div className="font-bold text-slate-900 text-xs">{c.title}</div>
@@ -971,7 +1005,7 @@ export default function TeacherDetailPage({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {teacher.batches?.length === 0 ? (
+                    {teacherBatches.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="px-6 py-14 text-center text-slate-500">
                           <Calendar className="h-10 w-10 mx-auto text-slate-300 mb-3" />
@@ -985,7 +1019,7 @@ export default function TeacherDetailPage({
                         </td>
                       </tr>
                     ) : (
-                      teacher.batches?.map((b) => (
+                      teacherBatches.map((b: any) => (
                         <tr key={b.batchId} className="hover:bg-slate-50/60 transition">
                           <td className="px-6 py-4">
                             <div className="font-bold text-slate-900 text-xs">{b.name}</div>

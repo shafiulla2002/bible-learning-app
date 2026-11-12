@@ -1188,7 +1188,9 @@ export const teacherApi = {
   },
 
   getTeacher: (instituteId: string, teacherId: string) => {
-    return apiFetch<TeacherDetailDto>(`/institutes/${instituteId}/teachers/${teacherId}`);
+    return apiFetch<TeacherDetailDto>(`/institutes/${instituteId}/teachers/${teacherId}`, {
+      bypassCache: true,
+    });
   },
 
   createTeacher: (instituteId: string, data: any) => {
@@ -1637,24 +1639,35 @@ export interface DashboardOverviewDto {
 }
 
 let cachedContextPromise: Promise<DashboardContextDto> | null = null;
+let cachedContextExpiry = 0;
 
 /**
- * Resolves the verified administrative institute context once per browser session,
- * avoiding duplicate /dashboard/context calls across header NotificationBell and pages.
+ * Resolves the verified administrative institute context with a 60s memory cache,
+ * avoiding duplicate /dashboard/context calls across header NotificationBell, portal shell, and pages.
  */
 export async function resolveVerifiedAdminContext(
   forceRefresh = false,
 ): Promise<DashboardContextDto> {
-  if (!cachedContextPromise || forceRefresh) {
-    cachedContextPromise = apiFetch<DashboardContextDto>('/dashboard/context')
+  const now = Date.now();
+  if (!cachedContextPromise || forceRefresh || now > cachedContextExpiry) {
+    cachedContextExpiry = now + 60000;
+    cachedContextPromise = apiFetch<DashboardContextDto>('/dashboard/context', {
+      bypassCache: forceRefresh,
+    })
       .then((ctx) => {
-        if (typeof window !== 'undefined' && ctx?.instituteId) {
-          localStorage.setItem('current_institute_id', ctx.instituteId);
+        if (typeof window !== 'undefined') {
+          if (ctx?.instituteId) {
+            localStorage.setItem('current_institute_id', ctx.instituteId);
+          }
+          if (ctx?.user?.role) {
+            localStorage.setItem('current_user_role', ctx.user.role);
+          }
         }
         return ctx;
       })
       .catch((err) => {
         cachedContextPromise = null;
+        cachedContextExpiry = 0;
         throw err;
       });
   }
