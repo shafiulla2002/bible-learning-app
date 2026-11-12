@@ -1180,6 +1180,12 @@ export interface TeacherDetailDto extends TeacherSummaryDto {
 
 export const teacherApi = {
   getTeachers: (instituteId: string, params?: Record<string, any>) => {
+    if (!instituteId) {
+      return Promise.resolve({
+        data: [] as TeacherSummaryDto[],
+        meta: { total: 0, page: 1, limit: 50, totalPages: 1 },
+      });
+    }
     const q = params ? '?' + new URLSearchParams(params as any).toString() : '';
     return apiFetch<{
       data: TeacherSummaryDto[];
@@ -1898,6 +1904,13 @@ export async function resolveActiveInstituteId(): Promise<string> {
   if (typeof window === 'undefined') return '';
   const stored = localStorage.getItem('current_institute_id');
   if (stored) return stored;
+  try {
+    const ctx = await resolveVerifiedAdminContext();
+    if (ctx?.instituteId) {
+      localStorage.setItem('current_institute_id', ctx.instituteId);
+      return ctx.instituteId;
+    }
+  } catch {}
   try {
     const me = await apiFetch<{
       instituteId?: string;

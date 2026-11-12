@@ -7,7 +7,7 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { teacherApi, TeacherSummaryDto, resolveVerifiedAdminContext } from '@/lib/api';
+import { teacherApi, TeacherSummaryDto, resolveVerifiedAdminContext, resolveActiveInstituteId } from '@/lib/api';
 import {
   GraduationCap,
   Users,
@@ -165,15 +165,30 @@ export default function TeachersDirectoryPage() {
       const storedId = localStorage.getItem('current_institute_id') || '';
       if (storedId) setInstituteId(storedId);
     }
-    resolveVerifiedAdminContext()
-      .then((ctx) => {
-        if (ctx?.instituteId) setInstituteId(ctx.instituteId);
+    resolveActiveInstituteId()
+      .then((id) => {
+        if (id) setInstituteId(id);
       })
       .catch(() => {});
   }, []);
 
   // 2. Fetch Teachers from PostgreSQL
   const loadTeachers = useCallback(async (bypassCache = false) => {
+    let activeId = instituteId;
+    if (!activeId && typeof window !== 'undefined') {
+      activeId = localStorage.getItem('current_institute_id') || '';
+    }
+    if (!activeId) {
+      try {
+        activeId = await resolveActiveInstituteId();
+        if (activeId) setInstituteId(activeId);
+      } catch {}
+    }
+    if (!activeId) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     setErrorMsg(null);
     try {
@@ -185,13 +200,13 @@ export default function TeachersDirectoryPage() {
       if (statusFilter !== 'ALL') params.status = statusFilter;
       if (specializationFilter !== 'ALL') params.specialization = specializationFilter;
 
-      const res = await teacherApi.getTeachers(instituteId, params);
+      const res = await teacherApi.getTeachers(activeId, params);
       const list = Array.isArray(res?.data) ? res.data : [];
       setTeachers(list);
       setTotalPages(res?.meta?.totalPages || 1);
       setTotalCount(res?.meta?.total ?? list.length);
     } catch (err: any) {
-      console.error('Error fetching teachers from PostgreSQL:', err.message);
+      console.warn('Error fetching teachers from PostgreSQL:', err.message);
       setErrorMsg(err.message || 'Unable to load faculty from database.');
       setTeachers([]);
       setTotalPages(1);
