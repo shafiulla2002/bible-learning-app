@@ -14,7 +14,11 @@ async function bootstrap() {
     expressApp.disable('x-powered-by');
   }
 
-  app.use(cookieParser());
+  app.use(
+    typeof (cookieParser as any) === 'function'
+      ? (cookieParser as any)()
+      : (cookieParser as any).default(),
+  );
 
   // Security headers + lightweight sliding-window rate limiter
   const rateBuckets = new Map<string, { count: number; resetAt: number }>();
