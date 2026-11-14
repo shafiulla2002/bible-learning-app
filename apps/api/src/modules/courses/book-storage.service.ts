@@ -109,7 +109,15 @@ export class BookStorageService {
    */
   resolveDiskPath(storageKey: string): string {
     const cleanKey = path.normalize(storageKey).replace(/^(\.\.[\/\\])+/, '');
-    return path.join(this.baseUploadDir, cleanKey);
+    const primaryPath = path.join(this.baseUploadDir, cleanKey);
+    if (fs.existsSync(primaryPath)) {
+      return primaryPath;
+    }
+    const rootFallback = path.resolve(process.cwd(), '..', '..', 'uploads', cleanKey);
+    if (fs.existsSync(rootFallback)) {
+      return rootFallback;
+    }
+    return primaryPath;
   }
 
   /**
