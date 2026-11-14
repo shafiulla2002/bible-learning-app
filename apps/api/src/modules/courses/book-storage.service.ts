@@ -107,14 +107,7 @@ export class BookStorageService {
     const pageCount = this.extractPdfPageCount(file.buffer);
 
     try {
-      await this.ensureChunkTable();
-      await this.prisma.$executeRawUnsafe(
-        `INSERT INTO book_pdf_chunks (storage_key, chunk_index, total_chunks, data)
-         VALUES ($1, 0, 1, $2)
-         ON CONFLICT (storage_key, chunk_index) DO UPDATE SET data = EXCLUDED.data, total_chunks = 1`,
-        storageKey,
-        file.buffer,
-      );
+      await this.upsertPdfChunkAsset(instituteId, storageKey, 0, file.buffer.toString('base64'), file.buffer.length);
     } catch (e) {}
 
     return {
@@ -126,19 +119,52 @@ export class BookStorageService {
     };
   }
 
-  private async ensureChunkTable(): Promise<void> {
-    if (this.chunkTableReady) return;
-    await this.prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS book_pdf_chunks (
-        storage_key TEXT NOT NULL,
-        chunk_index INT NOT NULL,
-        total_chunks INT NOT NULL,
-        data BYTEA NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (storage_key, chunk_index)
-      )
-    `);
-    this.chunkTableReady = true;
+  private async upsertPdfChunkAsset(
+    instituteId: string,
+    storageKey: string,
+    chunkIndex: number,
+    chunkBase64: string,
+    byteLength: number,
+  ): Promise<void> {
+    const chunkKey = `${storageKey}#chunk#${chunkIndex}`;
+    await this.prisma.mediaAsset.upsert({
+      where: { storageKey: chunkKey },
+      create: {
+        instituteId,
+        ownerUserId: 'system',
+        kind: 'PDF_CHUNK',
+        storageKey: chunkKey,
+        mimeType: 'application/pdf',
+        sizeBytes: BigInt(byteLength),
+        videoStreamId: chunkBase64,
+      },
+      update: {
+        sizeBytes: BigInt(byteLength),
+        videoStreamId: chunkBase64,
+      },
+    });
+  }
+
+  private async loadPdfBufferFromDb(storageKey: string): Promise<Buffer | null> {
+    const rows = await this.prisma.mediaAsset.findMany({
+      where: {
+        kind: 'PDF_CHUNK',
+        storageKey: { startsWith: `${storageKey}#chunk#` },
+      },
+      select: {
+        storageKey: true,
+        videoStreamId: true,
+      },
+    });
+    if (!rows.length) {
+      return null;
+    }
+    rows.sort((a, b) => {
+      const idxA = Number(a.storageKey.split('#chunk#')[1] || 0);
+      const idxB = Number(b.storageKey.split('#chunk#')[1] || 0);
+      return idxA - idxB;
+    });
+    return Buffer.concat(rows.map((r) => Buffer.from(r.videoStreamId || '', 'base64')));
   }
 
   async saveBookPdfChunk(
@@ -182,15 +208,12 @@ export class BookStorageService {
     const safeUploadId = (payload.uploadId || crypto.randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '');
     const storageKey = `institutes/${safeInstituteId}/books/${safeUploadId}.pdf`;
 
-    await this.ensureChunkTable();
-    await this.prisma.$executeRawUnsafe(
-      `INSERT INTO book_pdf_chunks (storage_key, chunk_index, total_chunks, data)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (storage_key, chunk_index) DO UPDATE SET data = EXCLUDED.data, total_chunks = EXCLUDED.total_chunks`,
+    await this.upsertPdfChunkAsset(
+      instituteId,
       storageKey,
       chunkIndex,
-      totalChunks,
-      chunkBuffer,
+      payload.chunkBase64,
+      chunkBuffer.length,
     );
 
     if (chunkIndex < totalChunks - 1) {
@@ -205,12 +228,10 @@ export class BookStorageService {
     // Final chunk received: compute page count from stored chunks
     let pageCount = 1;
     try {
-      const rows = (await this.prisma.$queryRawUnsafe(
-        `SELECT data FROM book_pdf_chunks WHERE storage_key = $1 ORDER BY chunk_index ASC`,
-        storageKey,
-      )) as Array<{ data: Buffer }>;
-      const fullBuffer = Buffer.concat(rows.map((r) => Buffer.from(r.data)));
-      pageCount = this.extractPdfPageCount(fullBuffer);
+      const fullBuffer = await this.loadPdfBufferFromDb(storageKey);
+      if (fullBuffer) {
+        pageCount = this.extractPdfPageCount(fullBuffer);
+      }
     } catch (e) {}
 
     return {
@@ -256,11 +277,12 @@ export class BookStorageService {
       }
     } catch (e) {}
     try {
-      await this.ensureChunkTable();
-      await this.prisma.$executeRawUnsafe(
-        `DELETE FROM book_pdf_chunks WHERE storage_key = $1`,
-        storageKey,
-      );
+      await this.prisma.mediaAsset.deleteMany({
+        where: {
+          kind: 'PDF_CHUNK',
+          storageKey: { startsWith: `${storageKey}#chunk#` },
+        },
+      });
       deleted = true;
     } catch (e) {}
     return deleted;
@@ -332,17 +354,12 @@ export class BookStorageService {
     }
 
     // Fallback: load persisted chunks from PostgreSQL
-    await this.ensureChunkTable();
-    const rows = (await this.prisma.$queryRawUnsafe(
-      `SELECT data FROM book_pdf_chunks WHERE storage_key = $1 ORDER BY chunk_index ASC`,
-      storageKey,
-    )) as Array<{ data: Buffer }>;
+    const fullBuffer = await this.loadPdfBufferFromDb(storageKey);
 
-    if (!rows || rows.length === 0) {
+    if (!fullBuffer || fullBuffer.length === 0) {
       throw new NotFoundException('Book PDF file was not found in storage');
     }
 
-    const fullBuffer = Buffer.concat(rows.map((r) => Buffer.from(r.data)));
     const fileSize = fullBuffer.length;
 
     if (rangeHeader) {
