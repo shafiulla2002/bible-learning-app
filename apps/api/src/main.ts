@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -6,7 +7,9 @@ import * as cookieParser from 'cookie-parser';
 import { getRequiredJwtSecret } from './core/auth/jwt-secret.util';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+  app.useBodyParser('json', { limit: '4mb' });
+  app.useBodyParser('urlencoded', { limit: '4mb', extended: true });
   getRequiredJwtSecret();
 
   const expressApp = app.getHttpAdapter().getInstance();

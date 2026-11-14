@@ -640,7 +640,7 @@ export const courseApi = {
       method: 'DELETE',
     }),
 
-  uploadBookPdf: (
+  uploadBookPdf: async (
     instituteId: string,
     file: File,
     onProgress?: (percent: number) => void,
@@ -651,57 +651,63 @@ export const courseApi = {
     pageCount: number;
     mimeType: string;
   }> => {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const url = resolveApiUrl(`/institutes/${instituteId}/courses/upload-book-pdf`);
-      let token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-      if (!token && typeof window !== 'undefined') {
-        token = localStorage.getItem('berea_auth_token');
+    const CHUNK_SIZE = 1.5 * 1024 * 1024; // 1.5 MB raw (~2 MB base64 JSON, safely under Vercel's 4.5 MB limit)
+    const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+    let uploadId: string | undefined;
+
+    const readSliceAsBase64 = (blob: Blob): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const commaIdx = result.indexOf(',');
+          resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+        };
+        reader.onerror = () => reject(new Error('Failed to read PDF file chunk'));
+        reader.readAsDataURL(blob);
+      });
+
+    let finalResult: any = null;
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(file.size, start + CHUNK_SIZE);
+      const chunkBase64 = await readSliceAsBase64(file.slice(start, end));
+
+      const res = await apiFetch<any>(
+        `/institutes/${instituteId}/courses/upload-book-pdf-chunk`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            uploadId,
+            chunkIndex,
+            totalChunks,
+            chunkBase64,
+            originalFilename: file.name,
+            totalSize: file.size,
+          }),
+        },
+      );
+
+      if (res?.uploadId) {
+        uploadId = res.uploadId;
       }
+      if (onProgress) {
+        onProgress(Math.round(((chunkIndex + 1) / totalChunks) * 100));
+      }
+      finalResult = res;
+    }
 
-      xhr.open('POST', url, true);
-      xhr.withCredentials = true;
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      const csrfToken = readBrowserCookie('csrf_token');
-      if (csrfToken) xhr.setRequestHeader('x-csrf-token', csrfToken);
+    if (!finalResult || !finalResult.storageKey) {
+      throw new Error('Failed to finalize PDF upload');
+    }
 
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && onProgress) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          onProgress(percent);
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const data = JSON.parse(xhr.responseText);
-            resolve(data);
-          } catch (e) {
-            reject(new Error('Invalid response from server'));
-          }
-        } else if (xhr.status === 413) {
-          reject(
-            new Error(
-              'PDF exceeds Vercel’s 4.5 MB upload limit (413). Please compress the PDF under 4 MB or upload on a host without a 4.5 MB body limit.',
-            ),
-          );
-        } else {
-          try {
-            const err = JSON.parse(xhr.responseText);
-            reject(new Error(err.message || `Upload failed with status ${xhr.status}`));
-          } catch {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
-          }
-        }
-      };
-
-      xhr.onerror = () => reject(new Error('Network error during PDF upload'));
-
-      const formData = new FormData();
-      formData.append('file', file);
-      xhr.send(formData);
-    });
+    return {
+      storageKey: finalResult.storageKey,
+      originalFilename: finalResult.originalFilename || file.name,
+      fileSize: finalResult.fileSize || file.size,
+      pageCount: finalResult.pageCount || 1,
+      mimeType: finalResult.mimeType || 'application/pdf',
+    };
   },
 
   deleteUploadedPdf: (instituteId: string, storageKey: string) =>

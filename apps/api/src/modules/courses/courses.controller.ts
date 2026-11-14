@@ -63,6 +63,14 @@ export class CoursesController {
     return this.bookStorageService.saveBookPdf(instituteId, file);
   }
 
+  @Post('upload-book-pdf-chunk')
+  async uploadBookPdfChunk(
+    @Param('instituteId') instituteId: string,
+    @Body() body: any,
+  ) {
+    return this.bookStorageService.saveBookPdfChunk(instituteId, body);
+  }
+
   @Delete('upload-book-pdf')
   async deleteUploadedPdf(
     @Param('instituteId') instituteId: string,
@@ -84,7 +92,7 @@ export class CoursesController {
       res.status(HttpStatus.NOT_FOUND).json({ message: 'No PDF associated with this course' });
       return;
     }
-    const { stream, status, headers } = this.bookStorageService.createPdfStream(
+    const { stream, status, headers } = await this.bookStorageService.createPdfStream(
       course.pdfStorageKey,
       range,
     );

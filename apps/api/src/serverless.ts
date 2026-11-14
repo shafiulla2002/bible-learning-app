@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
@@ -34,10 +35,12 @@ async function bootstrapServerlessLoopback(): Promise<string> {
     process.env.AUTH_DEV_OTP = 'true';
   }
 
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
     logger: ['error', 'warn'],
   });
+  app.useBodyParser('json', { limit: '4mb' });
+  app.useBodyParser('urlencoded', { limit: '4mb', extended: true });
   getRequiredJwtSecret();
 
   const expressApp = app.getHttpAdapter().getInstance();
