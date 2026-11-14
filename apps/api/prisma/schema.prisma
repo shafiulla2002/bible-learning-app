@@ -57,6 +57,8 @@ enum CourseStatus {
 }
 
 enum CourseType {
+  REGULAR
+  BOOK
   SELF_PACED
   COHORT
   LIVE
@@ -497,8 +499,8 @@ model Course {
   description        String
   coverImage         String?
   level              CourseLevel    @default(BEGINNER)
-  courseType         CourseType     @default(COHORT)
-  learningMode       LearningMode   @default(ONLINE)
+  courseType         String         @default("REGULAR")
+  learningMode       String         @default("ONLINE")
   durationLabel      String?
   eligibility        String?
   language           String         @default("English")
@@ -514,6 +516,15 @@ model Course {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   deletedAt          DateTime?
+
+  // Book specific fields
+  author             String?
+  pdfStorageKey      String?
+  pdfOriginalName    String?
+  pdfFileSize        Int?
+  pdfPageCount       Int?
+  publicationInfo    String?
+  bookMetadata       Json?
 
   instructors    CourseInstructor[]
   modules        Module[]
@@ -802,6 +813,9 @@ model Enrolment {
   source           EnrolmentSource @default(PURCHASE)
   status           EnrolmentStatus @default(ACTIVE)
   progressPct      Int             @default(0)
+  lastReadPage     Int             @default(1)
+  totalPages       Int             @default(1)
+  lastReadAt       DateTime?       @default(now())
   expiresAt        DateTime?
   completedAt      DateTime?
   createdAt        DateTime        @default(now())

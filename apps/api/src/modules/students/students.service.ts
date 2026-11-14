@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BookStorageService } from '../courses/book-storage.service';
 import { buildSyllabusPdfBuffer, safeFileName } from '../courses/pdf-syllabus.util';
 import {
   resolveRazorpayConfig,
@@ -39,6 +40,7 @@ export class StudentsService {
   constructor(
     private prisma: PrismaService,
     @Optional() private readonly notificationsService?: NotificationsService,
+    @Optional() private readonly bookStorageService?: BookStorageService,
   ) {}
 
   /**
@@ -5054,6 +5056,184 @@ export class StudentsService {
     return {
       fileName: `${safeFileName(course.slug || course.title, 'course')}-syllabus.pdf`,
       buffer,
+    };
+  }
+
+  /**
+   * Fetch all book courses enrolled by the authenticated student
+   */
+  async getStudentBooks(user: any) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+        course: {
+          courseType: 'BOOK',
+          deletedAt: null,
+        },
+      },
+      include: {
+        course: {
+          include: {
+            category: { select: { id: true, name: true, slug: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return enrolments.map((e) => ({
+      id: e.course.id,
+      courseId: e.course.id,
+      title: e.course.title,
+      slug: e.course.slug,
+      description: e.course.description,
+      coverImage: e.course.coverImage,
+      author: e.course.author,
+      category: e.course.category?.name || 'Biblical eBook',
+      price: e.course.price,
+      pdfOriginalName: e.course.pdfOriginalName,
+      pdfFileSize: e.course.pdfFileSize,
+      pdfPageCount: e.course.pdfPageCount || e.totalPages || 1,
+      publicationInfo: e.course.publicationInfo,
+      enrolmentId: e.id,
+      enrolledAt: e.createdAt.toISOString(),
+      status: e.status,
+      lastReadPage: e.lastReadPage || 1,
+      totalPages: e.totalPages || e.course.pdfPageCount || 1,
+      progressPct: e.progressPct || 0,
+      lastReadAt: e.lastReadAt ? e.lastReadAt.toISOString() : null,
+    }));
+  }
+
+  /**
+   * Secure PDF streaming with student authentication and enrollment verification
+   */
+  async getStudentBookPdfStream(user: any, courseId: string, range?: string) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+        courseId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+    });
+
+    if (!enrolment) {
+      throw new ForbiddenException('You do not have an active enrollment or purchase for this book.');
+    }
+
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: courseId,
+        instituteId: studentProfile.instituteId,
+        deletedAt: null,
+      },
+    });
+
+    if (!course || !course.pdfStorageKey) {
+      throw new NotFoundException('Book PDF file is not available.');
+    }
+
+    if (!this.bookStorageService) {
+      throw new ServiceUnavailableException('Book storage service is currently unavailable.');
+    }
+
+    return this.bookStorageService.createPdfStream(course.pdfStorageKey, range);
+  }
+
+  /**
+   * Get student's current reading progress for a book
+   */
+  async getStudentBookProgress(user: any, courseId: string) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+        courseId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      include: {
+        course: { select: { title: true, author: true, pdfPageCount: true } },
+      },
+    });
+
+    if (!enrolment) {
+      throw new ForbiddenException('You do not have an active enrollment for this book.');
+    }
+
+    const totalPages = enrolment.totalPages || enrolment.course.pdfPageCount || 1;
+    const lastReadPage = enrolment.lastReadPage || 1;
+    const progressPct = enrolment.progressPct || Math.round((lastReadPage / totalPages) * 100);
+
+    return {
+      courseId,
+      bookTitle: enrolment.course.title,
+      author: enrolment.course.author,
+      lastReadPage,
+      totalPages,
+      progressPct,
+      lastReadAt: enrolment.lastReadAt ? enrolment.lastReadAt.toISOString() : null,
+    };
+  }
+
+  /**
+   * Save student reading progress (auto-saved periodically and upon page turn)
+   */
+  async saveStudentBookProgress(
+    user: any,
+    courseId: string,
+    input: { lastReadPage?: number; totalPages?: number },
+  ) {
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentProfileId: studentProfile.id,
+        instituteId: studentProfile.instituteId,
+        courseId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      include: {
+        course: { select: { pdfPageCount: true } },
+      },
+    });
+
+    if (!enrolment) {
+      throw new ForbiddenException('You do not have an active enrollment for this book.');
+    }
+
+    const totalPages = Math.max(1, input.totalPages || enrolment.totalPages || enrolment.course.pdfPageCount || 1);
+    const lastReadPage = Math.max(1, Math.min(input.lastReadPage || 1, totalPages));
+    const progressPct = Math.min(100, Math.round((lastReadPage / totalPages) * 100));
+    const now = new Date();
+
+    const updated = await this.prisma.enrolment.update({
+      where: { id: enrolment.id },
+      data: {
+        lastReadPage,
+        totalPages,
+        progressPct,
+        lastReadAt: now,
+        completedAt: progressPct >= 100 ? now : enrolment.completedAt,
+        status: progressPct >= 100 ? 'COMPLETED' : enrolment.status,
+      },
+    });
+
+    return {
+      courseId,
+      lastReadPage: updated.lastReadPage,
+      totalPages: updated.totalPages,
+      progressPct: updated.progressPct,
+      lastReadAt: now.toISOString(),
+      isCompleted: updated.progressPct >= 100,
     };
   }
 }

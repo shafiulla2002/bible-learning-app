@@ -26,6 +26,31 @@ export function resolveApiBaseUrl(): string {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
+function consumeSsoTokenFromHash(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const hash = window.location.hash || '';
+    if (!hash.includes('sso_token=')) return null;
+    const params = new URLSearchParams(hash.replace(/^#/, ''));
+    const ssoToken = params.get('sso_token');
+    if (!ssoToken) return null;
+    localStorage.setItem('access_token', ssoToken);
+    localStorage.setItem('current_user_role', 'STUDENT');
+    params.delete('sso_token');
+    const remainingHash = params.toString();
+    const cleanUrl = `${window.location.pathname}${window.location.search}${remainingHash ? `#${remainingHash}` : ''}`;
+    window.history.replaceState(null, '', cleanUrl);
+    return ssoToken;
+  } catch {
+    return null;
+  }
+}
+
+function getStoredAccessToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return consumeSsoTokenFromHash() || localStorage.getItem('access_token');
+}
+
 function readBrowserCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
   const escaped = name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
@@ -131,7 +156,7 @@ export async function apiFetchResponse(
   }
 
   if (!headers['Authorization'] && typeof window !== 'undefined') {
-    const storedToken = localStorage.getItem('access_token');
+    const storedToken = getStoredAccessToken();
     if (storedToken) {
       headers['Authorization'] = `Bearer ${storedToken}`;
     }
@@ -179,7 +204,7 @@ export async function apiFetch<T>(
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   } else if (typeof window !== 'undefined') {
-    const storedToken = localStorage.getItem('access_token');
+    const storedToken = getStoredAccessToken();
     if (storedToken) {
       headers['Authorization'] = `Bearer ${storedToken}`;
     }
@@ -489,7 +514,7 @@ export interface CourseDto {
   slug: string;
   description?: string;
   level: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | string;
-  courseType?: 'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE';
+  courseType?: 'REGULAR' | 'BOOK' | 'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE' | string;
   learningMode?: 'ONLINE' | 'OFFLINE' | 'HYBRID';
   durationLabel?: string;
   eligibility?: string;
@@ -504,6 +529,13 @@ export interface CourseDto {
   pricing: 'FREE' | 'PAID' | string;
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   coverImage?: string | null;
+  author?: string | null;
+  pdfStorageKey?: string | null;
+  pdfOriginalName?: string | null;
+  pdfFileSize?: number | null;
+  pdfPageCount?: number | null;
+  publicationInfo?: string | null;
+  bookMetadata?: any;
   modules?: ModuleDto[];
   instructors?: Array<{
     id: string;
@@ -607,6 +639,67 @@ export const courseApi = {
     apiFetch<{ success: boolean }>(`/institutes/${instituteId}/courses/${courseId}`, {
       method: 'DELETE',
     }),
+
+  uploadBookPdf: (
+    instituteId: string,
+    file: File,
+    onProgress?: (percent: number) => void,
+  ): Promise<{
+    storageKey: string;
+    originalFilename: string;
+    fileSize: number;
+    pageCount: number;
+    mimeType: string;
+  }> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const url = resolveApiUrl(`/institutes/${instituteId}/courses/upload-book-pdf`);
+      let token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      if (!token && typeof window !== 'undefined') {
+        token = localStorage.getItem('berea_auth_token');
+      }
+
+      xhr.open('POST', url, true);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            resolve(data);
+          } catch (e) {
+            reject(new Error('Invalid response from server'));
+          }
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText);
+            reject(new Error(err.message || `Upload failed with status ${xhr.status}`));
+          } catch {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error during PDF upload'));
+
+      const formData = new FormData();
+      formData.append('file', file);
+      xhr.send(formData);
+    });
+  },
+
+  deleteUploadedPdf: (instituteId: string, storageKey: string) =>
+    apiFetch<{ success: boolean }>(
+      `/institutes/${instituteId}/courses/upload-book-pdf?storageKey=${encodeURIComponent(storageKey)}`,
+      { method: 'DELETE' },
+    ),
 
   upsertCompletionRule: (
     instituteId: string,

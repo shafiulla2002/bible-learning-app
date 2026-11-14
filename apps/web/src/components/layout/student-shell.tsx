@@ -167,6 +167,8 @@ export function StudentShell({
 
             {/* Collapse toggle (desktop only) */}
             <button
+              type="button"
+              suppressHydrationWarning
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               className="hidden md:flex text-blue-200 hover:text-white p-1 rounded-lg hover:bg-blue-600/40 transition shrink-0"
               title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}

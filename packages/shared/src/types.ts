@@ -148,7 +148,7 @@ export interface CourseSummaryItem {
   categoryId: string;
   categoryName: string;
   level: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
-  courseType?: 'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE';
+  courseType?: 'REGULAR' | 'BOOK' | 'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE';
   learningMode?: 'ONLINE' | 'OFFLINE' | 'HYBRID';
   durationLabel?: string;
   eligibility?: string;
@@ -162,12 +162,50 @@ export interface CourseSummaryItem {
   enrollmentEndsAt?: string;
   status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   coverImage?: string;
+  author?: string | null;
+  pdfStorageKey?: string | null;
+  pdfOriginalName?: string | null;
+  pdfFileSize?: number | null;
+  pdfPageCount?: number | null;
+  publicationInfo?: string | null;
+  bookMetadata?: any;
   enrolledCount: number;
   moduleCount: number;
   lessonCount: number;
   durationMinutes: number;
   leadTeacherName?: string;
   updatedAt: string;
+}
+
+export interface StudentBookItem {
+  id: string;
+  courseId: string;
+  title: string;
+  slug: string;
+  description: string;
+  coverImage?: string | null;
+  author?: string | null;
+  category?: string;
+  price: number;
+  pdfOriginalName?: string | null;
+  pdfFileSize?: number | null;
+  pdfPageCount?: number | null;
+  publicationInfo?: string | null;
+  enrolmentId: string;
+  enrolledAt: string;
+  status: string;
+  lastReadPage: number;
+  totalPages: number;
+  progressPct: number;
+  lastReadAt?: string | null;
+}
+
+export interface BookProgressData {
+  courseId: string;
+  lastReadPage: number;
+  totalPages: number;
+  progressPct: number;
+  lastReadAt?: string;
 }
 
 export interface ResourceItemDetail {

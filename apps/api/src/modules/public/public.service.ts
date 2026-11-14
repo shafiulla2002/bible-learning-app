@@ -156,7 +156,7 @@ export class PublicService {
     };
 
     if (query.level) where.level = query.level;
-    if (query.courseType) where.courseType = query.courseType;
+    if (query.courseType && query.courseType !== 'ALL') where.courseType = query.courseType;
     if (query.pricing) where.pricing = query.pricing;
     if (query.category) {
       where.category = {
@@ -222,6 +222,11 @@ export class PublicService {
         level: c.level,
         courseType: c.courseType,
         learningMode: c.learningMode,
+        author: c.author || undefined,
+        pdfPageCount: c.pdfPageCount || undefined,
+        pdfFileSize: c.pdfFileSize || undefined,
+        publicationInfo: c.publicationInfo || undefined,
+        hasPdf: Boolean(c.pdfStorageKey),
         durationLabel: c.durationLabel || undefined,
         eligibility: c.eligibility || undefined,
         language: c.language,
@@ -322,6 +327,11 @@ export class PublicService {
       level: course.level,
       courseType: course.courseType,
       learningMode: course.learningMode,
+      author: course.author || undefined,
+      pdfPageCount: course.pdfPageCount || undefined,
+      pdfFileSize: course.pdfFileSize || undefined,
+      publicationInfo: course.publicationInfo || undefined,
+      hasPdf: Boolean(course.pdfStorageKey),
       durationLabel: course.durationLabel || undefined,
       eligibility: course.eligibility || undefined,
       language: course.language,

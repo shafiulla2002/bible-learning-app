@@ -95,6 +95,10 @@ export class CoursesService {
       where.categoryId = query.categoryId;
     }
 
+    if (query.courseType && query.courseType !== 'ALL') {
+      where.courseType = query.courseType as any;
+    }
+
     if (query.search) {
       const s = query.search.trim();
       where.OR = [
@@ -174,6 +178,13 @@ export class CoursesService {
         enrollmentEndsAt: c.enrollmentEndsAt ? c.enrollmentEndsAt.toISOString() : undefined,
         status: c.status as any,
         coverImage: c.coverImage || undefined,
+        author: c.author || undefined,
+        pdfStorageKey: c.pdfStorageKey || undefined,
+        pdfOriginalName: c.pdfOriginalName || undefined,
+        pdfFileSize: c.pdfFileSize || undefined,
+        pdfPageCount: c.pdfPageCount || undefined,
+        publicationInfo: c.publicationInfo || undefined,
+        bookMetadata: c.bookMetadata || undefined,
         enrolledCount: c._count?.enrolments || 0,
         moduleCount: c.modules?.length || 0,
         lessonCount,
@@ -328,6 +339,13 @@ export class CoursesService {
       enrollmentEndsAt: course.enrollmentEndsAt ? course.enrollmentEndsAt.toISOString() : undefined,
       status: course.status as any,
       coverImage: course.coverImage || undefined,
+      author: course.author || undefined,
+      pdfStorageKey: course.pdfStorageKey || undefined,
+      pdfOriginalName: course.pdfOriginalName || undefined,
+      pdfFileSize: course.pdfFileSize || undefined,
+      pdfPageCount: course.pdfPageCount || undefined,
+      publicationInfo: course.publicationInfo || undefined,
+      bookMetadata: course.bookMetadata || undefined,
       description: course.description,
       accessDays: course.accessDays || undefined,
       enrolledCount: course._count?.enrolments || 0,
@@ -392,7 +410,7 @@ export class CoursesService {
           slug,
           description: input.description,
           level: (input.level as CourseLevel) || CourseLevel.BEGINNER,
-          courseType: ((input.courseType || 'COHORT') as CourseType),
+          courseType: ((input.courseType || 'REGULAR') as any),
           learningMode: ((input.learningMode || 'ONLINE') as LearningMode),
           durationLabel: input.durationLabel || null,
           eligibility: input.eligibility || null,
@@ -407,6 +425,13 @@ export class CoursesService {
           requiresApproval: input.requiresApproval ?? true,
           coverImage: input.coverImage || null,
           status: (input.status as CourseStatus) || CourseStatus.DRAFT,
+          author: input.author || null,
+          pdfStorageKey: input.pdfStorageKey || null,
+          pdfOriginalName: input.pdfOriginalName || null,
+          pdfFileSize: input.pdfFileSize ?? null,
+          pdfPageCount: input.pdfPageCount ?? null,
+          publicationInfo: input.publicationInfo || null,
+          bookMetadata: input.bookMetadata ? (input.bookMetadata as any) : undefined,
           completionRule: {
             create: {
               instituteId,
@@ -515,6 +540,13 @@ export class CoursesService {
         requiresApproval: input.requiresApproval,
         coverImage: input.coverImage,
         status: input.status as CourseStatus,
+        author: input.author,
+        pdfStorageKey: input.pdfStorageKey,
+        pdfOriginalName: input.pdfOriginalName,
+        pdfFileSize: input.pdfFileSize,
+        pdfPageCount: input.pdfPageCount,
+        publicationInfo: input.publicationInfo,
+        bookMetadata: input.bookMetadata ? (input.bookMetadata as any) : undefined,
       },
     });
 

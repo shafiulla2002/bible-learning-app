@@ -101,7 +101,7 @@ export default function CourseCurriculumBuilderPage() {
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [category, setCategory] = useState('Biblical Studies');
   const [level, setLevel] = useState('BEGINNER');
-  const [courseType, setCourseType] = useState<'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE'>('COHORT');
+  const [courseType, setCourseType] = useState<'REGULAR' | 'BOOK' | 'SELF_PACED' | 'COHORT' | 'LIVE' | 'DIPLOMA' | 'CERTIFICATE'>('COHORT');
   const [learningMode, setLearningMode] = useState<'ONLINE' | 'OFFLINE' | 'HYBRID'>('ONLINE');
   const [durationLabel, setDurationLabel] = useState('');
   const [eligibility, setEligibility] = useState('');
@@ -196,7 +196,7 @@ export default function CourseCurriculumBuilderPage() {
         setCategoryId(data.categoryId || '');
         setCategory(data.categoryName || data.category?.name || 'Biblical Studies');
         setLevel(data.level || 'BEGINNER');
-        setCourseType(data.courseType || 'COHORT');
+        setCourseType((data.courseType as any) || 'COHORT');
         setLearningMode(data.learningMode || 'ONLINE');
         setDurationLabel(data.durationLabel || '');
         setEligibility(data.eligibility || '');

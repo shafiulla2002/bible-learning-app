@@ -6,6 +6,7 @@ import {
   Param,
   Body,
   Query,
+  Headers,
   Res,
   UseGuards,
   HttpCode,
@@ -13,6 +14,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Role } from '@prisma/client';
+import { SaveBookProgressSchema } from '@bible-lms/shared';
 import { StudentsService } from './students.service';
 import {
   resolveResourceDelivery,
@@ -39,6 +41,49 @@ export class StudentMeController {
   @HttpCode(HttpStatus.OK)
   async getStudentDashboard(@CurrentUser() user: any) {
     return this.studentsService.getStudentDashboard(user);
+  }
+
+  @Get('books')
+  @HttpCode(HttpStatus.OK)
+  async getStudentBooks(@CurrentUser() user: any) {
+    return this.studentsService.getStudentBooks(user);
+  }
+
+  @Get('books/:courseId/pdf')
+  async streamStudentBookPdf(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+    @Headers('range') range: string | undefined,
+    @Res() res: Response,
+  ) {
+    const { stream, status, headers } = await this.studentsService.getStudentBookPdfStream(
+      user,
+      courseId,
+      range,
+    );
+    res.status(status);
+    Object.entries(headers).forEach(([key, val]) => res.setHeader(key, val));
+    stream.pipe(res);
+  }
+
+  @Get('books/:courseId/progress')
+  @HttpCode(HttpStatus.OK)
+  async getStudentBookProgress(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.studentsService.getStudentBookProgress(user, courseId);
+  }
+
+  @Post('books/:courseId/progress')
+  @HttpCode(HttpStatus.OK)
+  async saveStudentBookProgress(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+    @Body() body: any,
+  ) {
+    const validated = SaveBookProgressSchema.parse(body);
+    return this.studentsService.saveStudentBookProgress(user, courseId, validated);
   }
 
   @Get('courses')

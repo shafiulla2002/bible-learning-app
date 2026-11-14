@@ -8,12 +8,19 @@ import {
   Param,
   Body,
   Query,
+  Headers,
+  Res,
   HttpCode,
   HttpStatus,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import { Role } from '@prisma/client';
 import { CoursesService } from './courses.service';
+import { BookStorageService } from './book-storage.service';
 import { JwtAuthGuard } from '../../core/auth/guards/jwt-auth.guard';
 import { InstituteTenantGuard } from '../../core/auth/guards/institute-tenant.guard';
 import { RolesGuard } from '../../core/auth/guards/roles.guard';
@@ -42,7 +49,49 @@ import {
 @UseGuards(JwtAuthGuard, InstituteTenantGuard, RolesGuard)
 @Roles(Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR)
 export class CoursesController {
-  constructor(private readonly coursesService: CoursesService) {}
+  constructor(
+    private readonly coursesService: CoursesService,
+    private readonly bookStorageService: BookStorageService,
+  ) {}
+
+  @Post('upload-book-pdf')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 150 * 1024 * 1024 } }))
+  async uploadBookPdf(
+    @Param('instituteId') instituteId: string,
+    @UploadedFile() file: any,
+  ) {
+    return this.bookStorageService.saveBookPdf(instituteId, file);
+  }
+
+  @Delete('upload-book-pdf')
+  async deleteUploadedPdf(
+    @Param('instituteId') instituteId: string,
+    @Query('storageKey') storageKey: string,
+  ) {
+    const deleted = await this.bookStorageService.deleteBookPdf(instituteId, storageKey);
+    return { success: deleted };
+  }
+
+  @Get(':id/pdf')
+  async previewBookPdf(
+    @Param('instituteId') instituteId: string,
+    @Param('id') id: string,
+    @Headers('range') range: string | undefined,
+    @Res() res: Response,
+  ) {
+    const course: any = await this.coursesService.findOne(instituteId, id);
+    if (!course || !course.pdfStorageKey) {
+      res.status(HttpStatus.NOT_FOUND).json({ message: 'No PDF associated with this course' });
+      return;
+    }
+    const { stream, status, headers } = this.bookStorageService.createPdfStream(
+      course.pdfStorageKey,
+      range,
+    );
+    res.status(status);
+    Object.entries(headers).forEach(([key, val]) => res.setHeader(key, val));
+    stream.pipe(res);
+  }
 
   @Get()
   @Roles(

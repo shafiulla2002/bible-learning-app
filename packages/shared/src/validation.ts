@@ -136,7 +136,7 @@ export const CreateCourseSchema = z.object({
   categoryName: z.string().optional(),
   description: z.string().min(10, 'Description must be at least 10 characters'),
   level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']).default('BEGINNER'),
-  courseType: z.enum(['SELF_PACED', 'COHORT', 'LIVE', 'DIPLOMA', 'CERTIFICATE']).default('COHORT'),
+  courseType: z.enum(['REGULAR', 'BOOK', 'SELF_PACED', 'COHORT', 'LIVE', 'DIPLOMA', 'CERTIFICATE']).default('REGULAR'),
   learningMode: z.enum(['ONLINE', 'OFFLINE', 'HYBRID']).default('ONLINE'),
   durationLabel: z.string().max(120).optional(),
   eligibility: z.string().max(1000).optional(),
@@ -149,9 +149,18 @@ export const CreateCourseSchema = z.object({
   enrollmentStartsAt: z.string().optional().or(z.literal('')),
   enrollmentEndsAt: z.string().optional().or(z.literal('')),
   requiresApproval: z.boolean().default(true),
-  coverImage: z.string().url().optional().or(z.literal('')),
+  coverImage: z.string().optional().or(z.literal('')),
   leadTeacherId: z.string().optional(),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).default('DRAFT'),
+
+  // Book specific fields
+  author: z.string().max(200).optional().or(z.literal('')),
+  pdfStorageKey: z.string().optional().or(z.literal('')),
+  pdfOriginalName: z.string().optional().or(z.literal('')),
+  pdfFileSize: z.coerce.number().int().optional(),
+  pdfPageCount: z.coerce.number().int().optional(),
+  publicationInfo: z.string().max(1000).optional().or(z.literal('')),
+  bookMetadata: z.any().optional(),
 });
 
 export type CreateCourseInput = z.infer<typeof CreateCourseSchema>;
@@ -191,6 +200,7 @@ export const CourseFilterQuerySchema = z.object({
   search: z.string().optional(),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
   level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']).optional(),
+  courseType: z.enum(['REGULAR', 'BOOK', 'SELF_PACED', 'COHORT', 'LIVE', 'DIPLOMA', 'CERTIFICATE', 'ALL']).optional(),
   categoryId: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(10),
@@ -525,13 +535,19 @@ export const PublicCourseCatalogQuerySchema = z.object({
   instituteId: z.string().optional(),
   category: z.string().optional(),
   level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']).optional(),
-  courseType: z.enum(['SELF_PACED', 'COHORT', 'LIVE', 'DIPLOMA', 'CERTIFICATE']).optional(),
+  courseType: z.enum(['REGULAR', 'BOOK', 'SELF_PACED', 'COHORT', 'LIVE', 'DIPLOMA', 'CERTIFICATE', 'ALL']).optional(),
   pricing: z.enum(['FREE', 'PAID']).optional(),
   search: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(24),
 });
 export type PublicCourseCatalogQuery = z.infer<typeof PublicCourseCatalogQuerySchema>;
+
+export const SaveBookProgressSchema = z.object({
+  lastReadPage: z.coerce.number().int().min(1),
+  totalPages: z.coerce.number().int().min(1).optional(),
+});
+export type SaveBookProgressInput = z.infer<typeof SaveBookProgressSchema>;
 
 export const PublicStudentRegisterSchema = z.object({
   instituteSlug: z.string().optional(),
