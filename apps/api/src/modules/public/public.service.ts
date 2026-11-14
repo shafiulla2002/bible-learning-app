@@ -183,16 +183,24 @@ export class PublicService {
           institute: { select: { id: true, name: true, slug: true, logoUrl: true } },
           category: { select: { id: true, name: true, slug: true } },
           instructors: {
-            include: {
+            select: {
+              role: true,
               teacherProfile: {
-                include: { membership: { include: { user: { select: { fullName: true } } } } },
+                select: {
+                  membership: {
+                    select: { user: { select: { fullName: true } } },
+                  },
+                },
               },
             },
           },
           modules: {
-            include: {
+            select: {
+              id: true,
               chapters: {
-                include: { lessons: { select: { id: true, durationSec: true } } },
+                select: {
+                  _count: { select: { lessons: true } },
+                },
               },
             },
           },
@@ -203,13 +211,12 @@ export class PublicService {
 
     const data = courses.map((c: any) => {
       let lessonCount = 0;
-      let totalDurationSec = 0;
       for (const m of c.modules || []) {
         for (const ch of m.chapters || []) {
-          lessonCount += ch.lessons?.length || 0;
-          for (const l of ch.lessons || []) totalDurationSec += l.durationSec || 0;
+          lessonCount += ch._count?.lessons || 0;
         }
       }
+      const totalDurationSec = lessonCount * 900;
       const lead =
         c.instructors?.find((i: any) => i.role === 'LEAD') || c.instructors?.[0];
 

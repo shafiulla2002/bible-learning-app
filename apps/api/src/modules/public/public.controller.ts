@@ -5,6 +5,7 @@ import {
   Param,
   Query,
   Body,
+  Header,
   HttpCode,
   HttpStatus,
   Req,
@@ -29,11 +30,13 @@ export class PublicController {
   ) {}
 
   @Get('institutes')
+  @Header('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300')
   async listInstitutes() {
     return this.publicService.listInstitutes();
   }
 
   @Get('institutes/:slug/courses')
+  @Header('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120')
   async listInstituteCourses(
     @Param('slug') slug: string,
     @Query() query: any,
@@ -46,12 +49,14 @@ export class PublicController {
   }
 
   @Get('courses')
+  @Header('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120')
   async listPublishedCourses(@Query() query: any) {
     const validated = PublicCourseCatalogQuerySchema.parse(query);
     return this.publicService.listPublishedCourses(validated);
   }
 
   @Get('courses/:idOrSlug')
+  @Header('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120')
   async getPublishedCourseDetail(
     @Param('idOrSlug') idOrSlug: string,
     @Query('instituteSlug') instituteSlug?: string,
