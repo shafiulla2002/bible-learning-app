@@ -27,6 +27,8 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/api/v1/[[...slug]]': [
       '../api/dist/**/*',
+      '../api/uploads/**/*',
+      '../../uploads/**/*',
       '../../packages/shared/dist/**/*',
       '../../node_modules/.prisma/client/**/*',
       '../../node_modules/@prisma/client/**/*',
