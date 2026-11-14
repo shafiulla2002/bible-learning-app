@@ -660,7 +660,10 @@ export const courseApi = {
       }
 
       xhr.open('POST', url, true);
+      xhr.withCredentials = true;
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      const csrfToken = readBrowserCookie('csrf_token');
+      if (csrfToken) xhr.setRequestHeader('x-csrf-token', csrfToken);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && onProgress) {
@@ -677,6 +680,12 @@ export const courseApi = {
           } catch (e) {
             reject(new Error('Invalid response from server'));
           }
+        } else if (xhr.status === 413) {
+          reject(
+            new Error(
+              'PDF exceeds Vercel’s 4.5 MB upload limit (413). Please compress the PDF under 4 MB or upload on a host without a 4.5 MB body limit.',
+            ),
+          );
         } else {
           try {
             const err = JSON.parse(xhr.responseText);

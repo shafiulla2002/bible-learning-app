@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
@@ -80,17 +81,24 @@ export class BookStorageService {
       throw new BadRequestException('PDF file exceeds maximum allowed limit of 150MB.');
     }
 
-    // 4. Secure isolated institute directory
+    // 4. Secure isolated institute directory (fall back to os.tmpdir()/uploads on read-only serverless FS)
     const safeInstituteId = instituteId.replace(/[^a-zA-Z0-9_-]/g, '');
-    const instituteDir = path.join(this.baseUploadDir, 'institutes', safeInstituteId, 'books');
-    await fs.promises.mkdir(instituteDir, { recursive: true });
-
-    // 5. Generate collision-resistant unique filename
     const fileId = crypto.randomUUID();
     const diskFileName = `${fileId}.pdf`;
-    const targetPath = path.join(instituteDir, diskFileName);
 
-    await fs.promises.writeFile(targetPath, file.buffer);
+    const primaryDir = path.join(this.baseUploadDir, 'institutes', safeInstituteId, 'books');
+    try {
+      await fs.promises.mkdir(primaryDir, { recursive: true });
+      await fs.promises.writeFile(path.join(primaryDir, diskFileName), file.buffer);
+    } catch (err: any) {
+      if (err?.code === 'EROFS' || err?.code === 'EACCES' || err?.code === 'EPERM') {
+        const tmpDir = path.join(os.tmpdir(), 'uploads', 'institutes', safeInstituteId, 'books');
+        await fs.promises.mkdir(tmpDir, { recursive: true });
+        await fs.promises.writeFile(path.join(tmpDir, diskFileName), file.buffer);
+      } else {
+        throw err;
+      }
+    }
 
     const storageKey = `institutes/${safeInstituteId}/books/${diskFileName}`;
     const pageCount = this.extractPdfPageCount(file.buffer);
@@ -111,6 +119,7 @@ export class BookStorageService {
     const cleanKey = path.normalize(storageKey).replace(/^(\.\.[\/\\])+/, '');
     const candidates = [
       path.join(this.baseUploadDir, cleanKey),
+      path.join(os.tmpdir(), 'uploads', cleanKey),
       path.resolve(process.cwd(), '..', 'api', 'uploads', cleanKey),
       path.resolve(process.cwd(), 'apps', 'api', 'uploads', cleanKey),
       path.resolve(process.cwd(), '..', '..', 'uploads', cleanKey),
