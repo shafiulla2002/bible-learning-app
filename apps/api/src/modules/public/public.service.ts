@@ -139,10 +139,30 @@ export class PublicService {
     }));
   }
 
+  private readonly coursesCatalogCache = new Map<string, { payload: any; expiry: number }>();
+
   async listPublishedCourses(query: PublicCourseCatalogQuery) {
     const page = query.page || 1;
     const limit = query.limit || 24;
     const skip = (page - 1) * limit;
+
+    const isSearch = Boolean(query.search?.trim());
+    const cacheKey = isSearch ? '' : JSON.stringify({
+      page,
+      limit,
+      instituteSlug: query.instituteSlug || '',
+      instituteId: query.instituteId || '',
+      level: query.level || '',
+      courseType: query.courseType || '',
+      pricing: query.pricing || '',
+      category: query.category || '',
+    });
+    if (cacheKey) {
+      const hit = this.coursesCatalogCache.get(cacheKey);
+      if (hit && Date.now() < hit.expiry) {
+        return hit.payload;
+      }
+    }
 
     const where: any = {
       status: CourseStatus.PUBLISHED,
@@ -252,7 +272,7 @@ export class PublicService {
       };
     });
 
-    return {
+    const payload = {
       data,
       meta: {
         total,
@@ -261,6 +281,15 @@ export class PublicService {
         totalPages: Math.ceil(total / limit) || 1,
       },
     };
+
+    if (cacheKey) {
+      this.coursesCatalogCache.set(cacheKey, {
+        payload,
+        expiry: Date.now() + 60_000,
+      });
+    }
+
+    return payload;
   }
 
   async getPublishedCourseDetail(idOrSlug: string, instituteSlug?: string) {
