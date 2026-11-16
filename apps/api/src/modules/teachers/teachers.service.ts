@@ -4614,10 +4614,32 @@ export class TeachersService {
     const assignedBatchIds = assignedBatchTeachers.map((bt) => bt.batchId);
     const assignedCourseIds = Array.from(new Set(assignedBatchTeachers.map((bt) => bt.batch.courseId)));
 
+    const courseMap = new Map<string, { id: string; title: string }>();
+    const filterBatches = assignedBatchTeachers.map((bt) => {
+      if (bt.batch?.course) {
+        courseMap.set(bt.batch.course.id, {
+          id: bt.batch.course.id,
+          title: bt.batch.course.title,
+        });
+      }
+      return {
+        id: bt.batch.id,
+        name: bt.batch.name,
+        code: bt.batch.code,
+        courseId: bt.batch.courseId,
+        courseTitle: bt.batch.course?.title || '',
+      };
+    });
+    const filterCourses = Array.from(courseMap.values());
+
     if (assignedBatchIds.length === 0) {
       return {
         success: true,
         data: [],
+        filters: {
+          courses: filterCourses,
+          batches: filterBatches,
+        },
         metrics: {
           totalScheduled: 0,
           classesToday: 0,
@@ -4812,6 +4834,10 @@ export class TeachersService {
     return {
       success: true,
       data,
+      filters: {
+        courses: filterCourses,
+        batches: filterBatches,
+      },
       metrics: {
         totalScheduled,
         classesToday,
