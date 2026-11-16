@@ -195,6 +195,12 @@ export class AuthService {
         },
         include: {
           institute: true,
+          studentProfile: {
+            select: {
+              id: true,
+              _count: { select: { enrolments: true } },
+            },
+          },
         },
         orderBy: { createdAt: 'asc' as const },
       },
@@ -354,15 +360,22 @@ export class AuthService {
     let selectedMembership = activeMemberships[0];
     if (requestedRole) {
       const normalizedRole = this.normalizeRoleAlias(requestedRole);
-      const matched = activeMemberships.find(
+      const matching = activeMemberships.filter(
         (m) => m.role === normalizedRole || this.normalizeRoleAlias(String(m.role)) === normalizedRole,
       );
-      if (!matched) {
+      if (matching.length === 0) {
         throw new ForbiddenException(
           'Your account does not hold an active membership for the requested role',
         );
       }
-      selectedMembership = matched;
+      // If a user holds multiple memberships for the same role (e.g. across institutes),
+      // prefer the one with existing enrolments so returning students always keep course access.
+      selectedMembership =
+        matching.find((m) => (m.studentProfile?._count?.enrolments || 0) > 0) || matching[0];
+    } else if (activeMemberships.length > 1) {
+      selectedMembership =
+        activeMemberships.find((m) => (m.studentProfile?._count?.enrolments || 0) > 0) ||
+        activeMemberships[0];
     }
 
     const role = selectedMembership.role as RoleType;
