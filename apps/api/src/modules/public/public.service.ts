@@ -53,11 +53,21 @@ export class PublicService {
         where: { status: InstituteStatus.ACTIVE, deletedAt: null },
       });
       if (count === 0) throw new NotFoundException('No active institute found');
-      const first = await this.prisma.institute.findFirst({
-        where: { status: InstituteStatus.ACTIVE, deletedAt: null },
-        include: { settings: true },
-        orderBy: { createdAt: 'asc' },
-      });
+      const first =
+        (await this.prisma.institute.findFirst({
+          where: {
+            status: InstituteStatus.ACTIVE,
+            deletedAt: null,
+            courses: { some: { status: CourseStatus.PUBLISHED, deletedAt: null } },
+          },
+          include: { settings: true },
+          orderBy: { createdAt: 'asc' },
+        })) ||
+        (await this.prisma.institute.findFirst({
+          where: { status: InstituteStatus.ACTIVE, deletedAt: null },
+          include: { settings: true },
+          orderBy: { createdAt: 'asc' },
+        }));
       if (!first) throw new NotFoundException('Institute not found');
       return first;
     }
@@ -79,17 +89,16 @@ export class PublicService {
   private async generateAdmissionNo(instituteId: string): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `ADM-${year}-`;
-    const last = await this.prisma.studentProfile.findFirst({
+    const existing = await this.prisma.studentProfile.findMany({
       where: { instituteId, admissionNo: { startsWith: prefix } },
-      orderBy: { admissionNo: 'desc' },
       select: { admissionNo: true },
     });
-    let seq = 1;
-    if (last?.admissionNo) {
-      const n = parseInt(last.admissionNo.split('-').pop() || '', 10);
-      if (!isNaN(n)) seq = n + 1;
+    let maxSeq = 0;
+    for (const row of existing) {
+      const n = parseInt(row.admissionNo.split('-').pop() || '', 10);
+      if (!isNaN(n) && n > maxSeq) maxSeq = n;
     }
-    return `${prefix}${String(seq).padStart(4, '0')}`;
+    return `${prefix}${String(maxSeq + 1).padStart(4, '0')}`;
   }
 
   private async generateApplicationNumber(instituteId: string): Promise<string> {
