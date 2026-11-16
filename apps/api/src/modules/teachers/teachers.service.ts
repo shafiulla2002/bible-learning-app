@@ -4598,7 +4598,38 @@ export class TeachersService {
   ) {
     const { teacherProfileId, instituteId } = await this.resolveTeacherMembership(user);
 
-    // 1. Fetch teacher assigned batches and courses
+    // 1. Ensure any CourseInstructor assignments also have corresponding BatchTeacher records
+    const courseInstructors = await this.prisma.courseInstructor.findMany({
+      where: { teacherProfileId, instituteId },
+      include: {
+        course: {
+          include: {
+            batches: { where: { status: { in: ['ACTIVE', 'UPCOMING'] } } },
+          },
+        },
+      },
+    });
+    for (const ci of courseInstructors) {
+      if (!ci.course || ci.course.courseType === 'BOOK') continue;
+      for (const b of ci.course.batches || []) {
+        const hasBt = await this.prisma.batchTeacher.findFirst({
+          where: { batchId: b.id, teacherProfileId, instituteId },
+          select: { id: true },
+        });
+        if (!hasBt) {
+          await this.prisma.batchTeacher.create({
+            data: {
+              instituteId,
+              batchId: b.id,
+              teacherProfileId,
+              role: ci.role || 'LEAD',
+            },
+          });
+        }
+      }
+    }
+
+    // 2. Fetch teacher assigned batches and courses
     const assignedBatchTeachers = await this.prisma.batchTeacher.findMany({
       where: { teacherProfileId, instituteId },
       include: {
@@ -5209,6 +5240,84 @@ export class TeachersService {
       joinUrl,
       status: updated.status,
       notifiedStudents: studentUserIds.length,
+      data: updated,
+    };
+  }
+
+  async endTeacherLiveClass(user: any, sessionId: string) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: { id: sessionId, instituteId },
+      include: {
+        batch: {
+          include: {
+            enrolments: {
+              where: { status: { in: ['ACTIVE', 'COMPLETED'] } },
+              select: { id: true, studentProfileId: true },
+            },
+          },
+        },
+        attendances: {
+          select: { studentProfileId: true },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found in your institute');
+    }
+
+    const isTeacher = session.teacherProfileId === teacherProfileId;
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: { batchId: session.batchId, teacherProfileId, instituteId },
+    });
+
+    if (!isTeacher && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to end this live class');
+    }
+
+    const updated = await this.prisma.liveSession.update({
+      where: { id: session.id },
+      data: {
+        status: LiveSessionStatus.COMPLETED,
+      },
+    });
+
+    // Automatically mark non-attending enrolled students as ABSENT
+    const attendedProfileIds = new Set(session.attendances.map((a) => a.studentProfileId));
+    const startDate = new Date(session.startsAt);
+    const dateOnly = new Date(
+      Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate()),
+    );
+
+    let autoAbsentCount = 0;
+    for (const enr of session.batch?.enrolments || []) {
+      if (!attendedProfileIds.has(enr.studentProfileId)) {
+        await this.prisma.attendance.create({
+          data: {
+            instituteId,
+            batchId: session.batchId,
+            studentProfileId: enr.studentProfileId,
+            enrolmentId: enr.id,
+            liveSessionId: session.id,
+            mode: 'LIVE_SESSION',
+            date: dateOnly,
+            status: 'ABSENT',
+            remarks: 'Automatically marked absent upon session completion (did not join live meeting)',
+            markedById: authUser.id,
+            markedByRole: 'TEACHER',
+          },
+        });
+        autoAbsentCount++;
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Live class ended and attendance finalized',
+      status: updated.status,
+      autoAbsentCount,
       data: updated,
     };
   }

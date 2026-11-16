@@ -177,6 +177,16 @@ export class StudentMeController {
     return this.studentsService.joinStudentLiveSession(user, sessionId);
   }
 
+  @Post('live-sessions/:sessionId/telemetry')
+  @HttpCode(HttpStatus.OK)
+  async recordStudentLiveSessionTelemetry(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+    @Body() body: { event: 'JOINED' | 'HEARTBEAT' | 'LEFT'; durationSec?: number },
+  ) {
+    return this.studentsService.recordStudentLiveSessionTelemetry(user, sessionId, body);
+  }
+
   @Get('materials/:resourceId/content')
   @HttpCode(HttpStatus.OK)
   async getStudentMaterialContent(

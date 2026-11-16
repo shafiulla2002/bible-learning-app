@@ -444,12 +444,36 @@ export class CoursesService {
         },
       });
 
-      // If lead teacher specified, assign them
+      // Ensure a default active batch exists for non-BOOK courses so live classes & enrollments work immediately
+      let defaultBatchId: string | null = null;
+      if (newCourse.courseType !== CourseType.BOOK) {
+        const now = new Date();
+        const sixMonthsLater = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000);
+        const codePrefix = newCourse.slug.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'CRS';
+        const defaultBatch = await tx.batch.create({
+          data: {
+            instituteId,
+            courseId: newCourse.id,
+            name: `${newCourse.title} - Main Cohort`,
+            code: `${codePrefix}-${now.getFullYear()}-1`,
+            status: 'ACTIVE',
+            startDate: now,
+            endDate: sixMonthsLater,
+            capacity: 60,
+          },
+        });
+        defaultBatchId = defaultBatch.id;
+      }
+
+      // If lead teacher specified, assign them to both CourseInstructor and default BatchTeacher
+      let assignedTeacherUserId: string | null = null;
       if (input.leadTeacherId) {
         const teacher = await tx.teacherProfile.findFirst({
           where: { id: input.leadTeacherId, instituteId },
+          include: { membership: { select: { userId: true } } },
         });
         if (teacher) {
+          assignedTeacherUserId = teacher.membership?.userId || null;
           await tx.courseInstructor.create({
             data: {
               instituteId,
@@ -458,13 +482,23 @@ export class CoursesService {
               role: 'LEAD',
             },
           });
+          if (defaultBatchId) {
+            await tx.batchTeacher.create({
+              data: {
+                instituteId,
+                batchId: defaultBatchId,
+                teacherProfileId: teacher.id,
+                role: 'LEAD',
+              },
+            });
+          }
         }
       }
 
-      return newCourse;
+      return { newCourse, assignedTeacherUserId };
     });
 
-    const detail = await this.findOne(instituteId, course.id);
+    const detail = await this.findOne(instituteId, course.newCourse.id);
 
     if (this.notificationsService) {
       await this.notificationsService
@@ -480,6 +514,19 @@ export class CoursesService {
           link: `/admin/courses/${detail.id}`,
         })
         .catch(() => {});
+
+      if (course.assignedTeacherUserId) {
+        await this.notificationsService
+          .notifyUsers(instituteId, [course.assignedTeacherUserId], {
+            category: 'TEACHER',
+            eventType: 'COURSE_ASSIGNED',
+            referenceId: `${detail.id}:${input.leadTeacherId}`,
+            title: `New Course Assigned: ${detail.title}`,
+            body: `You have been assigned as Lead Instructor for "${detail.title}". You can now manage materials and schedule live classes.`,
+            link: `/teacher/courses/${detail.id}`,
+          })
+          .catch(() => {});
+      }
     }
 
     return detail;
@@ -1157,6 +1204,61 @@ export class CoursesService {
         role: input.role,
       },
     });
+
+    // Synchronize BatchTeacher assignment across active/upcoming batches of this course
+    if (course.courseType !== CourseType.BOOK) {
+      let batches = await this.prisma.batch.findMany({
+        where: { instituteId, courseId, status: { in: ['ACTIVE', 'UPCOMING'] } },
+      });
+      if (batches.length === 0) {
+        const now = new Date();
+        const sixMonthsLater = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000);
+        const codePrefix = course.slug.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'CRS';
+        const createdBatch = await this.prisma.batch.create({
+          data: {
+            instituteId,
+            courseId: course.id,
+            name: `${course.title} - Main Cohort`,
+            code: `${codePrefix}-${now.getFullYear()}-${String(Date.now()).slice(-3)}`,
+            status: 'ACTIVE',
+            startDate: now,
+            endDate: sixMonthsLater,
+            capacity: 60,
+          },
+        });
+        batches = [createdBatch];
+      }
+
+      for (const b of batches) {
+        const existingBt = await this.prisma.batchTeacher.findFirst({
+          where: { batchId: b.id, teacherProfileId: input.teacherProfileId, instituteId },
+        });
+        if (!existingBt) {
+          await this.prisma.batchTeacher.create({
+            data: {
+              instituteId,
+              batchId: b.id,
+              teacherProfileId: input.teacherProfileId,
+              role: input.role,
+            },
+          });
+        }
+      }
+    }
+
+    // Notify the assigned teacher
+    if (this.notificationsService && teacher.membership?.userId) {
+      await this.notificationsService
+        .notifyUsers(instituteId, [teacher.membership.userId], {
+          category: 'TEACHER',
+          eventType: 'COURSE_ASSIGNED',
+          referenceId: `${course.id}:${teacher.id}:${input.role}`,
+          title: `Course Assigned: ${course.title}`,
+          body: `You have been assigned as ${input.role === 'LEAD' ? 'Primary (Lead) Instructor' : 'Assistant Instructor'} for "${course.title}".`,
+          link: `/teacher/courses/${course.id}`,
+        })
+        .catch(() => {});
+    }
 
     return {
       id: instructor.id,

@@ -1954,9 +1954,9 @@ export class StudentsService {
               where: {
                 instituteId: user.instituteId || undefined,
                 status: { in: ['ACTIVE', 'COMPLETED'] },
-                batchId: { not: null },
               },
               include: {
+                course: true,
                 batch: {
                   include: {
                     course: true,
@@ -1971,6 +1971,29 @@ export class StudentsService {
 
     if (!membership || !membership.studentProfile) {
       throw new ForbiddenException('No active student profile found for this account.');
+    }
+
+    // Auto-backfill batchId for any enrolled non-BOOK course where batchId was null
+    for (const enr of membership.studentProfile.enrolments || []) {
+      if (!enr.batchId && enr.course && enr.course.courseType !== 'BOOK') {
+        const activeBatch = await this.prisma.batch.findFirst({
+          where: {
+            instituteId: membership.instituteId || enr.instituteId,
+            courseId: enr.courseId,
+            status: { in: ['ACTIVE', 'UPCOMING'] },
+          },
+          include: { course: true },
+          orderBy: { startDate: 'asc' },
+        });
+        if (activeBatch) {
+          await this.prisma.enrolment.update({
+            where: { id: enr.id },
+            data: { batchId: activeBatch.id },
+          });
+          enr.batchId = activeBatch.id;
+          (enr as any).batch = activeBatch;
+        }
+      }
     }
 
     const enrolledBatchIds = (membership.studentProfile.enrolments || [])
@@ -2055,6 +2078,18 @@ export class StudentsService {
       } else if (s.status !== 'COMPLETED' && now < s.startsAt && s.startsAt.getTime() - now.getTime() <= reminderWindowMs) {
         dynamicStatus = 'STARTING_SOON';
         upcomingCount++;
+        if (this.notificationsService && membership.instituteId) {
+          this.notificationsService
+            .notifyUsers(membership.instituteId, [user.sub], {
+              category: 'ACADEMIC',
+              eventType: 'LIVE_CLASS_REMINDER',
+              referenceId: `${s.id}:REMINDER_15M`,
+              title: `Starting Soon: ${s.title}`,
+              body: `"${s.title}" (${s.batch.course.title}) starts in less than 15 minutes. Get ready to join!`,
+              link: '/student/classes',
+            })
+            .catch(() => {});
+        }
       } else if (s.status !== 'COMPLETED' && now < s.startsAt) {
         dynamicStatus = 'UPCOMING';
         upcomingCount++;
@@ -2305,9 +2340,25 @@ export class StudentsService {
 
     const studentProfile = await this.resolveStudentProfileOrThrow(user);
     const startDate = new Date(session.startsAt);
+    const now = new Date();
     const dateOnly = new Date(
       Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate()),
     );
+
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentProfileId: studentProfile.id,
+        batchId: session.batchId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      select: { id: true },
+    });
+
+    // Late-entry rule: joining more than 15 minutes after scheduled start is marked LATE, otherwise PRESENT
+    const lateThresholdMs = 15 * 60 * 1000;
+    const isLate = now.getTime() - startDate.getTime() > lateThresholdMs;
+    const computedStatus = isLate ? 'LATE' : 'PRESENT';
+    const joinTimeIso = now.toISOString();
 
     const existing = await this.prisma.attendance.findFirst({
       where: {
@@ -2324,13 +2375,23 @@ export class StudentsService {
           instituteId: studentProfile.instituteId,
           batchId: session.batchId,
           studentProfileId: studentProfile.id,
+          enrolmentId: enrolment?.id || null,
           liveSessionId: session.id,
           mode: 'LIVE_SESSION',
           date: dateOnly,
-          status: 'PRESENT',
-          remarks: 'Joined live session via Student Portal',
+          status: computedStatus,
+          remarks: `Joined: ${joinTimeIso} | Status: ${computedStatus}`,
           markedById: studentProfile.membership?.userId || user.sub,
           markedByRole: 'STUDENT',
+        },
+      });
+    } else if (existing.status === 'ABSENT') {
+      // Student reconnected or joined after an initial absent mark
+      await this.prisma.attendance.update({
+        where: { id: existing.id },
+        data: {
+          status: computedStatus,
+          remarks: `${existing.remarks || ''} | Rejoined: ${joinTimeIso}`,
         },
       });
     }
@@ -2339,7 +2400,97 @@ export class StudentsService {
       canJoin: true,
       joinUrl: session.joinUrl,
       attendanceRecorded: true,
+      attendanceStatus: existing && existing.status !== 'ABSENT' ? existing.status : computedStatus,
       sessionId: session.id,
+    };
+  }
+
+  /**
+   * Verified Meeting Participation Telemetry (Jitsi IFrame events, Heartbeat & Leave Beacon)
+   * Updates join/leave timestamps, calculates total attendance duration, and enforces attendance rules.
+   */
+  async recordStudentLiveSessionTelemetry(
+    user: any,
+    sessionId: string,
+    body: { event: 'JOINED' | 'HEARTBEAT' | 'LEFT'; durationSec?: number },
+  ) {
+    const detail = await this.getStudentLiveSessionDetail(user, sessionId);
+    const session = detail.session;
+    const studentProfile = await this.resolveStudentProfileOrThrow(user);
+    const startDate = new Date(session.startsAt);
+    const now = new Date();
+    const dateOnly = new Date(
+      Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate()),
+    );
+
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentProfileId: studentProfile.id,
+        batchId: session.batchId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      select: { id: true },
+    });
+
+    const lateThresholdMs = 15 * 60 * 1000;
+    const isLate = now.getTime() - startDate.getTime() > lateThresholdMs;
+    const initialStatus = isLate ? 'LATE' : 'PRESENT';
+
+    let existing = await this.prisma.attendance.findFirst({
+      where: {
+        instituteId: studentProfile.instituteId,
+        batchId: session.batchId,
+        studentProfileId: studentProfile.id,
+        liveSessionId: session.id,
+      },
+    });
+
+    const durationMin = Math.max(
+      1,
+      Math.round(
+        (body.durationSec ||
+          (existing ? (now.getTime() - new Date(existing.markedAt).getTime()) / 1000 : 60)) / 60,
+      ),
+    );
+
+    const remarkText =
+      body.event === 'LEFT'
+        ? `Verified Meeting Participation | Joined: ${existing?.markedAt?.toISOString() || now.toISOString()} | Left: ${now.toISOString()} | Duration: ${durationMin} min(s)`
+        : `Verified Meeting Participation (${body.event}) | Active Duration: ${durationMin} min(s)`;
+
+    if (!existing) {
+      existing = await this.prisma.attendance.create({
+        data: {
+          instituteId: studentProfile.instituteId,
+          batchId: session.batchId,
+          studentProfileId: studentProfile.id,
+          enrolmentId: enrolment?.id || null,
+          liveSessionId: session.id,
+          mode: 'LIVE_SESSION',
+          date: dateOnly,
+          status: initialStatus,
+          remarks: remarkText,
+          markedById: studentProfile.membership?.userId || user.sub,
+          markedByRole: 'STUDENT',
+        },
+      });
+    } else {
+      existing = await this.prisma.attendance.update({
+        where: { id: existing.id },
+        data: {
+          enrolmentId: existing.enrolmentId || enrolment?.id || null,
+          status: existing.status === 'ABSENT' ? initialStatus : existing.status,
+          remarks: remarkText,
+        },
+      });
+    }
+
+    return {
+      success: true,
+      attendanceId: existing.id,
+      status: existing.status,
+      durationMin,
+      remarks: existing.remarks,
     };
   }
 

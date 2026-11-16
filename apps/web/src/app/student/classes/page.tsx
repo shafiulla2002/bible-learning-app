@@ -72,27 +72,58 @@ export default function StudentClassesPage() {
   const [joiningId, setJoiningId] = useState<string | null>(null);
 
   const handleJoinClass = async (session: LiveSessionItem) => {
+    // Open meeting synchronously inside user click event so browser popup blockers never block it
+    if (session.joinUrl) {
+      window.open(session.joinUrl, '_blank', 'noopener,noreferrer');
+    }
+
     setJoiningId(session.id);
     setActionNotice(null);
+    const joinStartMs = Date.now();
     try {
       const res = await apiFetch<{ joinUrl?: string; attendanceStatus?: string }>(
         `/students/live-sessions/${session.id}/join`,
         { method: 'POST' },
       );
-      const targetUrl = res.joinUrl || session.joinUrl;
-      if (targetUrl) {
-        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      if (!session.joinUrl && res.joinUrl) {
+        window.open(res.joinUrl, '_blank', 'noopener,noreferrer');
       }
+      const recordedStatus = (res.attendanceStatus as LiveSessionItem['attendanceStatus']) || 'PRESENT';
       setData((prev) =>
         prev
           ? {
               ...prev,
               sessions: prev.sessions.map((item) =>
-                item.id === session.id ? { ...item, attendanceStatus: 'PRESENT' } : item,
+                item.id === session.id ? { ...item, attendanceStatus: recordedStatus } : item,
               ),
             }
           : prev,
       );
+
+      // Start verified participation telemetry (JOINED + 60s HEARTBEAT + LEFT on return/unload)
+      apiFetch(`/students/live-sessions/${session.id}/telemetry`, {
+        method: 'POST',
+        body: JSON.stringify({ event: 'JOINED', durationSec: 1 }),
+      }).catch(() => {});
+
+      const heartbeatInterval = setInterval(() => {
+        const elapsedSec = Math.max(1, Math.round((Date.now() - joinStartMs) / 1000));
+        apiFetch(`/students/live-sessions/${session.id}/telemetry`, {
+          method: 'POST',
+          body: JSON.stringify({ event: 'HEARTBEAT', durationSec: elapsedSec }),
+        }).catch(() => {});
+      }, 60000);
+
+      const handleLeave = () => {
+        clearInterval(heartbeatInterval);
+        const elapsedSec = Math.max(1, Math.round((Date.now() - joinStartMs) / 1000));
+        apiFetch(`/students/live-sessions/${session.id}/telemetry`, {
+          method: 'POST',
+          body: JSON.stringify({ event: 'LEFT', durationSec: elapsedSec }),
+        }).catch(() => {});
+        window.removeEventListener('beforeunload', handleLeave);
+      };
+      window.addEventListener('beforeunload', handleLeave);
     } catch (err: any) {
       setActionNotice(err?.message || 'Unable to join live class right now.');
     } finally {

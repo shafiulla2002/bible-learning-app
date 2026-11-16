@@ -392,6 +392,15 @@ export class TeacherMeController {
     return this.teachersService.startTeacherLiveClass(user, sessionId);
   }
 
+  @Post('live-classes/:sessionId/end')
+  @HttpCode(HttpStatus.OK)
+  async endTeacherLiveClass(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.teachersService.endTeacherLiveClass(user, sessionId);
+  }
+
   @Post('live-classes/:sessionId/cancel')
   @HttpCode(HttpStatus.OK)
   async cancelTeacherLiveClass(

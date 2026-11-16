@@ -939,6 +939,26 @@ export class PublicService {
               : EnrolmentSource.FREE;
 
         for (const c of courses) {
+          let activeBatch = await tx.batch.findFirst({
+            where: { instituteId, courseId: c.id, status: { in: ['ACTIVE', 'UPCOMING'] } },
+            orderBy: { startDate: 'asc' },
+          });
+          if (!activeBatch && c.courseType !== 'BOOK') {
+            const codePrefix = c.slug.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'CRS';
+            activeBatch = await tx.batch.create({
+              data: {
+                instituteId,
+                courseId: c.id,
+                name: `${c.title} - Main Cohort`,
+                code: `${codePrefix}-${now.getFullYear()}-${String(Date.now()).slice(-3)}`,
+                status: 'ACTIVE',
+                startDate: now,
+                endDate: new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000),
+                capacity: 60,
+              },
+            });
+          }
+
           await tx.enrolment.upsert({
             where: {
               studentProfileId_courseId: {
@@ -949,11 +969,13 @@ export class PublicService {
             update: {
               source: enrolmentSource,
               status: EnrolmentStatus.ACTIVE,
+              ...(activeBatch ? { batchId: activeBatch.id } : {}),
             },
             create: {
               instituteId,
               studentProfileId: studentProfile.id,
               courseId: c.id,
+              batchId: activeBatch?.id || null,
               source: enrolmentSource,
               status: EnrolmentStatus.ACTIVE,
             },
@@ -1147,6 +1169,10 @@ export class PublicService {
       `;
 
       for (const item of order.items) {
+        const activeBatch = await tx.batch.findFirst({
+          where: { instituteId: order.instituteId, courseId: item.courseId, status: { in: ['ACTIVE', 'UPCOMING'] } },
+          orderBy: { startDate: 'asc' },
+        });
         await tx.enrolment.upsert({
           where: {
             studentProfileId_courseId: {
@@ -1157,11 +1183,13 @@ export class PublicService {
           update: {
             source: EnrolmentSource.PURCHASE,
             status: EnrolmentStatus.ACTIVE,
+            ...(activeBatch ? { batchId: activeBatch.id } : {}),
           },
           create: {
             instituteId: order.instituteId,
             studentProfileId: order.studentProfileId,
             courseId: item.courseId,
+            batchId: activeBatch?.id || null,
             source: EnrolmentSource.PURCHASE,
             status: EnrolmentStatus.ACTIVE,
           },

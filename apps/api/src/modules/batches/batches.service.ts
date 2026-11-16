@@ -339,12 +339,27 @@ export class BatchesService {
         },
       });
 
-      // Requirement 5: Support one Lead Teacher and multiple Assistant Teachers
+      // Requirement 5: Support one Lead Teacher and multiple Assistant Teachers + sync CourseInstructor
       if (input.leadTeacherProfileId) {
         await tx.batchTeacher.create({
           data: {
             instituteId,
             batchId: batch.id,
+            teacherProfileId: input.leadTeacherProfileId,
+            role: 'LEAD',
+          },
+        });
+        await tx.courseInstructor.upsert({
+          where: {
+            courseId_teacherProfileId: {
+              courseId: input.courseId,
+              teacherProfileId: input.leadTeacherProfileId,
+            },
+          },
+          update: { role: 'LEAD' },
+          create: {
+            instituteId,
+            courseId: input.courseId,
             teacherProfileId: input.leadTeacherProfileId,
             role: 'LEAD',
           },
@@ -356,6 +371,21 @@ export class BatchesService {
           data: {
             instituteId,
             batchId: batch.id,
+            teacherProfileId: assistantId,
+            role: 'ASSISTANT',
+          },
+        });
+        await tx.courseInstructor.upsert({
+          where: {
+            courseId_teacherProfileId: {
+              courseId: input.courseId,
+              teacherProfileId: assistantId,
+            },
+          },
+          update: {},
+          create: {
+            instituteId,
+            courseId: input.courseId,
             teacherProfileId: assistantId,
             role: 'ASSISTANT',
           },
@@ -375,6 +405,32 @@ export class BatchesService {
           link: `/admin/batches/${createdBatch.id}`,
         })
         .catch(() => {});
+
+      const assignedTeacherIds = [
+        ...(input.leadTeacherProfileId ? [input.leadTeacherProfileId] : []),
+        ...assistantTeacherIds,
+      ];
+      if (assignedTeacherIds.length > 0) {
+        const assignedProfiles = await this.prisma.teacherProfile.findMany({
+          where: { id: { in: assignedTeacherIds }, instituteId },
+          include: { membership: { select: { userId: true } } },
+        });
+        const teacherUserIds = assignedProfiles
+          .map((tp) => tp.membership?.userId)
+          .filter((id): id is string => Boolean(id));
+        if (teacherUserIds.length > 0) {
+          await this.notificationsService
+            .notifyUsers(instituteId, teacherUserIds, {
+              category: 'TEACHER',
+              eventType: 'BATCH_ASSIGNED',
+              referenceId: `${createdBatch.id}:ASSIGNED`,
+              title: `New Batch Assigned: ${createdBatch.name}`,
+              body: `You have been assigned to teach "${createdBatch.name}" for course "${course.title}".`,
+              link: `/teacher/batches/${createdBatch.id}`,
+            })
+            .catch(() => {});
+        }
+      }
     }
 
     return createdBatch;
@@ -896,7 +952,7 @@ export class BatchesService {
   ) {
     const batch = await this.prisma.batch.findFirst({
       where: { id: batchId, instituteId },
-      include: { teachers: true },
+      include: { teachers: true, course: { select: { id: true, title: true } } },
     });
     if (!batch) {
       throw new NotFoundException('Batch not found in this institute');
@@ -904,12 +960,13 @@ export class BatchesService {
 
     const teacher = await this.prisma.teacherProfile.findFirst({
       where: { id: input.teacherProfileId, instituteId },
+      include: { membership: { select: { userId: true } } },
     });
     if (!teacher) {
       throw new NotFoundException('Teacher profile not found in this institute');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const assignment = await this.prisma.$transaction(async (tx) => {
       // If role is LEAD, ensure we reassign previous LEAD to ASSISTANT or update existing
       if (input.role === 'LEAD') {
         const existingLead = batch.teachers.find((t) => t.role === 'LEAD');
@@ -921,6 +978,23 @@ export class BatchesService {
           });
         }
       }
+
+      // Synchronize CourseInstructor record
+      await tx.courseInstructor.upsert({
+        where: {
+          courseId_teacherProfileId: {
+            courseId: batch.courseId,
+            teacherProfileId: input.teacherProfileId,
+          },
+        },
+        update: { role: input.role },
+        create: {
+          instituteId,
+          courseId: batch.courseId,
+          teacherProfileId: input.teacherProfileId,
+          role: input.role,
+        },
+      });
 
       // Check if this teacher is already assigned to this batch
       const existingAssignment = batch.teachers.find(
@@ -943,6 +1017,21 @@ export class BatchesService {
         },
       });
     });
+
+    if (this.notificationsService && teacher.membership?.userId) {
+      await this.notificationsService
+        .notifyUsers(instituteId, [teacher.membership.userId], {
+          category: 'TEACHER',
+          eventType: 'BATCH_ASSIGNED',
+          referenceId: `${batch.id}:${teacher.id}:${input.role}`,
+          title: `Batch Assigned: ${batch.name}`,
+          body: `You have been assigned as ${input.role === 'LEAD' ? 'Primary (Lead) Instructor' : 'Assistant Instructor'} for batch "${batch.name}" (${batch.course?.title || 'Course'}).`,
+          link: `/teacher/batches/${batch.id}`,
+        })
+        .catch(() => {});
+    }
+
+    return assignment;
   }
 
   async removeTeacher(instituteId: string, batchId: string, teacherProfileId: string) {
@@ -1198,6 +1287,37 @@ export class BatchesService {
           title: 'Live Session Scheduled',
           body: `"${createdSession.title}" was scheduled for batch "${batch.name}" on ${startsAt.toISOString().slice(0, 10)}.`,
           link: `/admin/batches/${batch.id}`,
+        })
+        .catch(() => {});
+
+      // Notify assigned teacher
+      const teacherWithUser = await this.prisma.teacherProfile.findFirst({
+        where: { id: input.teacherProfileId, instituteId },
+        include: { membership: { select: { userId: true, user: { select: { fullName: true } } } } },
+      });
+      if (teacherWithUser?.membership?.userId) {
+        await this.notificationsService
+          .notifyUsers(instituteId, [teacherWithUser.membership.userId], {
+            category: 'TEACHER',
+            eventType: 'LIVE_CLASS_ASSIGNED',
+            referenceId: `${createdSession.id}:TEACHER`,
+            title: `Live Class Scheduled: ${createdSession.title}`,
+            body: `A live session "${createdSession.title}" for batch "${batch.name}" has been scheduled for ${startsAt.toLocaleString('en-US')}.`,
+            link: `/teacher/live-classes/${createdSession.id}`,
+          })
+          .catch(() => {});
+      }
+
+      // Notify enrolled batch students
+      await this.notificationsService
+        .emitLiveClassScheduled(instituteId, {
+          sessionId: createdSession.id,
+          title: createdSession.title,
+          batchId: batch.id,
+          batchName: batch.name,
+          startsAt: createdSession.startsAt,
+          joinUrl: createdSession.joinUrl,
+          teacherName: teacherWithUser?.membership?.user?.fullName,
         })
         .catch(() => {});
     }

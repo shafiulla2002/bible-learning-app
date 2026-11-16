@@ -65,7 +65,20 @@ export default function TeacherLiveClassesPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
+  const [endingId, setEndingId] = useState<string | null>(null);
   const [activeRecordingSession, setActiveRecordingSession] = useState<TeacherLiveClassItem | null>(null);
+
+  const handleEndClass = async (session: TeacherLiveClassItem) => {
+    setEndingId(session.id);
+    try {
+      await apiFetch(`/teachers/live-classes/${session.id}/end`, { method: 'POST' });
+      await refresh();
+    } catch (err: any) {
+      console.error('Failed to end class:', err);
+    } finally {
+      setEndingId(null);
+    }
+  };
 
   const resolveWorkingMeetingUrl = (existingUrl: string | null | undefined, sessionId: string, batchId: string) => {
     const raw = (existingUrl || '').trim();
@@ -653,16 +666,30 @@ export default function TeacherLiveClassesPage() {
                       </button>
 
                       {!isCancelled && !isCompleted && (
-                        <button
-                          type="button"
-                          disabled={startingId === session.id}
-                          onClick={() => handleStartClass(session)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition disabled:opacity-60"
-                        >
-                          <Video size={13} />
-                          <span>{startingId === session.id ? 'Starting...' : 'Start Class'}</span>
-                          <ExternalLink size={11} />
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            disabled={startingId === session.id}
+                            onClick={() => handleStartClass(session)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition disabled:opacity-60"
+                          >
+                            <Video size={13} />
+                            <span>{startingId === session.id ? 'Starting...' : 'Start Class'}</span>
+                            <ExternalLink size={11} />
+                          </button>
+                          {isLive && (
+                            <button
+                              type="button"
+                              disabled={endingId === session.id}
+                              onClick={() => handleEndClass(session)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition disabled:opacity-60"
+                              title="End Class & Finalize Attendance"
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>{endingId === session.id ? 'Ending...' : 'End Class'}</span>
+                            </button>
+                          )}
+                        </>
                       )}
 
                       {!isCancelled && !isCompleted && (
