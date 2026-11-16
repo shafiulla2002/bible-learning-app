@@ -2049,13 +2049,13 @@ export class StudentsService {
       if (s.status === 'CANCELLED') {
         dynamicStatus = 'CANCELLED';
         cancelledCount++;
-      } else if (now >= s.startsAt && now <= s.endsAt) {
+      } else if (s.status === 'LIVE' || (now >= s.startsAt && now <= s.endsAt && s.status !== 'COMPLETED')) {
         dynamicStatus = 'LIVE_NOW';
         liveNowCount++;
-      } else if (now < s.startsAt && s.startsAt.getTime() - now.getTime() <= reminderWindowMs) {
+      } else if (s.status !== 'COMPLETED' && now < s.startsAt && s.startsAt.getTime() - now.getTime() <= reminderWindowMs) {
         dynamicStatus = 'STARTING_SOON';
         upcomingCount++;
-      } else if (now < s.startsAt) {
+      } else if (s.status !== 'COMPLETED' && now < s.startsAt) {
         dynamicStatus = 'UPCOMING';
         upcomingCount++;
       } else {

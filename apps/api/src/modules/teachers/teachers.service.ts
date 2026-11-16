@@ -5083,6 +5083,110 @@ export class TeachersService {
     };
   }
 
+  /**
+   * Resolves a valid, working meeting URL or generates an instant Jitsi room
+   * when the existing URL is missing or an invalid placeholder Google Meet URL.
+   */
+  private resolveWorkingMeetingUrl(existingUrl: string | null | undefined, sessionId: string, batchId: string): string {
+    const raw = (existingUrl || '').trim();
+    const isGoogleMeet = /^https?:\/\/meet\.google\.com/i.test(raw);
+    const isValidGoogleMeet = /^https?:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?#]|$)/i.test(raw);
+
+    if (raw && (!isGoogleMeet || isValidGoogleMeet)) {
+      return raw;
+    }
+
+    const cleanRoom = `GraceBible-${sessionId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}-${batchId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6)}`;
+    return `https://meet.jit.si/${cleanRoom}`;
+  }
+
+  async startTeacherLiveClass(user: any, sessionId: string) {
+    const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
+
+    const session = await this.prisma.liveSession.findFirst({
+      where: { id: sessionId, instituteId },
+      include: {
+        batch: {
+          include: { course: { select: { id: true, title: true } } },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Live session not found in your institute');
+    }
+
+    const isTeacher = session.teacherProfileId === teacherProfileId;
+    const isBatchTeacher = await this.prisma.batchTeacher.findFirst({
+      where: { batchId: session.batchId, teacherProfileId, instituteId },
+    });
+
+    if (!isTeacher && !isBatchTeacher) {
+      throw new ForbiddenException('You are not authorized to start this live class');
+    }
+
+    if (session.status === LiveSessionStatus.CANCELLED) {
+      throw new BadRequestException('Cancelled sessions cannot be started');
+    }
+
+    const joinUrl = this.resolveWorkingMeetingUrl(session.joinUrl, session.id, session.batchId);
+
+    const updated = await this.prisma.liveSession.update({
+      where: { id: session.id },
+      data: {
+        status: LiveSessionStatus.LIVE,
+        joinUrl,
+      },
+    });
+
+    // Automatically share the live meeting link with every enrolled student in the batch
+    const enrolments = await this.prisma.enrolment.findMany({
+      where: {
+        instituteId,
+        batchId: session.batchId,
+        status: { in: ['ACTIVE', 'COMPLETED'] },
+      },
+      select: {
+        studentProfile: {
+          select: {
+            membership: {
+              select: { userId: true },
+            },
+          },
+        },
+      },
+    });
+
+    const studentUserIds = Array.from(
+      new Set(
+        enrolments
+          .map((e) => e.studentProfile?.membership?.userId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+
+    if (studentUserIds.length > 0) {
+      await this.prisma.notification.createMany({
+        data: studentUserIds.map((studentUserId) => ({
+          instituteId,
+          userId: studentUserId,
+          title: `Live Class Started: ${session.title}`,
+          body: `${authUser.fullName || 'Your instructor'} has started the live class (${session.batch?.course?.title || session.batch?.name || 'Cohort'}). Click Join Class to enter the meeting directly.`,
+          link: `/student/classes#cat=ACADEMIC&evt=LIVE_SESSION_STARTED&ref=${session.id}`,
+        })),
+      });
+    }
+
+    return {
+      success: true,
+      message: 'Live class started and meeting link shared with enrolled students',
+      joinUrl,
+      status: updated.status,
+      notifiedStudents: studentUserIds.length,
+      data: updated,
+    };
+  }
+
   async updateTeacherLiveClass(user: any, sessionId: string, payload: any) {
     const { teacherProfileId, instituteId, user: authUser } = await this.resolveTeacherMembership(user);
 

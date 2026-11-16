@@ -27,7 +27,7 @@ import {
   PlayCircle,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetch, apiFetchResponse } from '@/lib/api';
 import { useTeacherLiveClasses, TeacherLiveClassItem } from '@/lib/use-teacher-live-classes';
 import { MediaPlayerModal } from '@/components/shared/MediaPlayerModal';
 
@@ -64,7 +64,26 @@ export default function TeacherLiveClassesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [startingId, setStartingId] = useState<string | null>(null);
   const [activeRecordingSession, setActiveRecordingSession] = useState<TeacherLiveClassItem | null>(null);
+
+  const handleStartClass = async (session: TeacherLiveClassItem) => {
+    setStartingId(session.id);
+    try {
+      const res = await apiFetch<{ joinUrl?: string }>(`/teachers/live-classes/${session.id}/start`, {
+        method: 'POST',
+      });
+      const targetUrl = res?.joinUrl || session.joinUrl;
+      if (targetUrl) {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+      await refresh();
+    } catch (err: any) {
+      alert(err?.message || 'Unable to start live class.');
+    } finally {
+      setStartingId(null);
+    }
+  };
 
   // New Class Form State
   const [newTitle, setNewTitle] = useState('');
@@ -622,17 +641,17 @@ export default function TeacherLiveClassesPage() {
                         <span>{session.recordingUrl ? 'Recording' : 'Add Recording'}</span>
                       </button>
 
-                      {session.joinUrl && !isCancelled && (
-                        <a
-                          href={session.joinUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition"
+                      {!isCancelled && !isCompleted && (
+                        <button
+                          type="button"
+                          disabled={startingId === session.id}
+                          onClick={() => handleStartClass(session)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition disabled:opacity-60"
                         >
                           <Video size={13} />
-                          <span>Join Class</span>
+                          <span>{startingId === session.id ? 'Starting...' : 'Start Class'}</span>
                           <ExternalLink size={11} />
-                        </a>
+                        </button>
                       )}
 
                       {!isCancelled && !isCompleted && (
@@ -720,16 +739,16 @@ export default function TeacherLiveClassesPage() {
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-right whitespace-nowrap space-x-2">
-                          {session.joinUrl && !isCancelled && (
-                            <a
-                              href={session.joinUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-[11px] hover:bg-blue-700 transition"
+                          {!isCancelled && !isCompleted && (
+                            <button
+                              type="button"
+                              disabled={startingId === session.id}
+                              onClick={() => handleStartClass(session)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-[11px] hover:bg-blue-700 transition disabled:opacity-60"
                             >
                               <Video size={11} />
-                              <span>Join</span>
-                            </a>
+                              <span>{startingId === session.id ? 'Starting...' : 'Start Class'}</span>
+                            </button>
                           )}
                           <Link
                             href={`/teacher/live-classes/${session.id}`}

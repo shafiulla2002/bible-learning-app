@@ -26,6 +26,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
+import { apiFetch } from '@/lib/api';
 import {
   useTeacherLiveClassDetail,
   RosterStudentItem,
@@ -311,17 +312,27 @@ export default function TeacherLiveClassDetailPage() {
           </div>
 
           <div className="flex items-center gap-2 self-end sm:self-auto">
-            {session.joinUrl && !isCancelled && (
-              <a
-                href={session.joinUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+            {!isCancelled && !isCompleted && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await apiFetch<{ joinUrl?: string }>(`/teachers/live-classes/${session.id}/start`, {
+                      method: 'POST',
+                    });
+                    const targetUrl = res?.joinUrl || session.joinUrl;
+                    if (targetUrl) window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                    refresh();
+                  } catch (err: any) {
+                    alert(err?.message || 'Unable to start live class.');
+                  }
+                }}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition"
               >
                 <Video size={16} />
-                <span>Join Live Meeting</span>
+                <span>Start Class</span>
                 <ExternalLink size={13} />
-              </a>
+              </button>
             )}
 
             {!isCompleted && !isCancelled && (
