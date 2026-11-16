@@ -267,6 +267,8 @@ export default function TeacherLiveClassDetailPage() {
 
   // Filter roster
   const filteredRoster = roster.filter((student) => {
+    const sName = student.fullName || (student as any).studentName || 'Student';
+    const sAdm = student.admissionNumber || (student as any).admissionNo || '';
     const currentStatus = attendanceEdits[student.studentProfileId]?.status || student.attendanceStatus;
     if (rosterStatusFilter !== 'ALL') {
       if (rosterStatusFilter === 'UNMARKED' && currentStatus) return false;
@@ -275,8 +277,8 @@ export default function TeacherLiveClassDetailPage() {
     if (rosterSearch.trim()) {
       const q = rosterSearch.toLowerCase();
       return (
-        student.fullName.toLowerCase().includes(q) ||
-        (student.admissionNumber && student.admissionNumber.toLowerCase().includes(q)) ||
+        sName.toLowerCase().includes(q) ||
+        sAdm.toLowerCase().includes(q) ||
         (student.email && student.email.toLowerCase().includes(q))
       );
     }
@@ -316,15 +318,21 @@ export default function TeacherLiveClassDetailPage() {
               <button
                 type="button"
                 onClick={async () => {
+                  const raw = (session.joinUrl || '').trim();
+                  const isGoogleMeet = /^https?:\/\/meet\.google\.com/i.test(raw);
+                  const isValidGoogleMeet = /^https?:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?#]|$)/i.test(raw);
+                  const targetUrl =
+                    raw && (!isGoogleMeet || isValidGoogleMeet)
+                      ? raw
+                      : `https://meet.jit.si/GraceBible-${session.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}-${session.batchId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6)}`;
+                  window.open(targetUrl, '_blank', 'noopener,noreferrer');
                   try {
-                    const res = await apiFetch<{ joinUrl?: string }>(`/teachers/live-classes/${session.id}/start`, {
+                    await apiFetch<{ joinUrl?: string }>(`/teachers/live-classes/${session.id}/start`, {
                       method: 'POST',
                     });
-                    const targetUrl = res?.joinUrl || session.joinUrl;
-                    if (targetUrl) window.open(targetUrl, '_blank', 'noopener,noreferrer');
                     refresh();
                   } catch (err: any) {
-                    alert(err?.message || 'Unable to start live class.');
+                    console.error('Failed to mark class live:', err);
                   }
                 }}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition"
@@ -606,6 +614,9 @@ export default function TeacherLiveClassDetailPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredRoster.map((student) => {
+                    const displayName = student.fullName || (student as any).studentName || 'Student';
+                    const displayAdm = student.admissionNumber || (student as any).admissionNo || '—';
+                    const displayPhoto = student.photoUrl || (student as any).avatarUrl || null;
                     const currentStatus =
                       attendanceEdits[student.studentProfileId]?.status || student.attendanceStatus;
                     const currentRemarks =
@@ -617,18 +628,18 @@ export default function TeacherLiveClassDetailPage() {
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-xs overflow-hidden shrink-0">
-                              {student.photoUrl ? (
+                              {displayPhoto ? (
                                 <img
-                                  src={student.photoUrl}
-                                  alt={student.fullName}
+                                  src={displayPhoto}
+                                  alt={displayName}
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
-                                student.fullName.substring(0, 2).toUpperCase()
+                                displayName.substring(0, 2).toUpperCase()
                               )}
                             </div>
                             <div>
-                              <div className="font-bold text-slate-800">{student.fullName}</div>
+                              <div className="font-bold text-slate-800">{displayName}</div>
                               <div className="text-[11px] text-slate-400">{student.email || 'No email'}</div>
                             </div>
                           </div>
@@ -636,7 +647,7 @@ export default function TeacherLiveClassDetailPage() {
 
                         {/* Admission Number */}
                         <td className="py-3.5 px-4 font-mono text-slate-600">
-                          {student.admissionNumber || '—'}
+                          {displayAdm}
                         </td>
 
                         {/* Status Radio Buttons */}

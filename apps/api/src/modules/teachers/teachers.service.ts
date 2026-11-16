@@ -4866,7 +4866,7 @@ export class TeachersService {
           include: {
             course: { select: { id: true, title: true, slug: true } },
             enrolments: {
-              where: { status: 'ACTIVE' },
+              where: { status: { in: ['ACTIVE', 'COMPLETED'] } },
               include: {
                 studentProfile: {
                   include: {
@@ -5570,7 +5570,7 @@ export class TeachersService {
           include: {
             course: { select: { id: true, title: true } },
             enrolments: {
-              where: { status: 'ACTIVE' },
+              where: { status: { in: ['ACTIVE', 'COMPLETED'] } },
               include: {
                 studentProfile: {
                   include: {
@@ -5606,18 +5606,33 @@ export class TeachersService {
     const roster = session.batch.enrolments.map((enr) => {
       const sp = enr.studentProfile;
       const att = attMap.get(sp.id);
+      const fullName = sp.membership?.user?.fullName || 'Student';
+      const admissionNo = sp.admissionNo || 'N/A';
+      const avatarUrl = sp.membership?.user?.avatarUrl || null;
       return {
         studentProfileId: sp.id,
-        admissionNo: sp.admissionNo || 'N/A',
-        studentName: sp.membership?.user?.fullName || 'Student',
+        enrolmentId: enr.id,
+        admissionNo,
+        admissionNumber: admissionNo,
+        studentName: fullName,
+        fullName,
         email: sp.membership?.user?.email || '',
-        avatarUrl: sp.membership?.user?.avatarUrl || null,
+        avatarUrl,
+        photoUrl: avatarUrl,
         attendanceId: att?.id || null,
+        attendanceStatus: att?.status || null,
         status: att?.status || 'ABSENT',
         remarks: att?.remarks || null,
+        markedAt: att?.markedAt ? att.markedAt.toISOString() : null,
         isMarked: Boolean(att),
       };
     });
+
+    const presentCount = roster.filter((r) => r.attendanceStatus === 'PRESENT').length;
+    const lateCount = roster.filter((r) => r.attendanceStatus === 'LATE').length;
+    const absentCount = roster.filter((r) => r.attendanceStatus === 'ABSENT').length;
+    const excusedCount = roster.filter((r) => r.attendanceStatus === 'EXCUSED').length;
+    const unmarkedCount = roster.filter((r) => !r.attendanceStatus).length;
 
     return {
       success: true,
@@ -5628,6 +5643,14 @@ export class TeachersService {
         courseTitle: session.batch.course.title,
         startsAt: session.startsAt.toISOString(),
         roster,
+        summary: {
+          totalStudents: roster.length,
+          presentCount,
+          lateCount,
+          absentCount,
+          excusedCount,
+          unmarkedCount,
+        },
       },
     };
   }

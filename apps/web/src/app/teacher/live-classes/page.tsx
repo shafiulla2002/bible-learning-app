@@ -67,19 +67,30 @@ export default function TeacherLiveClassesPage() {
   const [startingId, setStartingId] = useState<string | null>(null);
   const [activeRecordingSession, setActiveRecordingSession] = useState<TeacherLiveClassItem | null>(null);
 
+  const resolveWorkingMeetingUrl = (existingUrl: string | null | undefined, sessionId: string, batchId: string) => {
+    const raw = (existingUrl || '').trim();
+    const isGoogleMeet = /^https?:\/\/meet\.google\.com/i.test(raw);
+    const isValidGoogleMeet = /^https?:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?#]|$)/i.test(raw);
+    if (raw && (!isGoogleMeet || isValidGoogleMeet)) {
+      return raw;
+    }
+    const cleanRoom = `GraceBible-${sessionId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}-${batchId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6)}`;
+    return `https://meet.jit.si/${cleanRoom}`;
+  };
+
   const handleStartClass = async (session: TeacherLiveClassItem) => {
+    const targetUrl = resolveWorkingMeetingUrl(session.joinUrl, session.id, session.batchId);
+    // Open synchronously in click handler so browser popup blockers never block the meeting tab
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+
     setStartingId(session.id);
     try {
-      const res = await apiFetch<{ joinUrl?: string }>(`/teachers/live-classes/${session.id}/start`, {
+      await apiFetch<{ joinUrl?: string }>(`/teachers/live-classes/${session.id}/start`, {
         method: 'POST',
       });
-      const targetUrl = res?.joinUrl || session.joinUrl;
-      if (targetUrl) {
-        window.open(targetUrl, '_blank', 'noopener,noreferrer');
-      }
       await refresh();
     } catch (err: any) {
-      alert(err?.message || 'Unable to start live class.');
+      console.error('Failed to mark class live:', err);
     } finally {
       setStartingId(null);
     }
