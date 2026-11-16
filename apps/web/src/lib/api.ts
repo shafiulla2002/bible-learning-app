@@ -180,7 +180,7 @@ export async function apiFetch<T>(
   endpoint: string,
   options: ApiFetchOptions = {},
 ): Promise<T> {
-  const { token, instituteId, bypassCache, ttlMs = 25000, headers: customHeaders, ...rest } = options;
+  const { token, instituteId, bypassCache, ttlMs = 120000, headers: customHeaders, ...rest } = options;
   const method = (rest.method || 'GET').toUpperCase();
   const url = resolveApiUrl(endpoint);
 
@@ -1764,7 +1764,7 @@ export async function resolveVerifiedAdminContext(
 ): Promise<DashboardContextDto> {
   const now = Date.now();
   if (!cachedContextPromise || forceRefresh || now > cachedContextExpiry) {
-    cachedContextExpiry = now + 60000;
+    cachedContextExpiry = now + 300000;
     cachedContextPromise = apiFetch<DashboardContextDto>('/dashboard/context', {
       bypassCache: forceRefresh,
     })

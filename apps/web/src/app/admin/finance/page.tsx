@@ -49,7 +49,12 @@ const adminNav = [
 ];
 
 export default function AdminFinancePage() {
-  const [instituteId, setInstituteId] = useState<string>('');
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('current_institute_id') || '';
+    }
+    return '';
+  });
   const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'structures'>('invoices');
   const [data, setData] = useState<FinanceOverviewDto | null>(null);
   const [students, setStudents] = useState<StudentProfileSummaryDto[]>([]);

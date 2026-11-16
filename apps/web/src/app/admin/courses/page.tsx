@@ -100,7 +100,12 @@ const adminNav = [
 ];
 
 export default function AdminCoursesPage() {
-  const [instituteId, setInstituteId] = useState<string>('');
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('current_institute_id') || '';
+    }
+    return '';
+  });
   const [adminName, setAdminName] = useState<string>('Institute Admin');
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');

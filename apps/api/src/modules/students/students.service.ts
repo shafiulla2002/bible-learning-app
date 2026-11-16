@@ -295,10 +295,23 @@ export class StudentsService {
         orderBy: { createdAt: query.sortOrder || 'desc' },
         include: {
           membership: {
-            include: { user: true },
+            select: {
+              userId: true,
+              user: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  phoneE164: true,
+                  email: true,
+                },
+              },
+            },
           },
           enrolments: {
-            include: { course: true, batch: true },
+            select: {
+              course: { select: { id: true, title: true } },
+              batch: { select: { id: true, name: true } },
+            },
             take: 1,
             orderBy: { createdAt: 'desc' },
           },

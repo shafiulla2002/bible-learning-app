@@ -97,7 +97,12 @@ function compressImageToThumbnail(file: File, maxDim = 256, quality = 0.82): Pro
 }
 
 export default function StudentsDirectoryPage() {
-  const [instituteId, setInstituteId] = useState<string>('');
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('current_institute_id') || '';
+    }
+    return '';
+  });
   const [adminName, setAdminName] = useState<string>('Institute Admin');
   const [activeSection, setActiveSection] = useState<'DIRECTORY' | 'ADMISSIONS'>('DIRECTORY');
   const [admissions, setAdmissions] = useState<any[]>([]);
@@ -287,7 +292,6 @@ export default function StudentsDirectoryPage() {
   // Fetch genuine student list from PostgreSQL
   const fetchStudents = useCallback(async () => {
     if (!instituteId) return;
-    setIsLoading(true);
     setErrorMessage(null);
 
     try {
@@ -301,6 +305,8 @@ export default function StudentsDirectoryPage() {
           setLiveStats(cached.meta.stats);
         }
         setIsLoading(false);
+      } else {
+        setIsLoading(true);
       }
 
       const res = await studentApi.getStudents(instituteId, {
