@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
-import { apiFetchResponse, resolveApiUrl } from '@/lib/api';
+import { apiFetchResponse } from '@/lib/api';
 import {
   BookOpen,
   PlayCircle,
@@ -96,6 +96,35 @@ export default function StudentCourseDetailPage({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
+  const [isDownloadingSyllabus, setIsDownloadingSyllabus] = useState<boolean>(false);
+
+  const handleDownloadSyllabus = async () => {
+    setIsDownloadingSyllabus(true);
+    try {
+      const res = await apiFetchResponse(`/students/courses/${courseId}/syllabus`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || `Unable to download syllabus (${res.status})`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') || '';
+      const match = disposition.match(/filename="?([^"]+)"?/i);
+      const fileName = match?.[1] || `${data?.course?.slug || 'course'}-syllabus.pdf`;
+
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err: any) {
+      alert(err?.message || 'Unable to download syllabus PDF right now.');
+    } finally {
+      setIsDownloadingSyllabus(false);
+    }
+  };
 
   useEffect(() => {
     async function fetchCourseDetail() {
@@ -171,13 +200,15 @@ export default function StudentCourseDetailPage({
             <span>Back to My Courses</span>
           </Link>
 
-          <a
-            href={resolveApiUrl(`/students/courses/${courseId}/syllabus`)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition"
+          <button
+            type="button"
+            onClick={handleDownloadSyllabus}
+            disabled={isDownloadingSyllabus}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition disabled:opacity-60 cursor-pointer"
           >
             <Download size={14} />
-            <span>Download Syllabus PDF</span>
-          </a>
+            <span>{isDownloadingSyllabus ? 'Downloading...' : 'Download Syllabus PDF'}</span>
+          </button>
         </div>
 
         {isLoading ? (
