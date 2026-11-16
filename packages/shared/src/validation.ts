@@ -1,10 +1,7 @@
 import { z } from 'zod';
 
 export const PhoneLoginSchema = z.object({
-  phoneNumber: z
-    .string()
-    .min(10, 'Phone number must be at least 10 digits')
-    .regex(/^\+?[1-9]\d{7,14}$/, 'Invalid phone number format (e.g. +919876543210)'),
+  phoneNumber: z.string().trim().min(1, 'Phone number is required'),
   otp: z.string().length(6, 'OTP must be 6 digits').optional(),
   password: z.string().min(6, 'Password must be at least 6 characters').optional(),
 });
@@ -13,10 +10,7 @@ export type PhoneLoginInput = z.infer<typeof PhoneLoginSchema>;
 
 export const StudentRegistrationSchema = z.object({
   fullName: z.string().min(2, 'Full name is required'),
-  phoneNumber: z
-    .string()
-    .min(10, 'Phone number must be at least 10 digits')
-    .regex(/^\+?[1-9]\d{7,14}$/, 'Invalid phone number format'),
+  phoneNumber: z.string().trim().min(1, 'Phone number is required'),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   password: z.string().min(6, 'Password must be at least 6 characters').optional(),
   church: z.string().optional(),
@@ -43,8 +37,8 @@ export const CreateStudentAdmissionSchema = z.object({
   phoneNumber: z
     .string()
     .transform((val) => val.trim().replace(/[\s\-()]/g, ''))
-    .refine((val) => /^\+?[1-9]\d{7,14}$/.test(val), {
-      message: 'Invalid phone number format (e.g. +919876543210)',
+    .refine((val) => val.length > 0, {
+      message: 'Phone number is required',
     }),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   gender: z
@@ -470,7 +464,7 @@ export type TeacherAddressInput = z.infer<typeof TeacherAddressSchema>;
 
 export const CreateTeacherSchema = z.object({
   fullName: z.string().trim().min(2, 'Full name must be at least 2 characters').max(100, 'Full name cannot exceed 100 characters'),
-  phoneE164: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'Phone number must be valid E.164 format (e.g. +919876543210)'),
+  phoneE164: z.string().trim().min(1, 'Phone number is required'),
   email: z.string().trim().email('Invalid email address').optional().nullable().or(z.literal('')),
   employeeCode: z.string().trim().max(50, 'Employee code cannot exceed 50 characters').optional().nullable().or(z.literal('')),
   qualifications: z.string().trim().max(255, 'Qualifications cannot exceed 255 characters').optional().nullable().or(z.literal('')),
@@ -553,7 +547,7 @@ export const PublicStudentRegisterSchema = z.object({
   instituteSlug: z.string().optional(),
   instituteId: z.string().optional(),
   fullName: z.string().trim().min(2, 'Full name is required').max(120),
-  phoneNumber: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'Phone number must be E.164 format (e.g. +919876543210)'),
+  phoneNumber: z.string().trim().min(1, 'Phone number is required'),
   email: z.string().trim().email('Invalid email address').optional().or(z.literal('')),
   password: z.string().min(8, 'Password must be at least 8 characters').optional(),
   church: z.string().trim().max(150).optional(),
@@ -569,7 +563,7 @@ export const PublicSubmitApplicationSchema = z.object({
   courseId: z.string().min(1, 'Course selection is required'),
   batchId: z.string().optional(),
   fullName: z.string().trim().min(2, 'Full name is required').max(120),
-  phoneNumber: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'Phone number must be E.164 format (e.g. +919876543210)'),
+  phoneNumber: z.string().trim().min(1, 'Phone number is required'),
   email: z.string().trim().email('Invalid email address').optional().or(z.literal('')),
   gender: z.string().optional(),
   dateOfBirth: z.string().optional(),
@@ -619,7 +613,7 @@ export const PublicCreateOrderSchema = z.object({
   couponCode: z.string().trim().max(40).optional(),
   admissionId: z.string().optional(),
   fullName: z.string().trim().min(2).max(120).optional(),
-  phoneNumber: z.string().trim().regex(/^\+[1-9]\d{6,14}$/).optional(),
+  phoneNumber: z.string().trim().optional(),
   email: z.string().trim().email().optional().or(z.literal('')),
 });
 export type PublicCreateOrderInput = z.infer<typeof PublicCreateOrderSchema>;
