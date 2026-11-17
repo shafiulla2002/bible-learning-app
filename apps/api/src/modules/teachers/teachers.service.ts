@@ -3858,6 +3858,7 @@ export class TeachersService {
     const submittedCount = attempts.filter((a: any) => a.status === 'SUBMITTED' || a.status === 'EVALUATED').length;
     const evaluatedCount = attempts.filter((a: any) => a.status === 'EVALUATED').length;
     const pendingEvalCount = attempts.filter((a: any) => a.status === 'SUBMITTED').length;
+    const sumQuestionMarks = exam.questions.reduce((acc, q) => acc + (q.marks || 0), 0);
 
     return {
       success: true,
@@ -3882,6 +3883,13 @@ export class TeachersService {
         submittedCount,
         evaluatedCount,
         pendingEvaluationCount: pendingEvalCount,
+        stats: {
+          totalQuestions: exam.questions.length,
+          sumQuestionMarks,
+          totalAttempts: attempts.length,
+          pendingEvaluations: pendingEvalCount,
+          evaluatedCount,
+        },
         questions: exam.questions.map((q) => ({
           id: q.id,
           prompt: q.prompt,
@@ -6123,19 +6131,72 @@ export class TeachersService {
     }
 
     const students = batch.enrolments.map((e) => {
-      const att = studentAttendanceMap.get(e.studentProfileId);
-      const rate = att && att.total > 0 ? Math.round((att.present / att.total) * 100) : null;
+      const att = studentAttendanceMap.get(e.studentProfileId) || { present: 0, total: 0 };
+      const ratePct = att.total > 0 ? Math.round((att.present / att.total) * 100) : null;
       return {
         id: e.studentProfileId,
         enrolmentId: e.id,
         admissionNo: e.studentProfile.admissionNo,
         fullName: e.studentProfile.membership?.user?.fullName || 'Student',
-        email: e.studentProfile.membership?.user?.email,
-        phone: e.studentProfile.membership?.user?.phoneE164,
-        enrolledAt: e.createdAt,
-        attendanceRate: rate,
+        email: e.studentProfile.membership?.user?.email || '',
+        phone: e.studentProfile.membership?.user?.phoneE164 || null,
+        photoUrl: null,
+        status: e.status,
+        progressPct: e.progressPct || 0,
+        enrolledAt: e.createdAt.toISOString(),
+        attendanceRate: ratePct,
+        attendance: {
+          present: att.present,
+          total: att.total,
+          ratePct,
+        },
       };
     });
+
+    const myAssignment = batch.teachers.find((t) => t.teacherProfileId === teacherProfileId);
+    const assignedRole = myAssignment?.role || 'LEAD';
+
+    const faculty = batch.teachers.map((t) => ({
+      teacherProfileId: t.teacherProfileId,
+      fullName: t.teacherProfile?.membership?.user?.fullName || 'Faculty',
+      email: t.teacherProfile?.membership?.user?.email || '',
+      employeeCode: t.teacherProfile?.employeeCode || null,
+      photoUrl: t.teacherProfile?.photoUrl || null,
+      role: t.role,
+    }));
+
+    const liveSessions = batch.liveSessions.map((ls) => ({
+      id: ls.id,
+      title: ls.title,
+      description: ls.description,
+      room: ls.room,
+      startsAt: ls.startsAt.toISOString(),
+      endsAt: ls.endsAt.toISOString(),
+      status: ls.status,
+      joinUrl: ls.joinUrl,
+      instructorName: faculty.find((f) => f.teacherProfileId === ls.teacherProfileId)?.fullName || null,
+    }));
+
+    const assignments = batch.assignments.map((a) => ({
+      id: a.id,
+      title: a.title,
+      dueDate: a.dueAt ? a.dueAt.toISOString() : null,
+      totalMarks: a.maxMarks,
+      status: a.status,
+      submissionsCount: a.submissions.length,
+    }));
+
+    const exams = batch.exams.map((ex) => ({
+      id: ex.id,
+      title: ex.title,
+      duration: ex.durationMin,
+      totalMarks: ex.totalMarks,
+      passMarks: ex.passMarks,
+      status: ex.status,
+      startsAt: ex.startAt ? ex.startAt.toISOString() : null,
+      endsAt: ex.endAt ? ex.endAt.toISOString() : null,
+      attemptsCount: ex.attempts.length,
+    }));
 
     return {
       success: true,
@@ -6145,54 +6206,35 @@ export class TeachersService {
           name: batch.name,
           code: batch.code,
           status: batch.status,
-          startDate: batch.startDate,
-          endDate: batch.endDate,
+          startDate: batch.startDate.toISOString(),
+          endDate: batch.endDate.toISOString(),
           capacity: batch.capacity,
-          term: batch.term?.name || null,
-          academicYear: batch.academicYear?.name || null,
+          termName: batch.term?.name || null,
+          academicYearName: batch.academicYear?.name || null,
+          assignedRole,
           course: {
             id: batch.course.id,
             title: batch.course.title,
             slug: batch.course.slug,
+            code: batch.course.slug,
+            level: batch.course.level,
             description: batch.course.description,
-            modulesCount: batch.course.modules.length,
-            lessonsCount: batch.course.modules.reduce(
-              (acc, m) => acc + m.chapters.reduce((a2, c) => a2 + c.lessons.length, 0),
-              0,
-            ),
           },
-          instructors: batch.teachers.map((t) => ({
-            id: t.teacherProfileId,
-            name: t.teacherProfile?.membership?.user?.fullName || 'Faculty',
-            role: t.role,
-            isMe: t.teacherProfileId === teacherProfileId,
-          })),
-          metrics: {
-            enrolledCount: students.length,
-            attendanceRate,
-            liveSessionsCount: batch.liveSessions.length,
-            assignmentsCount: batch.assignments.length,
-            examsCount: batch.exams.length,
-          },
-          students,
-          recentLiveSessions: batch.liveSessions,
-          recentAssignments: batch.assignments.map((a) => ({
-            id: a.id,
-            title: a.title,
-            dueAt: a.dueAt,
-            maxMarks: a.maxMarks,
-            status: a.status,
-            submissionsCount: a.submissions.length,
-          })),
-          recentExams: batch.exams.map((ex) => ({
-            id: ex.id,
-            title: ex.title,
-            status: ex.status,
-            type: ex.type,
-            totalMarks: ex.totalMarks,
-            attemptsCount: ex.attempts.length,
-          })),
         },
+        faculty,
+        students,
+        stats: {
+          totalEnrolled: students.length,
+          activeEnrolled: students.length,
+          totalFaculty: faculty.length,
+          totalAttendanceSessions: totalAttendanceRecords,
+          averageAttendancePct: attendanceRate,
+          totalAssignments: assignments.length,
+          totalExams: exams.length,
+        },
+        liveSessions,
+        assignments,
+        exams,
       },
     };
   }
