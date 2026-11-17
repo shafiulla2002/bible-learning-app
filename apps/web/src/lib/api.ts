@@ -26,29 +26,70 @@ export function resolveApiBaseUrl(): string {
 
 const API_BASE_URL = resolveApiBaseUrl();
 
-function consumeSsoTokenFromHash(): string | null {
+export function consumeSsoToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    const hash = window.location.hash || '';
-    if (!hash.includes('sso_token=')) return null;
-    const params = new URLSearchParams(hash.replace(/^#/, ''));
-    const ssoToken = params.get('sso_token');
-    if (!ssoToken) return null;
-    localStorage.setItem('access_token', ssoToken);
-    localStorage.setItem('current_user_role', 'STUDENT');
-    params.delete('sso_token');
-    const remainingHash = params.toString();
-    const cleanUrl = `${window.location.pathname}${window.location.search}${remainingHash ? `#${remainingHash}` : ''}`;
-    window.history.replaceState(null, '', cleanUrl);
-    return ssoToken;
+    let ssoToken: string | null = null;
+
+    // 1. Check query parameters (?sso_token=... or ?token=...)
+    if (window.location.search) {
+      const searchParams = new URLSearchParams(window.location.search);
+      ssoToken = searchParams.get('sso_token') || searchParams.get('token');
+      if (ssoToken) {
+        searchParams.delete('sso_token');
+        searchParams.delete('token');
+        const remainingSearch = searchParams.toString();
+        const cleanUrl = `${window.location.pathname}${remainingSearch ? `?${remainingSearch}` : ''}${window.location.hash || ''}`;
+        window.history.replaceState(null, '', cleanUrl);
+      }
+    }
+
+    // 2. Check hash (#sso_token=... or #token=...)
+    if (!ssoToken && window.location.hash) {
+      const hash = window.location.hash.replace(/^#/, '');
+      if (hash.includes('sso_token=') || hash.includes('token=')) {
+        const hashParams = new URLSearchParams(hash);
+        ssoToken = hashParams.get('sso_token') || hashParams.get('token');
+        if (ssoToken) {
+          hashParams.delete('sso_token');
+          hashParams.delete('token');
+          const remainingHash = hashParams.toString();
+          const cleanUrl = `${window.location.pathname}${window.location.search || ''}${remainingHash ? `#${remainingHash}` : ''}`;
+          window.history.replaceState(null, '', cleanUrl);
+        }
+      }
+    }
+
+    if (ssoToken) {
+      localStorage.setItem('access_token', ssoToken);
+      localStorage.setItem('token', ssoToken);
+      localStorage.setItem('auth_token', ssoToken);
+      localStorage.setItem('current_user_role', 'STUDENT');
+      try {
+        const cookieVal = encodeURIComponent(ssoToken);
+        document.cookie = `access_token=${cookieVal}; path=/; max-age=2592000; SameSite=Lax`;
+        document.cookie = `auth_token=${cookieVal}; path=/; max-age=2592000; SameSite=Lax`;
+        document.cookie = `token=${cookieVal}; path=/; max-age=2592000; SameSite=Lax`;
+      } catch {}
+      return ssoToken;
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-function getStoredAccessToken(): string | null {
+export function getStoredAccessToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return consumeSsoTokenFromHash() || localStorage.getItem('access_token');
+  return (
+    consumeSsoToken() ||
+    localStorage.getItem('access_token') ||
+    localStorage.getItem('token') ||
+    localStorage.getItem('auth_token') ||
+    readBrowserCookie('access_token') ||
+    readBrowserCookie('auth_token') ||
+    readBrowserCookie('token')
+  );
 }
 
 function readBrowserCookie(name: string): string | null {
@@ -77,8 +118,7 @@ function getCacheScopePrefix(tokenOverride?: string): string {
   if (typeof window === 'undefined') return 'ssr';
   const rawToken =
     tokenOverride ||
-    localStorage.getItem('access_token') ||
-    readBrowserCookie('access_token') ||
+    getStoredAccessToken() ||
     '';
   if (!rawToken) return 'anon';
   // Use trailing token characters as an opaque per-session scope without storing raw JWT in keys

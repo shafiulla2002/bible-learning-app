@@ -418,9 +418,11 @@ export class AuthService {
       role,
       instituteId,
       permissions,
+      ...(studentProfileId ? { studentProfileId, admissionNo } : {}),
+      ...(teacherProfileId ? { teacherProfileId } : {}),
     };
 
-    const accessToken = this.jwtService.sign(payload);
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '30d' });
 
     return {
       success: true,
@@ -475,5 +477,18 @@ export class AuthService {
         status: m.status,
       })),
     };
+  }
+
+  async signRefreshedSessionToken(user: any): Promise<string> {
+    const payload = {
+      sub: user.sub,
+      phone: user.phone,
+      role: user.role,
+      instituteId: user.instituteId,
+      permissions: user.permissions || [],
+      ...(user.studentProfileId ? { studentProfileId: user.studentProfileId } : {}),
+      ...(user.teacherProfileId ? { teacherProfileId: user.teacherProfileId } : {}),
+    };
+    return this.jwtService.sign(payload, { expiresIn: '30d' });
   }
 }

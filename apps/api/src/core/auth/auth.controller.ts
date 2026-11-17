@@ -20,7 +20,7 @@ export class AuthController {
 
   private attachSessionCookies(res: Response, accessToken: string) {
     const isProd = process.env.NODE_ENV === 'production';
-    const maxAgeMs = 7 * 24 * 60 * 60 * 1000;
+    const maxAgeMs = 30 * 24 * 60 * 60 * 1000;
     const csrfToken = crypto.randomBytes(24).toString('hex');
 
     res.cookie('auth_token', accessToken, {
@@ -94,6 +94,18 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async getMe(@CurrentUser() user: any) {
     return this.authService.getMe(user);
+  }
+
+  @Post('refresh-session')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async refreshSession(
+    @CurrentUser() user: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const accessToken = await this.authService.signRefreshedSessionToken(user);
+    this.attachSessionCookies(res, accessToken);
+    return { success: true, accessToken };
   }
 
   private clearSessionCookies(res: Response) {

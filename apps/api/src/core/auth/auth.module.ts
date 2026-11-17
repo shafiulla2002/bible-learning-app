@@ -18,7 +18,7 @@ import { getRequiredJwtSecret } from './jwt-secret.util';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret: getRequiredJwtSecret(configService.get<string>('JWT_SECRET')),
-        signOptions: { expiresIn: '15m' },
+        signOptions: { expiresIn: '30d' },
       }),
     }),
   ],

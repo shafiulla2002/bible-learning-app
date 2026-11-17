@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetchResponse, apiFetchSwr, clearCache, getStaleCached, resolveApiUrl } from './api';
+import { apiFetchResponse, apiFetchSwr, clearCache, consumeSsoToken, getStaleCached, resolveApiUrl } from './api';
 
 export interface StudentAuthContext {
   student: {
@@ -106,6 +106,9 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
   }, [options.redirectTo]);
 
   const fetchStudentContext = useCallback(async (forceRefresh = false) => {
+    if (typeof window !== 'undefined') {
+      consumeSsoToken();
+    }
     const cachedEntry = !forceRefresh
       ? getStaleCached<StudentAuthContext>(resolveApiUrl('/students/me'))
       : null;

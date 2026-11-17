@@ -588,13 +588,16 @@ export class PublicService {
     });
 
     const permissions = DEFAULT_ROLE_PERMISSIONS.STUDENT;
-    const accessToken = this.jwtService.sign({
-      sub: created.user.id,
-      phone: created.user.phoneE164,
-      role: 'STUDENT',
-      instituteId: inst.id,
-      permissions,
-    });
+    const accessToken = this.jwtService.sign(
+      {
+        sub: created.user.id,
+        phone: created.user.phoneE164,
+        role: 'STUDENT',
+        instituteId: inst.id,
+        permissions,
+      },
+      { expiresIn: '30d' },
+    );
 
     return {
       accessToken,
