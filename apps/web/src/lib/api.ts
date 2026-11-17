@@ -2711,7 +2711,8 @@ export async function preloadStudentPortalData(): Promise<void> {
         apiFetchResponse('/students/certificates').then(async (res) => {
           if (res.ok) {
             const data = await res.json();
-            setCachedPortalData('student_certificates', data, 15 * 60 * 1000);
+            const list = Array.isArray(data) ? data : Array.isArray(data?.certificates) ? data.certificates : [];
+            setCachedPortalData('student_certificates', list, 15 * 60 * 1000);
           }
         }),
         // 8. Tuition Fees, Invoices & Payment History
@@ -2726,7 +2727,8 @@ export async function preloadStudentPortalData(): Promise<void> {
           if (res.ok) {
             const data = await res.json();
             setCachedPortalData('student_notifications', data, 15 * 60 * 1000);
-            setCachedPortalData('student_messages', data, 15 * 60 * 1000);
+            const msgList = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.items) ? data.items : [];
+            setCachedPortalData('student_messages', msgList, 15 * 60 * 1000);
           }
         }),
         // 10. Student Profile

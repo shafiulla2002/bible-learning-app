@@ -40,59 +40,63 @@ interface Certificate {
 }
 
 export default function StudentCertificatesPage() {
-  const cachedCerts = getCachedPortalData<Certificate[]>('student_certificates');
-  const [certificates, setCertificates] = useState<Certificate[]>(() => cachedCerts || []);
-  const [loading, setLoading] = useState<boolean>(() => !cachedCerts);
+  const cachedRaw = getCachedPortalData<any>('student_certificates');
+  const cachedList: Certificate[] = Array.isArray(cachedRaw)
+    ? cachedRaw
+    : Array.isArray(cachedRaw?.certificates)
+    ? cachedRaw.certificates
+    : [];
+  const [certificates, setCertificates] = useState<Certificate[]>(() => cachedList);
+  const [loading, setLoading] = useState<boolean>(() => cachedList.length === 0 && !cachedRaw);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   const fetchCertificates = useCallback(async () => {
-    if (certificates.length === 0) {
-      setLoading(true);
-    }
     setErrorMessage(null);
     try {
       const res = await apiFetchResponse('/students/certificates');
       if (res.ok) {
         const data = await res.json();
-        const list = Array.isArray(data.certificates) ? data.certificates : [];
+        const list: Certificate[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.certificates)
+          ? data.certificates
+          : [];
         setCertificates(list);
         setCachedPortalData('student_certificates', list, 15 * 60 * 1000);
       } else {
         const errData = await res.json().catch(() => ({}));
         setErrorMessage(errData.message || 'Unable to retrieve certificates from the server.');
-        if (certificates.length === 0) {
-          setCertificates([]);
-        }
       }
     } catch (err: any) {
       console.error('Fetch Certificates Error:', err);
-      setErrorMessage(err.message || 'Connection error while contacting certificates service.');
-      if (certificates.length === 0) {
-        setCertificates([]);
-      }
+      setErrorMessage(err?.message || 'Connection error while contacting certificates service.');
     } finally {
       setLoading(false);
     }
-  }, [certificates.length]);
+  }, []);
 
   useEffect(() => {
     fetchCertificates();
   }, [fetchCertificates]);
 
   const handleCopyLink = (token: string) => {
+    if (typeof window === 'undefined') return;
     const url = `${window.location.origin}/verify/certificate/${token}`;
-    navigator.clipboard.writeText(url);
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    }
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2500);
   };
 
-  const filtered = certificates.filter(
+  const safeList = Array.isArray(certificates) ? certificates : [];
+  const filtered = safeList.filter(
     (c) =>
-      c.courseTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.certificateNo.toLowerCase().includes(searchQuery.toLowerCase())
+      (c?.courseTitle || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c?.certificateNo || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -155,7 +159,7 @@ export default function StudentCertificatesPage() {
             placeholder="Search certificate number or course..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            disabled={loading || certificates.length === 0}
+            disabled={loading || safeList.length === 0}
             className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
           />
         </div>

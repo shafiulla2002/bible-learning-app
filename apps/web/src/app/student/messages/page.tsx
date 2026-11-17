@@ -19,9 +19,14 @@ interface NotificationItem {
 
 export default function StudentMessagesPage() {
   const cachedItems =
-    getCachedPortalData<NotificationItem[]>('student_messages') ||
-    getCachedPortalData<NotificationItem[]>('student_notifications');
-  const [items, setItems] = useState<NotificationItem[]>(() => (Array.isArray(cachedItems) ? cachedItems : []));
+    getCachedPortalData<any>('student_messages') ||
+    getCachedPortalData<any>('student_notifications');
+  const [items, setItems] = useState<NotificationItem[]>(() => {
+    if (Array.isArray(cachedItems)) return cachedItems;
+    if (cachedItems && Array.isArray(cachedItems.data)) return cachedItems.data;
+    if (cachedItems && Array.isArray(cachedItems.items)) return cachedItems.items;
+    return [];
+  });
   const [loading, setLoading] = useState<boolean>(() => !cachedItems);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +37,7 @@ export default function StudentMessagesPage() {
     setError(null);
     try {
       const res = await apiFetch<any>('/students/notifications');
-      const list = Array.isArray(res) ? res : res?.items || res?.notifications || [];
+      const list = Array.isArray(res) ? res : res?.data || res?.items || res?.notifications || [];
       setItems(list);
       setCachedPortalData('student_messages', list, 15 * 60 * 1000);
     } catch (err: any) {
@@ -61,7 +66,8 @@ export default function StudentMessagesPage() {
     } catch {}
   };
 
-  const unreadCount = items.filter((i) => !i.readAt).length;
+  const safeItems = Array.isArray(items) ? items : [];
+  const unreadCount = safeItems.filter((i) => !i.readAt).length;
 
   return (
     <StudentShell pageTitle="Messages & Announcements">

@@ -87,8 +87,8 @@ export default function StudentPaymentsPage() {
     overdueInvoicesCount: 0,
     currency: 'INR',
   });
-  const [invoices, setInvoices] = useState<Invoice[]>(() => cachedPayments?.invoices || []);
-  const [recentPayments, setRecentPayments] = useState<PaymentTransaction[]>(() => cachedPayments?.recentPayments || []);
+  const [invoices, setInvoices] = useState<Invoice[]>(() => (Array.isArray(cachedPayments?.invoices) ? cachedPayments.invoices : []));
+  const [recentPayments, setRecentPayments] = useState<PaymentTransaction[]>(() => (Array.isArray(cachedPayments?.recentPayments) ? cachedPayments.recentPayments : []));
   const [loading, setLoading] = useState<boolean>(() => !cachedPayments);
   const [activeTab, setActiveTab] = useState<'invoices' | 'history'>('invoices');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');

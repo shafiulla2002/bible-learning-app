@@ -19,8 +19,8 @@ interface CalendarEventItem {
 }
 
 export default function StudentCalendarPage() {
-  const cachedEvents = getCachedPortalData<CalendarEventItem[]>('student_calendar');
-  const [events, setEvents] = useState<CalendarEventItem[]>(() => cachedEvents || []);
+  const cachedEvents = getCachedPortalData<any>('student_calendar');
+  const [events, setEvents] = useState<CalendarEventItem[]>(() => (Array.isArray(cachedEvents) ? cachedEvents : []));
   const [filterKind, setFilterKind] = useState<'ALL' | 'LIVE_CLASS' | 'ASSIGNMENT' | 'EXAM'>('ALL');
   const [loading, setLoading] = useState<boolean>(() => !cachedEvents);
   const [error, setError] = useState<string | null>(null);
