@@ -374,6 +374,31 @@ export default function StudentsDirectoryPage() {
       cleanPhone = `+${cleanPhone}`;
     }
 
+    const cleanEmail = newStudent.email?.trim().toLowerCase() || null;
+
+    // Instant client-side duplicate check against loaded directory
+    const duplicatePhone = students.find(
+      (s) => s.phoneNumber && s.phoneNumber.replace(/[\s\-()]/g, '') === cleanPhone,
+    );
+    if (duplicatePhone) {
+      setFormError(
+        `A student with phone number "${cleanPhone}" is already registered (${duplicatePhone.fullName}, Admission No: ${duplicatePhone.admissionNo}). A student cannot be registered more than once.`,
+      );
+      return;
+    }
+
+    if (cleanEmail) {
+      const duplicateEmail = students.find(
+        (s) => s.email && s.email.trim().toLowerCase() === cleanEmail,
+      );
+      if (duplicateEmail) {
+        setFormError(
+          `A student with email "${cleanEmail}" is already registered (${duplicateEmail.fullName}, Admission No: ${duplicateEmail.admissionNo}). A student cannot be registered more than once.`,
+        );
+        return;
+      }
+    }
+
     const genderVal = (newStudent.gender || 'MALE').toUpperCase();
 
     const addressVal =

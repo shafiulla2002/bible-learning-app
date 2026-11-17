@@ -86,20 +86,52 @@ export class StudentsService {
       throw new NotFoundException('Institute not found');
     }
 
-    // 2. Check if student with this phone already has an active profile in this institute
-    const existingMembership = await this.prisma.membership.findFirst({
+    // 2. Prevent duplicate student registration by phone number OR email
+    const cleanPhone = input.phoneNumber.replace(/\s+/g, '').trim();
+    const cleanEmail = input.email?.trim().toLowerCase() || null;
+
+    // Check by Phone Number
+    const existingPhoneMembership = await this.prisma.membership.findFirst({
       where: {
         instituteId,
         role: Role.STUDENT,
-        user: { phoneE164: input.phoneNumber },
+        user: { phoneE164: cleanPhone },
       },
       include: { studentProfile: true },
     });
 
-    if (existingMembership?.studentProfile) {
+    if (existingPhoneMembership?.studentProfile) {
       throw new ConflictException(
-        `A student with phone ${input.phoneNumber} is already registered with admission number ${existingMembership.studentProfile.admissionNo}`,
+        `A student with phone number "${cleanPhone}" is already registered (Admission No: ${existingPhoneMembership.studentProfile.admissionNo}). A student cannot be registered more than once.`,
       );
+    }
+
+    // Check by Email
+    if (cleanEmail) {
+      const existingEmailMembership = await this.prisma.membership.findFirst({
+        where: {
+          instituteId,
+          role: Role.STUDENT,
+          user: { email: { equals: cleanEmail, mode: 'insensitive' } },
+        },
+        include: { studentProfile: true },
+      });
+
+      if (existingEmailMembership?.studentProfile) {
+        throw new ConflictException(
+          `A student with email address "${cleanEmail}" is already registered (Admission No: ${existingEmailMembership.studentProfile.admissionNo}). A student cannot be registered more than once.`,
+        );
+      }
+
+      // Check if this email is already registered with a different phone number
+      const emailOwner = await this.prisma.user.findFirst({
+        where: { email: { equals: cleanEmail, mode: 'insensitive' } },
+      });
+      if (emailOwner && emailOwner.phoneE164 !== cleanPhone) {
+        throw new ConflictException(
+          `The email address "${cleanEmail}" is already registered with a different phone number (${emailOwner.phoneE164}). Each student must have a unique phone number and email address.`,
+        );
+      }
     }
 
     // 3. Generate unique admission number
@@ -131,15 +163,15 @@ export class StudentsService {
     const createdStudent = await this.prisma.$transaction(async (tx) => {
       // Find or create User
       let user = await tx.user.findUnique({
-        where: { phoneE164: input.phoneNumber },
+        where: { phoneE164: cleanPhone },
       });
 
       if (!user) {
         user = await tx.user.create({
           data: {
-            phoneE164: input.phoneNumber,
-            fullName: input.fullName,
-            email: input.email || null,
+            phoneE164: cleanPhone,
+            fullName: input.fullName.trim(),
+            email: cleanEmail,
           },
         });
       } else {
@@ -147,8 +179,8 @@ export class StudentsService {
         user = await tx.user.update({
           where: { id: user.id },
           data: {
-            fullName: input.fullName,
-            email: input.email || user.email,
+            fullName: input.fullName.trim(),
+            email: cleanEmail || user.email,
           },
         });
       }

@@ -514,7 +514,7 @@ export class PublicService {
     }
 
     const phone = this.normalizePhone(input.phoneNumber);
-    const emailClean = input.email?.trim() || null;
+    const emailClean = input.email?.trim().toLowerCase() || null;
 
     const existingMembership = await this.prisma.membership.findFirst({
       where: {
@@ -525,13 +525,31 @@ export class PublicService {
       include: { studentProfile: true },
     });
     if (existingMembership?.studentProfile) {
-      throw new ConflictException('A student account already exists for this phone number in this institute');
+      throw new ConflictException(
+        `A student account already exists for this phone number (${phone}) in this institute with admission number ${existingMembership.studentProfile.admissionNo}. A student cannot be registered more than once.`,
+      );
     }
 
     if (emailClean) {
-      const emailOwner = await this.prisma.user.findUnique({ where: { email: emailClean } });
+      const existingEmailMembership = await this.prisma.membership.findFirst({
+        where: {
+          instituteId: inst.id,
+          role: Role.STUDENT,
+          user: { email: { equals: emailClean, mode: 'insensitive' } },
+        },
+        include: { studentProfile: true },
+      });
+      if (existingEmailMembership?.studentProfile) {
+        throw new ConflictException(
+          `A student account already exists for this email address (${emailClean}) in this institute with admission number ${existingEmailMembership.studentProfile.admissionNo}. A student cannot be registered more than once.`,
+        );
+      }
+
+      const emailOwner = await this.prisma.user.findFirst({
+        where: { email: { equals: emailClean, mode: 'insensitive' } },
+      });
       if (emailOwner && emailOwner.phoneE164 !== phone) {
-        throw new ConflictException('This email address is already registered with a different phone number');
+        throw new ConflictException('This email address is already registered with a different phone number. Each student must have a unique email and phone number.');
       }
     }
 
@@ -655,7 +673,18 @@ export class PublicService {
     }
 
     const phone = this.normalizePhone(input.phoneNumber);
-    const emailClean = input.email?.trim() || null;
+    const emailClean = input.email?.trim().toLowerCase() || null;
+
+    if (emailClean) {
+      const emailOwner = await this.prisma.user.findFirst({
+        where: { email: { equals: emailClean, mode: 'insensitive' } },
+      });
+      if (emailOwner && emailOwner.phoneE164 !== phone) {
+        throw new ConflictException(
+          `This email address (${emailClean}) is already registered with a different phone number (${emailOwner.phoneE164}). Please use your registered phone number or a different email address.`,
+        );
+      }
+    }
     const applicationNumber = await this.generateApplicationNumber(instituteId);
     const admissionNo = await this.generateAdmissionNo(instituteId);
 
@@ -903,6 +932,19 @@ export class PublicService {
         throw new BadRequestException('Applicant phone number and full name are required for checkout');
       }
       const phone = this.normalizePhone(input.phoneNumber);
+      const emailClean = input.email?.trim().toLowerCase() || null;
+
+      if (emailClean) {
+        const emailOwner = await this.prisma.user.findFirst({
+          where: { email: { equals: emailClean, mode: 'insensitive' } },
+        });
+        if (emailOwner && emailOwner.phoneE164 !== phone) {
+          throw new ConflictException(
+            `This email address (${emailClean}) is already registered with a different phone number (${emailOwner.phoneE164}). Please log in or use your registered phone number.`,
+          );
+        }
+      }
+
       const admNo = await this.generateAdmissionNo(instituteId);
       studentProfile = await this.prisma.$transaction(async (tx) => {
         let user = await tx.user.findUnique({ where: { phoneE164: phone } });
@@ -911,7 +953,7 @@ export class PublicService {
             data: {
               phoneE164: phone,
               fullName: input.fullName!.trim(),
-              email: input.email?.trim() || null,
+              email: emailClean,
               status: 'ACTIVE',
             },
           });
