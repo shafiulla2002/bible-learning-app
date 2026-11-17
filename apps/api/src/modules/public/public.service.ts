@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Optional,
   NotFoundException,
   BadRequestException,
   ConflictException,
@@ -10,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   PublicCourseCatalogQuery,
   PublicStudentRegisterInput,
@@ -41,6 +43,7 @@ export class PublicService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    @Optional() private readonly notificationsService?: NotificationsService,
   ) {}
 
   private normalizePhone(rawPhone: string): string {
@@ -587,6 +590,17 @@ export class PublicService {
       return { user, membership, studentProfile };
     });
 
+    if (this.notificationsService) {
+      await this.notificationsService
+        .emitStudentEvent(inst.id, {
+          eventType: 'STUDENT_REGISTERED',
+          studentId: created.studentProfile.id,
+          fullName: created.user.fullName,
+          admissionNo: created.studentProfile.admissionNo,
+        })
+        .catch(() => {});
+    }
+
     const permissions = DEFAULT_ROLE_PERMISSIONS.STUDENT;
     const accessToken = this.jwtService.sign(
       {
@@ -769,6 +783,22 @@ export class PublicService {
 
       return { admission, profile, autoAccept };
     });
+
+    if (this.notificationsService) {
+      const applicantUser = await this.prisma.user.findFirst({
+        where: { memberships: { some: { studentProfile: { id: outcome.profile.id } } } },
+        select: { fullName: true },
+      });
+      await this.notificationsService
+        .emitStudentEvent(instituteId, {
+          eventType: outcome.autoAccept ? 'STUDENT_REGISTERED' : 'ADMISSION_AWAITING_APPROVAL',
+          studentId: outcome.profile.id,
+          fullName: applicantUser?.fullName || 'Student Applicant',
+          admissionNo: outcome.profile.admissionNo,
+          courseTitle: course.title,
+        })
+        .catch(() => {});
+    }
 
     return {
       applicationId: outcome.admission.id,
@@ -1058,6 +1088,18 @@ export class PublicService {
           },
           { expiresIn: '30d' },
         );
+
+        if (this.notificationsService) {
+          await this.notificationsService
+            .emitStudentEvent(instituteId, {
+              eventType: 'STUDENT_REGISTERED',
+              studentId: studentProfile.id,
+              fullName: studentUserRecord.fullName,
+              admissionNo: studentProfile.admissionNo,
+              courseTitle: courses.map((c) => c.title).join(', '),
+            })
+            .catch(() => {});
+        }
       }
 
       return {
@@ -1254,6 +1296,23 @@ export class PublicService {
         });
       }
     });
+
+    if (this.notificationsService) {
+      const studentProf = await this.prisma.studentProfile.findUnique({
+        where: { id: order.studentProfileId },
+        include: { membership: { include: { user: { select: { fullName: true } } } } },
+      });
+      if (studentProf?.membership?.user) {
+        await this.notificationsService
+          .emitStudentEvent(order.instituteId, {
+            eventType: 'STUDENT_REGISTERED',
+            studentId: studentProf.id,
+            fullName: studentProf.membership.user.fullName,
+            admissionNo: studentProf.admissionNo,
+          })
+          .catch(() => {});
+      }
+    }
 
     return {
       verified: true,

@@ -73,6 +73,7 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
         localStorage.removeItem('current_student_profile_id');
         localStorage.removeItem('current_teacher_profile_id');
         localStorage.removeItem('current_institute_id');
+        localStorage.removeItem('student_ctx_cache');
         sessionStorage.clear();
       } catch (e) {
         console.warn('localStorage clear note:', e);
@@ -109,6 +110,8 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     if (typeof window !== 'undefined') {
       consumeSsoToken();
     }
+
+    // 1. Try in-memory SWR cache first
     const cachedEntry = !forceRefresh
       ? getStaleCached<StudentAuthContext>(resolveApiUrl('/students/me'))
       : null;
@@ -116,13 +119,30 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     if (cachedEntry?.data?.student && cachedEntry?.data?.profile) {
       setData(cachedEntry.data);
       setIsLoading(false);
+      // If not stale, skip API call entirely
+      if (!cachedEntry.isStale) return;
     } else {
+      // 2. Try localStorage cold-start cache (makes returning users instant)
+      if (!forceRefresh && typeof window !== 'undefined') {
+        try {
+          const lsRaw = localStorage.getItem('student_ctx_cache');
+          if (lsRaw) {
+            const lsParsed = JSON.parse(lsRaw) as { data: StudentAuthContext; expiry: number };
+            if (lsParsed.expiry > Date.now() && lsParsed.data?.student && lsParsed.data?.profile) {
+              setData(lsParsed.data);
+              setIsLoading(false);
+              // Still refresh in background — do NOT return yet, fall through
+            }
+          }
+        } catch {}
+      }
       setIsLoading(true);
     }
+
     setError(null);
     try {
       const res = await apiFetchSwr<StudentAuthContext>('/students/me', {
-        ttlMs: 60000,
+        ttlMs: 300000, // 5 min in-memory cache (was 60s)
         bypassCache: forceRefresh,
         onRevalidate: (fresh) => {
           if (fresh && fresh.student && fresh.profile) {
@@ -136,6 +156,10 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
         if (typeof window !== 'undefined') {
           localStorage.setItem('current_student_profile_id', res.profile.studentProfileId);
           localStorage.setItem('current_institute_id', res.institute.id);
+          // Persist to localStorage for cold-start cache (5 min)
+          try {
+            localStorage.setItem('student_ctx_cache', JSON.stringify({ data: res, expiry: Date.now() + 300000 }));
+          } catch {}
         }
       } else {
         throw new Error('Incomplete student authentication profile');

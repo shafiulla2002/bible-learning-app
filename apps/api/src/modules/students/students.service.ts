@@ -830,122 +830,75 @@ export class StudentsService {
       membershipWhere.instituteId = user.instituteId;
     }
 
-    const membership = await this.prisma.membership.findFirst({
-      where: membershipWhere,
-      include: {
-        user: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            phoneE164: true,
-            avatarUrl: true,
+    // ── Parallel Phase 1: membership + enrolments (lightweight selects only) ──
+    const [membership, enrolmentsRaw] = await Promise.all([
+      this.prisma.membership.findFirst({
+        where: membershipWhere,
+        select: {
+          instituteId: true,
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phoneE164: true,
+              avatarUrl: true,
+            },
+          },
+          institute: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              logoUrl: true,
+            },
+          },
+          studentProfile: {
+            select: {
+              id: true,
+              admissionNo: true,
+              church: true,
+              preferredLanguage: true,
+              status: true,
+            },
           },
         },
-        institute: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            logoUrl: true,
-          },
+      }),
+      // Enrolments with minimal course info first — no nested modules/lessons
+      this.prisma.enrolment.findMany({
+        where: {
+          instituteId: user.instituteId || undefined,
+          studentProfile: { membership: { userId: user.sub, role: Role.STUDENT, status: 'ACTIVE' } },
         },
-        studentProfile: {
-          include: {
-            enrolments: {
-              where: {
-                instituteId: user.instituteId || undefined,
-              },
-              include: {
-                course: {
-                  select: {
-                    id: true,
-                    title: true,
-                    slug: true,
-                    coverImage: true,
-                    level: true,
-                    category: {
-                      select: {
-                        id: true,
-                        name: true,
-                      },
+        select: {
+          id: true,
+          status: true,
+          progressPct: true,
+          batchId: true,
+          courseId: true,
+          course: {
+            select: {
+              id: true,
+              title: true,
+              slug: true,
+              coverImage: true,
+              category: { select: { id: true, name: true } },
+              instructors: {
+                take: 1,
+                select: {
+                  teacherProfile: {
+                    select: {
+                      membership: { select: { user: { select: { fullName: true } } } },
                     },
-                    instructors: {
-                      select: {
-                        teacherProfile: {
-                          select: {
-                            photoUrl: true,
-                            membership: {
-                              select: {
-                                user: {
-                                  select: {
-                                    fullName: true,
-                                  },
-                                },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                    modules: {
-                      select: {
-                        id: true,
-                        chapters: {
-                          select: {
-                            id: true,
-                            lessons: {
-                              select: {
-                                id: true,
-                                title: true,
-                                durationSec: true,
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-                batch: {
-                  select: {
-                    id: true,
-                    name: true,
-                    startDate: true,
-                    endDate: true,
-                  },
-                },
-                progressRecords: {
-                  select: {
-                    id: true,
-                    lessonId: true,
-                    isCompleted: true,
-                    lastPosSec: true,
-                    completedAt: true,
                   },
                 },
               },
             },
-            attendances: {
-              where: {
-                status: 'PRESENT',
-                instituteId: user.instituteId || undefined,
-              },
-              select: {
-                id: true,
-                date: true,
-                status: true,
-                batchId: true,
-                liveSessionId: true,
-              },
-              orderBy: {
-                date: 'desc',
-              },
-            },
           },
+          batch: { select: { id: true, name: true } },
         },
-      },
-    });
+      }),
+    ]);
 
     if (!membership || !membership.studentProfile) {
       throw new ForbiddenException(
@@ -955,53 +908,139 @@ export class StudentsService {
 
     const studentProfile = membership.studentProfile;
     const instituteId = membership.instituteId;
-
-    // 1. Process Enrolments & Courses
-    const allEnrolments = studentProfile.enrolments || [];
+    const allEnrolments = enrolmentsRaw || [];
     const activeEnrolments = allEnrolments.filter((e) => e.status === 'ACTIVE');
     const completedEnrolments = allEnrolments.filter(
       (e) => e.status === 'COMPLETED' || e.progressPct === 100
     );
 
-    // Collect enrolled batch IDs
     const enrolledBatchIds = activeEnrolments
       .map((e) => e.batchId)
       .filter((id): id is string => Boolean(id));
 
-    // Map course details
+    const activeCourseIds = activeEnrolments.map((e) => e.courseId).filter(Boolean);
+
+    // ── Parallel Phase 2: progress records + attendance + live sessions ──
+    const [progressRecordsRaw, attendances, lessonCountsRaw, liveSessions] = await Promise.all([
+      // Progress records for active enrolments only (completed lessons)
+      this.prisma.lessonProgress.findMany({
+        where: {
+          enrolment: {
+            studentProfileId: studentProfile.id,
+            status: 'ACTIVE',
+          },
+          isCompleted: true,
+        },
+        select: {
+          enrolmentId: true,
+          lessonId: true,
+          isCompleted: true,
+          completedAt: true,
+        },
+      }),
+      // Recent attendance (last 90 days max)
+      this.prisma.attendance.findMany({
+        where: {
+          studentProfileId: studentProfile.id,
+          status: 'PRESENT',
+          instituteId: instituteId || undefined,
+          date: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
+        },
+        select: { id: true, date: true, status: true },
+        orderBy: { date: 'desc' },
+        take: 100,
+      }),
+      // Lesson counts per course via chapter join (Lesson has chapterId, Chapter has moduleId, Module has courseId)
+      activeCourseIds.length > 0
+        ? this.prisma.lesson.findMany({
+            where: {
+              chapter: {
+                module: {
+                  courseId: { in: activeCourseIds },
+                },
+              },
+            },
+            select: {
+              id: true,
+              chapter: {
+                select: {
+                  module: {
+                    select: { courseId: true },
+                  },
+                },
+              },
+            },
+          })
+        : Promise.resolve([]),
+      // Upcoming live sessions
+      enrolledBatchIds.length > 0
+        ? this.prisma.liveSession.findMany({
+            where: {
+              instituteId,
+              batchId: { in: enrolledBatchIds },
+              status: { in: ['SCHEDULED', 'LIVE'] },
+              endsAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+            },
+            select: {
+              id: true,
+              title: true,
+              startsAt: true,
+              endsAt: true,
+              status: true,
+              joinUrl: true,
+              room: true,
+              batchId: true,
+              batch: {
+                select: {
+                  name: true,
+                  course: { select: { title: true } },
+                },
+              },
+              teacherProfile: {
+                select: {
+                  membership: { select: { user: { select: { fullName: true } } } },
+                },
+              },
+            },
+            orderBy: { startsAt: 'asc' },
+            take: 5,
+          })
+        : Promise.resolve([]),
+    ]);
+
+    // ── Build lesson count map ──
+    const lessonCountMap = new Map<string, number>();
+    for (const l of lessonCountsRaw as Array<{ id: string; chapter: { module: { courseId: string } } }>) {
+      const cId = l.chapter?.module?.courseId;
+      if (cId) {
+        lessonCountMap.set(cId, (lessonCountMap.get(cId) || 0) + 1);
+      }
+    }
+
+    // ── Build progress map (enrolmentId -> completedLesson set) ──
+    const progressByEnrolment = new Map<string, Set<string>>();
+    for (const p of progressRecordsRaw) {
+      if (!progressByEnrolment.has(p.enrolmentId)) {
+        progressByEnrolment.set(p.enrolmentId, new Set());
+      }
+      progressByEnrolment.get(p.enrolmentId)!.add(p.lessonId);
+    }
+
+    // 1. Map continue-learning courses
     const continueLearningCourses = activeEnrolments.map((enrolment) => {
       const course = enrolment.course;
-      const allLessons: Array<{ id: string; title: string; durationSec: number }> = [];
-      if (course?.modules) {
-        for (const mod of course.modules) {
-          if (mod.chapters) {
-            for (const ch of mod.chapters) {
-              if (ch.lessons) {
-                for (const l of ch.lessons) {
-                  allLessons.push(l);
-                }
-              }
-            }
-          }
-        }
-      }
-
-      const totalLessons = allLessons.length > 0 ? allLessons.length : 20;
-      const completedProgress = (enrolment.progressRecords || []).filter((p) => p.isCompleted);
+      const totalLessons = lessonCountMap.get(course.id) || 20;
+      const completedLessonsSet = progressByEnrolment.get(enrolment.id) || new Set();
       const completedLessons = Math.min(
         totalLessons,
         Math.max(
-          completedProgress.length,
+          completedLessonsSet.size,
           Math.round((enrolment.progressPct / 100) * totalLessons)
         )
       );
-
       const instructorName =
         course?.instructors?.[0]?.teacherProfile?.membership?.user?.fullName ||
         'Faculty Instructor';
-
-      const completedLessonIds = new Set(completedProgress.map((p) => p.lessonId));
-      const nextLesson = allLessons.find((l) => !completedLessonIds.has(l.id)) || allLessons[0];
 
       return {
         enrolmentId: enrolment.id,
@@ -1014,121 +1053,60 @@ export class StudentsService {
         completedLessons,
         totalLessons,
         progressPct: enrolment.progressPct,
-        nextLessonId: nextLesson?.id || null,
-        nextLessonTitle: nextLesson?.title || 'Lesson 1',
+        nextLessonId: null,
+        nextLessonTitle: 'Continue Learning',
         batchName: enrolment.batch?.name || null,
       };
     });
 
-    // 2. Fetch Upcoming Live Classes
-    let upcomingLiveClasses: any[] = [];
-    if (enrolledBatchIds.length > 0) {
-      const now = new Date();
-      const liveSessions = await this.prisma.liveSession.findMany({
-        where: {
-          instituteId,
-          batchId: { in: enrolledBatchIds },
-          status: { in: ['SCHEDULED', 'LIVE'] },
-          endsAt: { gte: new Date(now.getTime() - 2 * 60 * 60 * 1000) },
-        },
-        include: {
-          batch: {
-            select: {
-              id: true,
-              name: true,
-              course: {
-                select: {
-                  title: true,
-                },
-              },
-            },
-          },
-          teacherProfile: {
-            select: {
-              photoUrl: true,
-              membership: {
-                select: {
-                  user: {
-                    select: {
-                      fullName: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        orderBy: {
-          startsAt: 'asc',
-        },
-        take: 5,
-      });
+    // 2. Map live sessions
+    const now = new Date();
+    const upcomingLiveClasses = liveSessions.map((session: any) => {
+      const isCurrentlyLive =
+        session.status === 'LIVE' ||
+        (now >= new Date(session.startsAt) && now <= new Date(session.endsAt));
+      return {
+        id: session.id,
+        title: session.title,
+        courseName: session.batch?.course?.title || session.batch?.name || 'Course Class',
+        instructor: session.teacherProfile?.membership?.user?.fullName || 'Faculty Member',
+        startsAt: session.startsAt,
+        endsAt: session.endsAt,
+        status: isCurrentlyLive ? 'LIVE' : session.status,
+        joinUrl: session.joinUrl || null,
+        room: session.room || null,
+        canJoin: isCurrentlyLive || (new Date(session.startsAt).getTime() - now.getTime() <= 15 * 60 * 1000),
+      };
+    });
 
-      upcomingLiveClasses = liveSessions.map((session) => {
-        const isCurrentlyLive =
-          session.status === 'LIVE' ||
-          (now >= new Date(session.startsAt) && now <= new Date(session.endsAt));
-
-        return {
-          id: session.id,
-          title: session.title,
-          courseName: session.batch?.course?.title || session.batch?.name || 'Course Class',
-          instructor:
-            session.teacherProfile?.membership?.user?.fullName || 'Faculty Member',
-          startsAt: session.startsAt,
-          endsAt: session.endsAt,
-          status: isCurrentlyLive ? 'LIVE' : session.status,
-          joinUrl: session.joinUrl || null,
-          room: session.room || null,
-          canJoin: isCurrentlyLive || (new Date(session.startsAt).getTime() - now.getTime() <= 15 * 60 * 1000),
-        };
-      });
-    }
-
-    // 3. Compute Learning Hours & Streak
-    const attendances = studentProfile.attendances || [];
+    // 3. Statistics
     const attendedClassesCount = attendances.length;
-    const attendanceHours = attendedClassesCount * 1.5;
-
-    let lessonSeconds = 0;
-    for (const e of allEnrolments) {
-      if (e.progressRecords) {
-        for (const p of e.progressRecords) {
-          if (p.isCompleted) {
-            lessonSeconds += 1800;
-          }
-        }
-      }
-    }
-    const lessonHours = Math.round(lessonSeconds / 3600);
-    const totalLearningHours = Math.max(0, Math.round(attendanceHours + lessonHours));
+    const totalCompletedLessonsCount = progressRecordsRaw.filter((p) => p.isCompleted).length;
+    const totalLearningHours = Math.max(
+      0,
+      Math.round(attendedClassesCount * 1.5 + totalCompletedLessonsCount * 0.5)
+    );
 
     const activityDateStrings = new Set<string>();
     for (const a of attendances) {
-      const d = new Date(a.date).toISOString().split('T')[0];
-      activityDateStrings.add(d);
+      activityDateStrings.add(new Date(a.date).toISOString().split('T')[0]);
     }
-    for (const e of allEnrolments) {
-      for (const p of e.progressRecords || []) {
-        if (p.completedAt) {
-          activityDateStrings.add(new Date(p.completedAt).toISOString().split('T')[0]);
-        }
+    for (const p of progressRecordsRaw) {
+      if (p.completedAt) {
+        activityDateStrings.add(new Date(p.completedAt).toISOString().split('T')[0]);
       }
     }
 
     let streak = 0;
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    const yesterday = new Date(today);
+    const todayStr = now.toISOString().split('T')[0];
+    const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toISOString().split('T')[0];
-
     const currentCheck = activityDateStrings.has(todayStr)
-      ? today
+      ? now
       : activityDateStrings.has(yesterdayStr)
       ? yesterday
       : null;
-
     if (currentCheck) {
       const checkDate = new Date(currentCheck);
       while (true) {
@@ -1136,22 +1114,16 @@ export class StudentsService {
         if (activityDateStrings.has(dateStr)) {
           streak++;
           checkDate.setDate(checkDate.getDate() - 1);
-        } else {
-          break;
-        }
+        } else break;
       }
     }
 
-    const totalCompletedLessons = continueLearningCourses.reduce(
-      (acc, c) => acc + c.completedLessons,
-      0
-    );
     const xpPoints =
-      totalCompletedLessons * 100 +
+      totalCompletedLessonsCount * 100 +
       attendedClassesCount * 50 +
       completedEnrolments.length * 500;
 
-    // 4. Learning Progress Donut Chart Calculation
+    // 4. Progress chart
     const categoryProgressMap = new Map<string, { total: number; completed: number }>();
     for (const c of continueLearningCourses) {
       const cat = c.category || 'Biblical Studies';
@@ -1160,63 +1132,32 @@ export class StudentsService {
       existing.completed += c.completedLessons;
       categoryProgressMap.set(cat, existing);
     }
+    const totalAllLessons = Array.from(categoryProgressMap.values()).reduce((acc, v) => acc + v.total, 0);
+    const totalAllCompleted = Array.from(categoryProgressMap.values()).reduce((acc, v) => acc + v.completed, 0);
+    const overallProgressPct = totalAllLessons > 0 ? Math.round((totalAllCompleted / totalAllLessons) * 100) : 0;
 
-    const categoryBreakdown: Array<{ name: string; percentage: number; color: string }> = [];
     const colors = ['#2563EB', '#8B5CF6', '#06B6D4'];
     let colorIdx = 0;
-
-    const totalAllLessons = Array.from(categoryProgressMap.values()).reduce(
-      (acc, v) => acc + v.total,
-      0
-    );
-    const totalAllCompleted = Array.from(categoryProgressMap.values()).reduce(
-      (acc, v) => acc + v.completed,
-      0
-    );
-
+    const categoryBreakdown: Array<{ name: string; percentage: number; color: string }> = [];
     for (const [catName, progress] of categoryProgressMap.entries()) {
-      const percentage =
-        totalAllLessons > 0 ? Math.round((progress.completed / totalAllLessons) * 100) : 0;
       categoryBreakdown.push({
         name: catName,
-        percentage,
+        percentage: totalAllLessons > 0 ? Math.round((progress.completed / totalAllLessons) * 100) : 0,
         color: colors[colorIdx % colors.length],
       });
       colorIdx++;
     }
-
     if (categoryBreakdown.length === 0) {
-      categoryBreakdown.push({
-        name: 'No active courses',
-        percentage: 0,
-        color: '#94A3B8',
-      });
+      categoryBreakdown.push({ name: 'No active courses', percentage: 0, color: '#94A3B8' });
     }
 
-    const overallProgressPct =
-      totalAllLessons > 0 ? Math.round((totalAllCompleted / totalAllLessons) * 100) : 0;
-
-    // 5. Academic Calendar Events
-    const calendarEvents: Array<{
-      date: string;
-      type: 'LIVE_CLASS' | 'ASSIGNMENT' | 'EXAM' | 'ATTENDANCE';
-      title: string;
-    }> = [];
-
+    // 5. Calendar events
+    const calendarEvents: Array<{ date: string; type: 'LIVE_CLASS' | 'ASSIGNMENT' | 'EXAM' | 'ATTENDANCE'; title: string }> = [];
     for (const c of upcomingLiveClasses) {
-      calendarEvents.push({
-        date: new Date(c.startsAt).toISOString().split('T')[0],
-        type: 'LIVE_CLASS',
-        title: c.title,
-      });
+      calendarEvents.push({ date: new Date(c.startsAt).toISOString().split('T')[0], type: 'LIVE_CLASS', title: c.title });
     }
-
     for (const a of attendances.slice(0, 30)) {
-      calendarEvents.push({
-        date: new Date(a.date).toISOString().split('T')[0],
-        type: 'ATTENDANCE',
-        title: 'Class Attendance: Present',
-      });
+      calendarEvents.push({ date: new Date(a.date).toISOString().split('T')[0], type: 'ATTENDANCE', title: 'Class Attendance: Present' });
     }
 
     return {

@@ -330,15 +330,15 @@ export class NotificationsService {
   private getEligibleRolesForCategory(category: NotificationCategory): Role[] {
     switch (category) {
       case 'FEE':
-        return [Role.INSTITUTE_ADMIN, Role.FINANCE_OFFICER];
+        return [Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.FINANCE_OFFICER];
       case 'STUDENT':
       case 'TEACHER':
       case 'ATTENDANCE':
       case 'ACADEMIC':
-        return [Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR];
+        return [Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN, Role.ACADEMIC_COORDINATOR];
       case 'ADMIN':
       default:
-        return [Role.INSTITUTE_ADMIN];
+        return [Role.SUPER_ADMIN, Role.INSTITUTE_ADMIN];
     }
   }
 
@@ -961,17 +961,19 @@ export class NotificationsService {
       courseTitle?: string;
     },
   ) {
-    let title = 'New Student Registration';
-    let body = `${params.fullName} (${params.admissionNo}) has been registered${
+    let title = 'New Student Admission & Enrollment';
+    let body = `${params.fullName} (${params.admissionNo}) has newly enrolled${
       params.courseTitle ? ` in ${params.courseTitle}` : ''
-    }.`;
+    }. Click to view complete student profile.`;
 
     if (params.eventType === 'ADMISSION_AWAITING_APPROVAL') {
-      title = 'Admission Awaiting Approval';
-      body = `Application from ${params.fullName} (${params.admissionNo}) requires administrative review.`;
+      title = 'New Student Admission Application';
+      body = `New admission application received from ${params.fullName} (${params.admissionNo})${
+        params.courseTitle ? ` for ${params.courseTitle}` : ''
+      }. Click to review profile and approve.`;
     } else if (params.eventType === 'STUDENT_STATUS_UPDATED') {
       title = 'Student Admission Status Updated';
-      body = `${params.fullName} (${params.admissionNo}) status changed to ${params.status || 'UPDATED'}.`;
+      body = `${params.fullName} (${params.admissionNo}) status changed to ${params.status || 'UPDATED'}. Click to view student profile.`;
     }
 
     return this.notifyInstituteAdmins(instituteId, {
@@ -980,10 +982,7 @@ export class NotificationsService {
       title,
       body,
       link: `/admin/students/${params.studentId}`,
-      referenceId:
-        params.eventType === 'STUDENT_STATUS_UPDATED'
-          ? `${params.studentId}:${params.status || Date.now()}`
-          : params.studentId,
+      referenceId: `${params.studentId}:${params.eventType}:${Date.now()}`,
     });
   }
 

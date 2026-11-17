@@ -98,187 +98,6 @@ const adminNav = [
   },
 ];
 
-// ── Explicit Sample Simulation Dataset (Used ONLY when Demo Mode is explicitly toggled ON) ──
-const DEMO_PREVIEW_OVERVIEW: DashboardOverviewDto = {
-  institute: {
-    id: 'demo-inst',
-    name: 'Grace Bible Institute (Demo Preview)',
-    displayName: 'Grace Bible Institute',
-    code: 'DEMO-2026',
-    currency: 'INR',
-    timezone: 'Asia/Kolkata',
-    logoUrl: null,
-    primaryColor: '#1e3a8a',
-    secondaryColor: '#3b82f6',
-    accentColor: '#10b981',
-  },
-  viewer: {
-    userId: 'demo-user',
-    fullName: 'Demo Administrator',
-    role: 'INSTITUTE_ADMIN',
-  },
-  dateFilter: {
-    preset: '30D',
-    label: 'Last 30 Days (Demo)',
-    from: null,
-    to: null,
-    previousFrom: null,
-    previousTo: null,
-  },
-  kpi: {
-    totalStudents: 342,
-    activeStudents: 312,
-    pendingAdmissionsCount: 4,
-    totalTeachers: 24,
-    activeTeachers: 22,
-    onLeaveTeachers: 2,
-    totalCourses: 16,
-    publishedCourses: 12,
-    draftCourses: 4,
-    activeBatches: 8,
-    totalBatches: 8,
-    totalFeeCollected: 48500000,
-    totalFeePending: 4250000,
-    overdueFeeAmount: 0,
-    pendingInvoicesCount: 6,
-    upcomingSessionsCount: 7,
-    sessionsTodayCount: 2,
-    attendancePercentage: 92,
-    comparisons: {
-      studentsRegistered: {
-        periodValue: 342,
-        previousPeriodValue: 304,
-        changePct: 12.05,
-        direction: 'UP',
-        periodLabel: 'vs last period',
-      },
-      enrolments: {
-        periodValue: 86,
-        previousPeriodValue: 74,
-        changePct: 16.2,
-        direction: 'UP',
-        periodLabel: 'vs last period',
-      },
-      feeCollection: {
-        periodValue: 48500000,
-        previousPeriodValue: 40920000,
-        changePct: 18.5,
-        direction: 'UP',
-        periodLabel: 'vs last period',
-      },
-    },
-  },
-  enrolmentTrend: [
-    { month: '2026-05', label: 'May', count: 28, registrations: 32 },
-    { month: '2026-06', label: 'Jun', count: 42, registrations: 45 },
-    { month: '2026-07', label: 'Jul', count: 35, registrations: 38 },
-    { month: '2026-08', label: 'Aug', count: 58, registrations: 62 },
-    { month: '2026-09', label: 'Sep', count: 64, registrations: 70 },
-    { month: '2026-10', label: 'Oct', count: 82, registrations: 88 },
-  ],
-  financialTrend: [
-    { month: '2026-05', label: 'May', collected: 18000000, pending: 3500000 },
-    { month: '2026-06', label: 'Jun', collected: 24000000, pending: 4000000 },
-    { month: '2026-07', label: 'Jul', collected: 31000000, pending: 2500000 },
-    { month: '2026-08', label: 'Aug', collected: 39500000, pending: 5200000 },
-    { month: '2026-09', label: 'Sep', collected: 44000000, pending: 4800000 },
-    { month: '2026-10', label: 'Oct', collected: 48500000, pending: 4250000 },
-  ],
-  courseDistribution: [
-    { courseTitle: 'Building Biblical Theology', studentCount: 86 },
-    { courseTitle: 'Church History: Reformation to Modern', studentCount: 74 },
-    { courseTitle: 'Pastoral Leadership & Counseling', studentCount: 62 },
-    { courseTitle: 'Systematic Theology & Hermeneutics', studentCount: 54 },
-    { courseTitle: 'Old Testament Survey & Exegesis', studentCount: 42 },
-  ],
-  recentAdmissions: [],
-  upcomingSessions: [],
-  recentPayments: [],
-};
-
-const DEMO_PREVIEW_TRANSACTIONS: TransactionItemDto[] = [
-  {
-    id: 'demo-tx-101',
-    paymentNumber: 'PAY-DEMO-0081',
-    receiptNumber: 'RCPT-DEMO-0081',
-    studentId: 'demo-stu-1',
-    studentName: 'Blonde Drizzle (Sample)',
-    admissionNo: 'ADM-54124',
-    courseName: 'Digital Marketing & Ministry Outreach',
-    invoiceId: 'inv-101',
-    invoiceNumber: 'INV-DEMO-0041',
-    amount: 4450000,
-    paymentMode: 'CARD',
-    referenceNumber: 'REF-1264',
-    status: 'COMPLETED',
-    paymentDate: '2026-10-29T10:30:00Z',
-  },
-  {
-    id: 'demo-tx-102',
-    paymentNumber: 'PAY-DEMO-0082',
-    receiptNumber: 'RCPT-DEMO-0082',
-    studentId: 'demo-stu-2',
-    studentName: 'Kuiper Split (Sample)',
-    admissionNo: 'ADM-54125',
-    courseName: 'Building Biblical Theology (Core)',
-    invoiceId: 'inv-102',
-    invoiceNumber: 'INV-DEMO-0042',
-    amount: 3450000,
-    paymentMode: 'CARD',
-    referenceNumber: 'REF-3658',
-    status: 'FAILED',
-    paymentDate: '2026-10-28T14:15:00Z',
-  },
-  {
-    id: 'demo-tx-103',
-    paymentNumber: 'PAY-DEMO-0083',
-    receiptNumber: 'RCPT-DEMO-0083',
-    studentId: 'demo-stu-3',
-    studentName: 'Diva Bliss (Sample)',
-    admissionNo: 'ADM-54126',
-    courseName: 'Pastoral Leadership & Counseling',
-    invoiceId: 'inv-103',
-    invoiceNumber: 'INV-DEMO-0043',
-    amount: 6450000,
-    paymentMode: 'UPI',
-    referenceNumber: 'UPI-9845',
-    status: 'COMPLETED',
-    paymentDate: '2026-10-27T09:45:00Z',
-  },
-  {
-    id: 'demo-tx-104',
-    paymentNumber: 'PAY-DEMO-0084',
-    receiptNumber: 'RCPT-DEMO-0084',
-    studentId: 'demo-stu-4',
-    studentName: 'Grace Thomas (Sample)',
-    admissionNo: 'ADM-54127',
-    courseName: 'Church History: Reformation to Modern',
-    invoiceId: 'inv-104',
-    invoiceNumber: 'INV-DEMO-0044',
-    amount: 1850000,
-    paymentMode: 'NET_BANKING',
-    referenceNumber: 'NB-4242',
-    status: 'COMPLETED',
-    paymentDate: '2026-10-26T16:20:00Z',
-  },
-  {
-    id: 'demo-tx-105',
-    paymentNumber: 'PAY-DEMO-0085',
-    receiptNumber: 'RCPT-DEMO-0085',
-    studentId: 'demo-stu-5',
-    studentName: 'Esther Williams (Sample)',
-    admissionNo: 'ADM-54129',
-    courseName: 'Old Testament Survey & Exegesis',
-    invoiceId: 'inv-106',
-    invoiceNumber: 'INV-DEMO-0046',
-    amount: 6450000,
-    paymentMode: 'CARD',
-    referenceNumber: 'REF-1264',
-    status: 'PENDING',
-    paymentDate: '2026-10-24T18:00:00Z',
-  },
-];
-
 const EXPORT_OPTIONS: Array<{
   type: ExportReportType;
   label: string;
@@ -368,14 +187,7 @@ export default function AdminDashboardPage() {
   const [viewerName, setViewerName] = useState<string>('Institute Admin');
   const [instituteDisplayName, setInstituteDisplayName] = useState<string>('Bible Institute');
 
-  // Explicit Demo Mode Toggle (Default: strictly false in production unless explicit query/env)
-  const [demoMode, setDemoMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('demo') === 'true') return true;
-    }
-    return process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
-  });
+  // Real Database Mode (No Demo Mock Data)
 
   // Global Date Filter
   const [dateFilter, setDateFilter] = useState<'7D' | '30D' | 'THIS_MONTH' | 'ALL'>('30D');
@@ -426,13 +238,7 @@ export default function AdminDashboardPage() {
 
   // 2. Fetch Genuine PostgreSQL Dashboard Overview
   const fetchDashboardData = useCallback(async () => {
-    if (demoMode) {
-      setOverview(DEMO_PREVIEW_OVERVIEW);
-      setIsLiveConnected(false);
-      setIsLoadingOverview(false);
-      setOverviewError(null);
-      return;
-    }
+    
 
     let activeId = instituteId || (typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : null);
     if (!activeId) {
@@ -486,17 +292,11 @@ export default function AdminDashboardPage() {
     } finally {
       setIsLoadingOverview(false);
     }
-  }, [instituteId, dateFilter, demoMode]);
+  }, [instituteId, dateFilter]);
 
   // 3. Fetch Genuine PostgreSQL Transactions Ledger with Backend Pagination & Filters
   const fetchTransactionsData = useCallback(async () => {
-    if (demoMode) {
-      setTransactions(DEMO_PREVIEW_TRANSACTIONS);
-      setTxTotalCount(DEMO_PREVIEW_TRANSACTIONS.length);
-      setTxTotalPages(1);
-      setIsLoadingTx(false);
-      return;
-    }
+    
 
     const activeId = instituteId || (typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : null);
     if (!activeId) {
@@ -536,48 +336,16 @@ export default function AdminDashboardPage() {
     } finally {
       setIsLoadingTx(false);
     }
-  }, [instituteId, txPage, txSearch, txStatusFilter, dateFilter, demoMode]);
+  }, [instituteId, txPage, txSearch, txStatusFilter, dateFilter]);
 
-  // Handle explicit toggle between Demo Mode and Live Database Mode
-  const handleToggleDemoMode = useCallback((newDemoMode: boolean) => {
-    if (!newDemoMode) {
-      // REQUIREMENT 7: Clear ALL simulated KPI, chart, and transaction state immediately before fetching live database records
-      setOverview(null);
-      setTransactions([]);
-      setTxTotalCount(0);
-      setTxTotalPages(1);
-      setIsLiveConnected(false);
-      setIsLoadingOverview(true);
-      setIsLoadingTx(true);
-      setOverviewError(null);
-    } else {
-      // Entering Demo Mode: apply simulated preview metrics
-      setOverview(DEMO_PREVIEW_OVERVIEW);
-      setTransactions(DEMO_PREVIEW_TRANSACTIONS);
-      setTxTotalCount(DEMO_PREVIEW_TRANSACTIONS.length);
-      setTxTotalPages(1);
-      setIsLiveConnected(false);
-      setIsLoadingOverview(false);
-      setIsLoadingTx(false);
-      setOverviewError(null);
-    }
-    setDemoMode(newDemoMode);
-  }, []);
+  
 
-  // Refresh data when instituteId, dateFilter, or demoMode changes
-  useEffect(() => {
-    if (demoMode) {
-      setOverview(DEMO_PREVIEW_OVERVIEW);
-      setTransactions(DEMO_PREVIEW_TRANSACTIONS);
-      setTxTotalCount(DEMO_PREVIEW_TRANSACTIONS.length);
-      setTxTotalPages(1);
-      setIsLoadingOverview(false);
-      setIsLoadingTx(false);
-    } else if (instituteId) {
+    useEffect(() => {
+    if (instituteId) {
       fetchDashboardData();
       fetchTransactionsData();
     }
-  }, [instituteId, fetchDashboardData, fetchTransactionsData, demoMode]);
+  }, [instituteId, fetchDashboardData, fetchTransactionsData]);
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -664,29 +432,7 @@ export default function AdminDashboardPage() {
       userRoleLabel="Institute Administrator"
     >
       <div className="space-y-6 pb-12">
-        {/* ── DEMO DATA WARNING BANNER (Only visible when Demo Mode is explicitly toggled ON) ── */}
-        {demoMode && (
-          <div className="px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between text-amber-900 animate-in fade-in duration-200">
-            <div className="flex items-center gap-2.5">
-              <AlertCircle size={18} className="text-amber-600 shrink-0" />
-              <div className="text-xs">
-                <span className="font-bold uppercase tracking-wider bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-md mr-2">
-                  DEMO DATA
-                </span>
-                <span>
-                  Displaying simulated Bible Institute sample preview metrics. None of these records represent actual database rows.
-                </span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleToggleDemoMode(false)}
-              className="text-xs font-bold text-amber-800 underline hover:text-amber-950 shrink-0 ml-3"
-            >
-              Switch to Live DB
-            </button>
-          </div>
-        )}
+        {/* Live Database Mode Active */}
 
         {/* ── 1. GREETING BANNER & HEADER (Screenshot 8 Reference Style) ──────── */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -698,7 +444,7 @@ export default function AdminDashboardPage() {
               </span>
               <span className="text-slate-300">•</span>
               <span className="text-slate-500">
-                {demoMode ? 'DEMO DATA (Simulated Preview)' : isLiveConnected ? 'Live PostgreSQL Records' : 'Database Offline'}
+                {isLoadingOverview && !overview ? 'Synchronizing Database...' : 'Live PostgreSQL Records'}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
@@ -712,20 +458,7 @@ export default function AdminDashboardPage() {
 
           {/* Quick Date Filters + Demo Toggle + Export + Refresh */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Demo Mode Toggle Button */}
-            <button
-              type="button"
-              onClick={() => handleToggleDemoMode(!demoMode)}
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                demoMode
-                  ? 'bg-amber-100 border-amber-300 text-amber-900'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              title="Toggle simulated sample preview vs genuine database records"
-            >
-              <Info size={13} className={demoMode ? 'text-amber-700' : 'text-slate-400'} />
-              <span>{demoMode ? 'Demo Mode (On)' : 'Demo Preview'}</span>
-            </button>
+            
 
             {/* Date Range Selector */}
             <div className="inline-flex items-center bg-slate-100/90 p-1 rounded-xl text-xs font-semibold text-slate-600">
@@ -848,49 +581,7 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* ── BACKEND CONNECTION STATUS BANNER (When API is offline in production) ── */}
-        {!isLiveConnected && !demoMode && (
-          <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-950">
-            <div className="flex items-start gap-3">
-              <AlertCircle size={20} className="text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs uppercase tracking-wider bg-rose-100 text-rose-900 px-2 py-0.5 rounded-md">
-                    Backend Connection Offline
-                  </span>
-                  <span className="text-xs font-semibold text-rose-800">
-                    {overviewError || 'Unable to connect to live institute database records.'}
-                  </span>
-                </div>
-                <p className="text-[11px] text-rose-700 mt-1">
-                  In production mode, the dashboard displays only verified PostgreSQL records and never fabricates mock numbers.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleToggleDemoMode(true)}
-                className="text-xs bg-white text-slate-700 hover:bg-slate-50"
-              >
-                Enable Demo Preview
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  fetchDashboardData();
-                  fetchTransactionsData();
-                }}
-                className="text-xs gap-1.5"
-              >
-                <RefreshCw size={12} className={isLoadingOverview || isLoadingTx ? 'animate-spin' : ''} />
-                <span>Retry Connection</span>
-              </Button>
-            </div>
-          </div>
-        )}
+        
 
         {/* ── 2. EXACTLY 4 SUMMARY CARDS (Screenshot 8 Reference Style) ───────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
@@ -902,11 +593,7 @@ export default function AdminDashboardPage() {
                   Total Students
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {demoMode && (
-                    <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                      DEMO DATA
-                    </span>
-                  )}
+                  
                   <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
                     <Users size={16} />
                   </div>
@@ -944,11 +631,7 @@ export default function AdminDashboardPage() {
                   Total Course
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {demoMode && (
-                    <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                      DEMO DATA
-                    </span>
-                  )}
+                  
                   <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
                     <BookOpen size={16} />
                   </div>
@@ -986,11 +669,7 @@ export default function AdminDashboardPage() {
                   Active Batches & Classes
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {demoMode && (
-                    <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                      DEMO DATA
-                    </span>
-                  )}
+                  
                   <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
                     <Video size={16} />
                   </div>
@@ -1029,11 +708,7 @@ export default function AdminDashboardPage() {
                   Total Earning
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {demoMode && (
-                    <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                      DEMO DATA
-                    </span>
-                  )}
+                  
                   <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
                     <Coins size={16} />
                   </div>
@@ -1073,12 +748,8 @@ export default function AdminDashboardPage() {
                 <h3 className="text-base font-bold text-slate-900 tracking-tight">
                   Overview
                 </h3>
-                {demoMode && (
-                  <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                    DEMO DATA
-                  </span>
-                )}
-                {kpi?.comparisons?.enrolments && !demoMode && (
+                
+                {kpi?.comparisons?.enrolments && (
                   <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
                     Activity Metrics
                   </span>
@@ -1122,12 +793,8 @@ export default function AdminDashboardPage() {
                 <h3 className="text-base font-bold text-slate-900 tracking-tight">
                   Student Analysis
                 </h3>
-                {demoMode && (
-                  <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                    DEMO DATA
-                  </span>
-                )}
-                {kpi?.comparisons?.studentsRegistered && !demoMode && (
+                
+                {kpi?.comparisons?.studentsRegistered && (
                   <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
                     Enrollment Cohort
                   </span>
@@ -1169,16 +836,10 @@ export default function AdminDashboardPage() {
                 <h2 className="text-lg font-bold text-slate-900 tracking-tight">
                   Transaction
                 </h2>
-                {demoMode && (
-                  <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                    DEMO DATA (SAMPLE TRANSACTIONS)
-                  </span>
-                )}
+                
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                {demoMode
-                  ? 'Simulated sample payment ledger records for preview demonstration'
-                  : 'Genuine PostgreSQL payment receipts, ledger records, and tuition collections'}
+                Genuine PostgreSQL payment receipts, ledger records, and tuition collections
               </p>
             </div>
 

@@ -94,7 +94,7 @@ export function useStudentDashboard() {
       setError(null);
 
       const json = await apiFetchSwr<StudentDashboardData>('/students/dashboard', {
-        ttlMs: 30000,
+        ttlMs: 120000, // 2 min cache (was 30s) — avoids re-fetching on every tab switch
         bypassCache: forceRefresh,
         onRevalidate: (fresh) => setData(fresh),
       });
