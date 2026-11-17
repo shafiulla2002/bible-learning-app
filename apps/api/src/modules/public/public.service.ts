@@ -29,6 +29,7 @@ import {
   PaymentStatus,
   Role,
 } from '@prisma/client';
+import { buildSyllabusPdfBuffer, safeFileName } from '../courses/pdf-syllabus.util';
 import {
   createRazorpayRemoteOrder,
   resolveRazorpayConfig,
@@ -401,6 +402,60 @@ export class PublicService {
       batches: course.batches || [],
       modules: course.modules || [],
       enrolledCount: course._count?.enrolments || 0,
+    };
+  }
+
+  async getPublicCourseSyllabusPdf(idOrSlug: string) {
+    const course: any = await this.prisma.course.findFirst({
+      where: {
+        status: CourseStatus.PUBLISHED,
+        deletedAt: null,
+        OR: [{ id: idOrSlug }, { slug: idOrSlug }],
+      },
+      include: {
+        institute: { select: { name: true } },
+        modules: {
+          orderBy: { position: 'asc' },
+          include: {
+            chapters: {
+              orderBy: { position: 'asc' },
+              include: {
+                lessons: {
+                  orderBy: { position: 'asc' },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    const buffer = buildSyllabusPdfBuffer({
+      instituteName: course.institute?.name || undefined,
+      courseTitle: course.title,
+      courseCode: course.slug,
+      description: course.description,
+      modules: (course.modules || []).map((mod: any) => ({
+        title: mod.title,
+        orderIndex: mod.position,
+        lessons: (mod.chapters || []).flatMap((ch: any) =>
+          (ch.lessons || []).map((l: any) => ({
+            title: `${ch.title}: ${l.title}`,
+            lessonType: l.type,
+            durationMinutes: l.durationSec ? Math.round(l.durationSec / 60) : null,
+            summary: l.body,
+          })),
+        ),
+      })),
+    });
+
+    return {
+      fileName: `${safeFileName(course.slug || course.title, 'course')}-syllabus.pdf`,
+      buffer,
     };
   }
 

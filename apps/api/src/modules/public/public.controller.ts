@@ -9,7 +9,9 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { PublicService } from './public.service';
 import {
   PublicCourseCatalogQuerySchema,
@@ -62,6 +64,18 @@ export class PublicController {
     @Query('instituteSlug') instituteSlug?: string,
   ) {
     return this.publicService.getPublishedCourseDetail(idOrSlug, instituteSlug);
+  }
+
+  @Get('courses/:idOrSlug/syllabus')
+  async downloadPublicCourseSyllabus(
+    @Param('idOrSlug') idOrSlug: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, fileName } = await this.publicService.getPublicCourseSyllabusPdf(idOrSlug);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.send(buffer);
   }
 
   @Get('coupons/validate')
