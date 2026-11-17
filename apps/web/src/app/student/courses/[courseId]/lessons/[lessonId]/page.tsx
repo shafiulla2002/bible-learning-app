@@ -4,9 +4,9 @@ import React, { useState, useEffect, useRef, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StudentShell } from '@/components/layout/student-shell';
-import { LessonLoadingSkeleton } from '@/components/ui/loading-skeleton';
+import { LessonLoadingSkeleton, PercentageProgressLoader, usePercentageProgress } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
-import { apiFetchResponse, resolveApiUrl } from '@/lib/api';
+import { apiFetchResponse, resolveApiUrl, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -81,13 +81,22 @@ export default function StudentLessonPlayerPage({
   const router = useRouter();
   const { student, profile, institute } = useStudentAuth();
 
-  const [data, setData] = useState<LessonDetailResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cacheKey = `student_lesson_${courseId}_${lessonId}`;
+  const cachedInitialLesson = getCachedPortalData<LessonDetailResponse>(cacheKey);
+
+  const [data, setData] = useState<LessonDetailResponse | null>(() => cachedInitialLesson);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitialLesson);
   const [error, setError] = useState<string | null>(null);
 
+  // Smooth percentage loading when fetching from network
+  const { progress, isComplete, stageMessage } = usePercentageProgress({
+    isLoading: isLoading && !data,
+    minDurationMs: 600,
+  });
+
   // Playback & Progress State
-  const [isCompleted, setIsCompleted] = useState<boolean>(false);
-  const [currentPosSec, setCurrentPosSec] = useState<number>(0);
+  const [isCompleted, setIsCompleted] = useState<boolean>(() => cachedInitialLesson?.progress?.isCompleted || false);
+  const [currentPosSec, setCurrentPosSec] = useState<number>(() => cachedInitialLesson?.progress?.lastPosSec || 0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
@@ -104,16 +113,17 @@ export default function StudentLessonPlayerPage({
   } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const lastSavedPosRef = useRef<number>(0);
+  const lastSavedPosRef = useRef<number>(cachedInitialLesson?.progress?.lastPosSec || 0);
 
   // 1. Fetch Lesson Data
   useEffect(() => {
     async function fetchLesson() {
       try {
-        setIsLoading(true);
+        if (!data) {
+          setIsLoading(true);
+        }
         setError(null);
 
-        const headers: Record<string, string> = {};
         const res = await apiFetchResponse(`/students/courses/${courseId}/lessons/${lessonId}`);
 
         if (!res.ok) {
@@ -123,12 +133,15 @@ export default function StudentLessonPlayerPage({
 
         const json = await res.json();
         setData(json);
+        setCachedPortalData(cacheKey, json, 15 * 60 * 1000);
         setIsCompleted(json.progress?.isCompleted || false);
         setCurrentPosSec(json.progress?.lastPosSec || 0);
         lastSavedPosRef.current = json.progress?.lastPosSec || 0;
       } catch (err: any) {
         console.error('Error fetching lesson:', err);
-        setError(err.message || 'Failed to load lesson');
+        if (!data) {
+          setError(err.message || 'Failed to load lesson');
+        }
       } finally {
         setIsLoading(false);
       }
@@ -214,10 +227,18 @@ export default function StudentLessonPlayerPage({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  if (isLoading || !data) {
+  if (!data && !isComplete) {
     return (
       <StudentShell pageTitle="Loading Lesson...">
-        <LessonLoadingSkeleton message="Loading lesson stream & lecture notes..." />
+        <div className="space-y-6">
+          <PercentageProgressLoader
+            progress={progress}
+            stageMessage={stageMessage}
+            title="Synchronizing Lesson & Lecture Notes"
+            subtitle="Fetching video streams, theological transcripts, and reading curriculum..."
+            variant="hero"
+          />
+        </div>
       </StudentShell>
     );
   }
@@ -241,7 +262,7 @@ export default function StudentLessonPlayerPage({
   }
 
   return (
-    <StudentShell pageTitle={data?.lesson.title || 'Lesson Player'}>
+    <StudentShell pageTitle={data?.lesson?.title || 'Lesson Player'}>
       <div className="space-y-5">
         
         {/* Top Navigation & Breadcrumb */}
@@ -256,14 +277,14 @@ export default function StudentLessonPlayerPage({
             </Link>
             <div>
               <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium">
-                <span>{data?.course.title}</span>
+                <span>{data?.course?.title || 'Course'}</span>
                 <span>/</span>
-                <span>{data?.lesson.moduleTitle}</span>
+                <span>{data?.lesson?.moduleTitle || 'Curriculum'}</span>
                 <span>/</span>
-                <span className="text-slate-600 font-semibold">{data?.lesson.chapterTitle}</span>
+                <span className="text-slate-600 font-semibold">{data?.lesson?.chapterTitle || 'Chapter'}</span>
               </div>
               <h2 className="text-base font-bold text-slate-900 leading-snug">
-                {data?.lesson.title}
+                {data?.lesson?.title || 'Lesson Stream'}
               </h2>
             </div>
           </div>
@@ -600,7 +621,7 @@ export default function StudentLessonPlayerPage({
                   <Clock size={14} className="text-slate-400" />
                   <span>Duration: {Math.floor((data?.lesson.durationSec || 900) / 60)} minutes</span>
                 </div>
-                <span>Curriculum Position: Lesson {data?.navigation.currentIndex} of {data?.navigation.totalLessons}</span>
+                <span>Curriculum Position: Lesson {data?.navigation?.currentIndex || 1} of {data?.navigation?.totalLessons || 1}</span>
               </div>
             </div>
 
@@ -713,7 +734,7 @@ export default function StudentLessonPlayerPage({
             <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm space-y-3">
               <h4 className="text-sm font-bold text-slate-900 tracking-tight">Your Learning Path</h4>
               <p className="text-xs text-slate-500">
-                You are on Lesson {data?.navigation.currentIndex} of {data?.navigation.totalLessons}. All progress is auto-saved.
+                You are on Lesson {data?.navigation?.currentIndex || 1} of {data?.navigation?.totalLessons || 1}. All progress is auto-saved.
               </p>
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                 <div

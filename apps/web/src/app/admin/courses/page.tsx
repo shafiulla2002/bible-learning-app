@@ -44,6 +44,8 @@ import {
   CourseDto,
   CourseCategoryDto,
   resolveVerifiedAdminContext,
+  getCachedPortalData,
+  setCachedPortalData,
 } from '@/lib/api';
 
 
@@ -106,16 +108,32 @@ export default function AdminCoursesPage() {
     }
     return '';
   });
+
+  const initialActiveId = typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') || '' : '';
+  const cachedInitialCourses = initialActiveId
+    ? getCachedPortalData<any>(`admin_courses_${initialActiveId}`)
+    : null;
+
   const [adminName, setAdminName] = useState<string>('Institute Admin');
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [categoryError, setCategoryError] = useState('');
 
-  // Real Database State (Strict Zero-Mock: empty by default)
-  const [courses, setCourses] = useState<CourseDto[]>([]);
+  // Real Database State (Synchronous cache snapshot for instant 0ms load)
+  const [courses, setCourses] = useState<CourseDto[]>(() => {
+    return cachedInitialCourses && Array.isArray(cachedInitialCourses)
+      ? cachedInitialCourses
+      : cachedInitialCourses?.data && Array.isArray(cachedInitialCourses.data)
+        ? cachedInitialCourses.data
+        : [];
+  });
   const [categories, setCategories] = useState<CourseCategoryDto[]>([]);
-  const [totalCourses, setTotalCourses] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [totalCourses, setTotalCourses] = useState<number>(() => {
+    return cachedInitialCourses?.meta?.total || (Array.isArray(cachedInitialCourses) ? cachedInitialCourses.length : 0);
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    return !cachedInitialCourses;
+  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Filters
@@ -224,7 +242,9 @@ export default function AdminCoursesPage() {
   // Fetch courses from PostgreSQL
   const fetchCourses = useCallback(async () => {
     if (!instituteId) return;
-    setIsLoading(true);
+    if (courses.length === 0) {
+      setIsLoading(true);
+    }
     setErrorMessage(null);
 
     try {
@@ -238,18 +258,23 @@ export default function AdminCoursesPage() {
       if (res && Array.isArray(res.data)) {
         setCourses(res.data);
         setTotalCourses(res.meta?.total ?? res.data.length);
+        if (!search && statusFilter === 'ALL' && categoryFilter === 'ALL') {
+          setCachedPortalData(`admin_courses_${instituteId}`, res.data, 15 * 60 * 1000);
+        }
       } else {
         setCourses([]);
         setTotalCourses(0);
       }
     } catch (err: any) {
-      setCourses([]);
-      setTotalCourses(0);
-      setErrorMessage(err?.message || 'Unable to connect to live courses database');
+      if (courses.length === 0) {
+        setCourses([]);
+        setTotalCourses(0);
+        setErrorMessage(err?.message || 'Unable to connect to live courses database');
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [instituteId, search, statusFilter, categoryFilter]);
+  }, [instituteId, search, statusFilter, categoryFilter, courses.length]);
 
   useEffect(() => {
     fetchCourses();

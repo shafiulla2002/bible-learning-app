@@ -22,7 +22,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { NotificationBell } from '@/components/notifications/notification-bell';
-import { apiFetchResponse, resolveVerifiedAdminContext } from '@/lib/api';
+import { apiFetchResponse, resolveVerifiedAdminContext, preloadAdminPortalData } from '@/lib/api';
 
 export interface NavItem {
   label: string;
@@ -158,6 +158,9 @@ export function PortalShell({
 
         if (!cancelled) {
           setAuthStatus('authorized');
+          if (portalRole === 'ADMIN' && ctx?.instituteId) {
+            preloadAdminPortalData(ctx.instituteId);
+          }
         }
       } catch (err: any) {
         if (err?.status === 401 || err?.status === 403) {

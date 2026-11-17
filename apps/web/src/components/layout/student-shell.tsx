@@ -27,6 +27,7 @@ import {
   CalendarCheck,
 } from 'lucide-react';
 import { useStudentAuth } from '@/lib/use-student-auth';
+import { preloadStudentPortalData } from '@/lib/api';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 
 export interface StudentNavItem {
@@ -85,6 +86,13 @@ export function StudentShell({
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
+
+  // Pre-warm student portal caches (Courses, Assignments, Live sessions)
+  useEffect(() => {
+    if (isAuthenticated) {
+      preloadStudentPortalData();
+    }
+  }, [isAuthenticated]);
 
   const studentDisplayName = student?.fullName || 'Student';
   const studentInitials = studentDisplayName

@@ -7,7 +7,14 @@ import { StatCard } from '@/components/ui/stat-card';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { teacherApi, TeacherSummaryDto, resolveVerifiedAdminContext, resolveActiveInstituteId } from '@/lib/api';
+import {
+  teacherApi,
+  TeacherSummaryDto,
+  resolveVerifiedAdminContext,
+  resolveActiveInstituteId,
+  getCachedPortalData,
+  setCachedPortalData,
+} from '@/lib/api';
 import {
   GraduationCap,
   Users,
@@ -91,9 +98,35 @@ function compressImage(file: File, maxDim = 256, quality = 0.82): Promise<string
 }
 
 export default function TeachersDirectoryPage() {
-  const [instituteId, setInstituteId] = useState<string>('');
-  const [teachers, setTeachers] = useState<TeacherSummaryDto[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('current_institute_id') || '';
+    }
+    return '';
+  });
+
+  // Synchronous cache snapshot for 0ms instantaneous render
+  const initialActiveId = typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') || '' : '';
+  const cachedInitialTeachers = initialActiveId
+    ? getCachedPortalData<any>(`admin_teachers_${initialActiveId}`)
+    : null;
+
+  const [teachers, setTeachers] = useState<TeacherSummaryDto[]>(() => {
+    return cachedInitialTeachers?.data && Array.isArray(cachedInitialTeachers.data)
+      ? cachedInitialTeachers.data
+      : Array.isArray(cachedInitialTeachers)
+        ? cachedInitialTeachers
+        : [];
+  });
+  const [totalCount, setTotalCount] = useState<number>(() => {
+    return cachedInitialTeachers?.meta?.total || (Array.isArray(cachedInitialTeachers?.data) ? cachedInitialTeachers.data.length : (Array.isArray(cachedInitialTeachers) ? cachedInitialTeachers.length : 0));
+  });
+  const [totalPages, setTotalPages] = useState<number>(() => {
+    return cachedInitialTeachers?.meta?.totalPages || 1;
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    return !cachedInitialTeachers;
+  });
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   // Filters & Search
@@ -107,8 +140,6 @@ export default function TeachersDirectoryPage() {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [specializationFilter, setSpecializationFilter] = useState<string>('ALL');
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
-  const [totalCount, setTotalCount] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Toast State
@@ -189,7 +220,9 @@ export default function TeachersDirectoryPage() {
       return;
     }
 
-    setIsLoading(true);
+    if (teachers.length === 0) {
+      setIsLoading(true);
+    }
     setErrorMsg(null);
     try {
       const params: Record<string, any> = {
@@ -205,12 +238,17 @@ export default function TeachersDirectoryPage() {
       setTeachers(list);
       setTotalPages(res?.meta?.totalPages || 1);
       setTotalCount(res?.meta?.total ?? list.length);
+      if (currentPage === 1 && !debouncedSearch && statusFilter === 'ALL' && specializationFilter === 'ALL') {
+        setCachedPortalData(`admin_teachers_${activeId}`, res, 15 * 60 * 1000);
+      }
     } catch (err: any) {
       console.warn('Error fetching teachers from PostgreSQL:', err.message);
-      setErrorMsg(err.message || 'Unable to load faculty from database.');
-      setTeachers([]);
-      setTotalPages(1);
-      setTotalCount(0);
+      if (teachers.length === 0) {
+        setErrorMsg(err.message || 'Unable to load faculty from database.');
+        setTeachers([]);
+        setTotalPages(1);
+        setTotalCount(0);
+      }
     } finally {
       setIsLoading(false);
     }

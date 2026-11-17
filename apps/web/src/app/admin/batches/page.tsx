@@ -35,6 +35,8 @@ import {
   AcademicTermDto,
   CourseDto,
   resolveVerifiedAdminContext,
+  getCachedPortalData,
+  setCachedPortalData,
 } from '@/lib/api';
 
 const adminNav = [
@@ -79,12 +81,43 @@ export default function BatchesPage() {
     return '';
   });
 
-  // Database State (Strict Zero-Mock: empty by default)
-  const [batches, setBatches] = useState<BatchItem[]>([]);
+  const initialActiveId = typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') || '' : '';
+  const cachedInitialBatches = initialActiveId
+    ? getCachedPortalData<any>(`admin_batches_${initialActiveId}`)
+    : null;
+
+  // Database State (Synchronous cache snapshot for instant 0ms load)
+  const [batches, setBatches] = useState<BatchItem[]>(() => {
+    if (cachedInitialBatches && Array.isArray(cachedInitialBatches)) {
+      return cachedInitialBatches.map((b: any) => ({
+        id: b.id,
+        name: b.name,
+        code: b.code,
+        courseId: b.courseId,
+        courseTitle: b.course?.title || b.courseTitle || 'Biblical Studies',
+        academicYearId: b.academicYearId,
+        academicYearName: b.academicYear?.name || b.academicYearName || '2026-2027',
+        termId: b.termId || b.academicTermId,
+        termName: b.academicTerm?.name || b.termName || 'Semester',
+        status: b.status,
+        startDate: typeof b.startDate === 'string' ? b.startDate.slice(0, 10) : '2026-07-01',
+        endDate: typeof b.endDate === 'string' ? b.endDate.slice(0, 10) : '2026-12-31',
+        capacity: b.capacity,
+        enrolledCount: b._count?.enrolments ?? b.enrolledCount ?? 0,
+        leadTeacher: {
+          id: 't-faculty',
+          name: b.teachers?.[0]?.teacherProfile?.membership?.user?.fullName || b.leadTeacher?.name || 'Faculty Lead',
+        },
+        assistantsCount: Math.max(0, (b._count?.teachers ?? 1) - 1),
+        scheduledClassesCount: b._count?.liveSessions ?? b.scheduledClassesCount ?? 0,
+      }));
+    }
+    return [];
+  });
   const [academicYears, setAcademicYears] = useState<AcademicYearDto[]>([]);
   const [academicTerms, setAcademicTerms] = useState<AcademicTermDto[]>([]);
   const [courses, setCourses] = useState<CourseDto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => !cachedInitialBatches);
   const [apiError, setApiError] = useState<string | null>(null);
 
   // Filters
@@ -168,7 +201,9 @@ export default function BatchesPage() {
   // Load live batches from PostgreSQL
   const loadBatches = useCallback(async () => {
     if (!instituteId) return;
-    setIsLoading(true);
+    if (batches.length === 0) {
+      setIsLoading(true);
+    }
     setApiError(null);
 
     try {
@@ -199,13 +234,16 @@ export default function BatchesPage() {
       }));
 
       setBatches(mapped);
+      setCachedPortalData(`admin_batches_${instituteId}`, rawBatches, 15 * 60 * 1000);
     } catch (err: any) {
-      setBatches([]);
-      setApiError(err?.message || 'Failed to query live batches from PostgreSQL');
+      if (batches.length === 0) {
+        setBatches([]);
+        setApiError(err?.message || 'Failed to query live batches from PostgreSQL');
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [instituteId]);
+  }, [instituteId, batches.length]);
 
   useEffect(() => {
     loadBatches();

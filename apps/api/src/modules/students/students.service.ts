@@ -318,7 +318,7 @@ export class StudentsService {
       ];
     }
 
-    const [total, profiles] = await Promise.all([
+    const [total, profiles, statusCounts] = await Promise.all([
       this.prisma.studentProfile.count({ where }),
       this.prisma.studentProfile.findMany({
         where,
@@ -352,6 +352,11 @@ export class StudentsService {
           },
         },
       }),
+      this.prisma.studentProfile.groupBy({
+        by: ['status'],
+        where: { instituteId },
+        _count: { id: true },
+      }),
     ]);
 
     const data: StudentProfileSummary[] = (profiles as any[]).map((p) => {
@@ -374,6 +379,19 @@ export class StudentsService {
       };
     });
 
+    let activeCount = 0;
+    let reviewCount = 0;
+    let inactiveCount = 0;
+    let totalAll = 0;
+    for (const sc of (statusCounts || [])) {
+      const c = sc._count?.id || 0;
+      totalAll += c;
+      const st = String(sc.status || '').toUpperCase();
+      if (st === 'ACTIVE') activeCount += c;
+      else if (st === 'UNDER_REVIEW' || st === 'SUSPENDED') reviewCount += c;
+      else if (st === 'INACTIVE' || st === 'DROPPED') inactiveCount += c;
+    }
+
     return {
       data,
       meta: {
@@ -383,6 +401,12 @@ export class StudentsService {
         totalPages: Math.ceil(total / limit) || 1,
         hasNextPage: page * limit < total,
         hasPrevPage: page > 1,
+        stats: {
+          total: totalAll || total,
+          activeCount,
+          reviewCount,
+          inactiveCount,
+        },
       },
     };
   }

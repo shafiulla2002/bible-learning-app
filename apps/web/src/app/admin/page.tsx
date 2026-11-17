@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import {
   dashboardApi,
   resolveVerifiedAdminContext,
+  preloadAdminPortalData,
   DashboardOverviewDto,
   DateRangePreset,
   ExportReportType,
@@ -219,6 +220,17 @@ export default function AdminDashboardPage() {
     minDurationMs: 800,
   });
 
+  // Pre-warm and background cache all portal subpages (Students, Batches, Teachers, Courses)
+  // once the dashboard completes 100% so that clicking any sidebar tab reflects data immediately.
+  useEffect(() => {
+    if (isComplete) {
+      const activeId = instituteId || (typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') || '' : '');
+      if (activeId) {
+        preloadAdminPortalData(activeId);
+      }
+    }
+  }, [isComplete, instituteId]);
+
   // Real Database Transactions State (Strict Data Integrity: empty by default in production)
   const [transactions, setTransactions] = useState<TransactionItemDto[]>([]);
   const [txTotalCount, setTxTotalCount] = useState<number>(0);
@@ -305,6 +317,7 @@ export default function AdminDashboardPage() {
       setIsLiveConnected(true);
       if (data.institute?.displayName) setInstituteDisplayName(data.institute.displayName);
       if (data.viewer?.fullName) setViewerName(data.viewer.fullName);
+      preloadAdminPortalData(activeId);
     } catch (err: any) {
       // Production Rule: Never silently present mock data when API is offline
       setOverview(null);

@@ -140,6 +140,49 @@ export function getCached<T>(key: string, tokenOverride?: string): T | null {
   return item.data as T;
 }
 
+/**
+ * Fast synchronous portal cache reader (MemoryCache + SessionStorage fallback).
+ * Guarantees 0ms initial frame render for portal subpages and tabs.
+ */
+export function getCachedPortalData<T>(key: string): T | null {
+  // 1. Try memory cache (0ms RAM lookup)
+  const mem = getCached<T>(key);
+  if (mem !== null && mem !== undefined) return mem;
+
+  // 2. Try browser sessionStorage (preserves state across page/tab navigation)
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = sessionStorage.getItem(`portal_cache::${key}`);
+      if (raw) {
+        const item = JSON.parse(raw);
+        if (item && (!item.expiry || Date.now() < item.expiry)) {
+          // Warm up memory cache so subsequent reads are instant RAM
+          setCached(key, item.data, item.expiry ? Math.max(1000, item.expiry - Date.now()) : 60000);
+          return item.data as T;
+        } else {
+          sessionStorage.removeItem(`portal_cache::${key}`);
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * Fast portal cache writer (writes to both MemoryCache and SessionStorage).
+ */
+export function setCachedPortalData<T>(key: string, data: T, ttlMs = 15 * 60 * 1000): void {
+  setCached(key, data, ttlMs);
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.setItem(
+        `portal_cache::${key}`,
+        JSON.stringify({ data, expiry: Date.now() + ttlMs, cachedAt: Date.now() }),
+      );
+    } catch {}
+  }
+}
+
 export function getStaleCached<T>(
   key: string,
   tokenOverride?: string,
@@ -486,6 +529,12 @@ export interface PaginatedStudentsDto {
     totalPages: number;
     hasNextPage: boolean;
     hasPrevPage: boolean;
+    stats?: {
+      total: number;
+      activeCount: number;
+      reviewCount: number;
+      inactiveCount: number;
+    };
   };
 }
 
@@ -2537,3 +2586,108 @@ export const platformApi = {
   listAuditLogs: (limit: number = 50) =>
     apiFetch<any[]>(`/platform/audit-logs?limit=${limit}`),
 };
+
+// ============================================================================
+// CROSS-PORTAL PRELOAD & CACHE WARMING ENGINE
+// Automatically triggered when dashboard reaches 100% or session initializes.
+// Synchronously populates browser cache for instantaneous subpage navigation.
+// ============================================================================
+
+let adminPreloadInFlight: Promise<void> | null = null;
+
+export async function preloadAdminPortalData(instituteId?: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const targetInstituteId =
+    instituteId ||
+    localStorage.getItem('current_institute_id') ||
+    '';
+  if (!targetInstituteId) return;
+
+  if (adminPreloadInFlight) return adminPreloadInFlight;
+
+  adminPreloadInFlight = (async () => {
+    try {
+      await Promise.allSettled([
+        // 1. Students & Directory (Page 1)
+        studentApi.getStudents(targetInstituteId, { page: 1, limit: 10 }).then((res) => {
+          if (res && Array.isArray(res.data)) {
+            setCachedPortalData(`admin_students_${targetInstituteId}`, res, 15 * 60 * 1000);
+            setCachedPortalData(`students:${targetInstituteId}:1:10:::ALL:ALL`, res, 15 * 60 * 1000);
+          }
+        }),
+
+        // 2. Admissions Applications Queue
+        admissionsApi.listAdmissions(targetInstituteId, { limit: 50 }).then((res) => {
+          if (res) {
+            setCachedPortalData(`admin_admissions_${targetInstituteId}`, res, 15 * 60 * 1000);
+          }
+        }),
+
+        // 3. Courses & Curriculum
+        courseApi.getCourses(targetInstituteId, { limit: 100 }).then((res) => {
+          if (res && Array.isArray(res.data)) {
+            setCachedPortalData(`admin_courses_${targetInstituteId}`, res, 15 * 60 * 1000);
+          }
+        }),
+
+        // 4. Batches & Cohorts
+        batchApi.getBatches(targetInstituteId).then((res: any) => {
+          const raw = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
+          if (raw.length > 0) {
+            setCachedPortalData(`admin_batches_${targetInstituteId}`, raw, 15 * 60 * 1000);
+          }
+        }),
+
+        // 5. Teachers & Faculty
+        teacherApi.getTeachers(targetInstituteId, { limit: 50 }).then((res) => {
+          if (res && Array.isArray(res.data)) {
+            setCachedPortalData(`admin_teachers_${targetInstituteId}`, res, 15 * 60 * 1000);
+          }
+        }),
+      ]);
+    } catch {
+      // Background preload silently catches network blips
+    } finally {
+      adminPreloadInFlight = null;
+    }
+  })();
+
+  return adminPreloadInFlight;
+}
+
+let studentPreloadInFlight: Promise<void> | null = null;
+
+export async function preloadStudentPortalData(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (studentPreloadInFlight) return studentPreloadInFlight;
+
+  studentPreloadInFlight = (async () => {
+    try {
+      await Promise.allSettled([
+        apiFetchResponse('/students/courses').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_courses', data, 15 * 60 * 1000);
+          }
+        }),
+        apiFetchResponse('/students/assignments').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_assignments', data, 15 * 60 * 1000);
+          }
+        }),
+        apiFetchResponse('/students/live-sessions').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_live_sessions', data, 15 * 60 * 1000);
+          }
+        }),
+      ]);
+    } catch {
+    } finally {
+      studentPreloadInFlight = null;
+    }
+  })();
+
+  return studentPreloadInFlight;
+}

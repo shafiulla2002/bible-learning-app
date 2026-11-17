@@ -19,6 +19,8 @@ import {
   resolveActiveInstituteId,
   getCached,
   setCached,
+  getCachedPortalData,
+  setCachedPortalData,
 } from '@/lib/api';
 import {
   Users,
@@ -103,25 +105,74 @@ export default function StudentsDirectoryPage() {
     }
     return '';
   });
+
+  // Synchronous cache snapshot for 0ms immediate render
+  const initialActiveId = typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') || '' : '';
+  const cachedInitialStudents = initialActiveId
+    ? getCachedPortalData<any>(`admin_students_${initialActiveId}`) ||
+      getCachedPortalData<any>(`students:${initialActiveId}:1:10:::ALL:ALL`)
+    : null;
+  const cachedInitialAdmissions = initialActiveId
+    ? getCachedPortalData<any>(`admin_admissions_${initialActiveId}`)
+    : null;
+  const cachedInitialCourses = initialActiveId
+    ? getCachedPortalData<CourseDto[]>(`admin_courses_${initialActiveId}`)
+    : null;
+  const cachedInitialBatches = initialActiveId
+    ? getCachedPortalData<BatchDto[]>(`admin_batches_${initialActiveId}`)
+    : null;
+
   const [adminName, setAdminName] = useState<string>('Institute Admin');
   const [activeSection, setActiveSection] = useState<'DIRECTORY' | 'ADMISSIONS'>('DIRECTORY');
-  const [admissions, setAdmissions] = useState<any[]>([]);
-  const [admissionSummary, setAdmissionSummary] = useState<Record<string, number>>({});
+  const [admissions, setAdmissions] = useState<any[]>(() => {
+    return cachedInitialAdmissions?.data && Array.isArray(cachedInitialAdmissions.data)
+      ? cachedInitialAdmissions.data
+      : [];
+  });
+  const [admissionSummary, setAdmissionSummary] = useState<Record<string, number>>(() => {
+    return cachedInitialAdmissions?.summary || {};
+  });
   const [admissionStatusFilter, setAdmissionStatusFilter] = useState<string>('ALL');
-  const [isLoadingAdmissions, setIsLoadingAdmissions] = useState<boolean>(false);
+  const [isLoadingAdmissions, setIsLoadingAdmissions] = useState<boolean>(() => {
+    return !cachedInitialAdmissions;
+  });
   const [approveTarget, setApproveTarget] = useState<any | null>(null);
   const [approveBatchId, setApproveBatchId] = useState<string>('');
   const [rejectTarget, setRejectTarget] = useState<any | null>(null);
   const [rejectReason, setRejectReason] = useState<string>('');
 
-  // Live Database State (Strict Zero-Mock: starts empty)
-  const [students, setStudents] = useState<StudentProfileSummaryDto[]>([]);
-  const [liveStats, setLiveStats] = useState<{ total: number; activeCount: number; reviewCount: number; inactiveCount: number } | null>(null);
-  const [totalCount, setTotalCount] = useState<number>(0);
-  const [totalPages, setTotalPages] = useState<number>(1);
+  // Live Database State (Strict Zero-Mock: initialized synchronously from cached portal data)
+  const [students, setStudents] = useState<StudentProfileSummaryDto[]>(() => {
+    return cachedInitialStudents?.data && Array.isArray(cachedInitialStudents.data)
+      ? cachedInitialStudents.data
+      : [];
+  });
+  const [liveStats, setLiveStats] = useState<{ total: number; activeCount: number; reviewCount: number; inactiveCount: number } | null>(() => {
+    if (cachedInitialStudents?.meta?.stats) {
+      return cachedInitialStudents.meta.stats;
+    }
+    if (cachedInitialStudents?.data && Array.isArray(cachedInitialStudents.data)) {
+      const list = cachedInitialStudents.data;
+      return {
+        total: cachedInitialStudents.meta?.total || list.length,
+        activeCount: list.filter((s: any) => s.status === 'ACTIVE').length,
+        reviewCount: list.filter((s: any) => s.status === 'UNDER_REVIEW' || s.status === 'SUSPENDED').length,
+        inactiveCount: list.filter((s: any) => s.status === 'INACTIVE' || s.status === 'DROPPED').length,
+      };
+    }
+    return null;
+  });
+  const [totalCount, setTotalCount] = useState<number>(() => {
+    return cachedInitialStudents?.meta?.total || (cachedInitialStudents?.data?.length ?? 0);
+  });
+  const [totalPages, setTotalPages] = useState<number>(() => {
+    return cachedInitialStudents?.meta?.totalPages || 1;
+  });
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize] = useState<number>(10);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    return !cachedInitialStudents || !cachedInitialStudents.data || cachedInitialStudents.data.length === 0;
+  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Filters
@@ -135,8 +186,8 @@ export default function StudentsDirectoryPage() {
   const [courseFilter, setCourseFilter] = useState<string>('ALL');
 
   // Available options for selects
-  const [courses, setCourses] = useState<CourseDto[]>([]);
-  const [batches, setBatches] = useState<BatchDto[]>([]);
+  const [courses, setCourses] = useState<CourseDto[]>(() => cachedInitialCourses || []);
+  const [batches, setBatches] = useState<BatchDto[]>(() => cachedInitialBatches || []);
 
   // Add Student Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -206,7 +257,9 @@ export default function StudentsDirectoryPage() {
   // Fetch Admissions Applications Queue
   const fetchAdmissions = useCallback(async () => {
     if (!instituteId) return;
-    setIsLoadingAdmissions(true);
+    if (admissions.length === 0) {
+      setIsLoadingAdmissions(true);
+    }
     try {
       const res = await admissionsApi.listAdmissions(instituteId, {
         status: admissionStatusFilter !== 'ALL' ? admissionStatusFilter : undefined,
@@ -215,12 +268,15 @@ export default function StudentsDirectoryPage() {
       });
       setAdmissions(res.data || []);
       setAdmissionSummary(res.summary || {});
+      if (admissionStatusFilter === 'ALL' && !debouncedSearch) {
+        setCachedPortalData(`admin_admissions_${instituteId}`, res, 15 * 60 * 1000);
+      }
     } catch {
-      setAdmissions([]);
+      if (admissions.length === 0) setAdmissions([]);
     } finally {
       setIsLoadingAdmissions(false);
     }
-  }, [instituteId, admissionStatusFilter, debouncedSearch]);
+  }, [instituteId, admissionStatusFilter, debouncedSearch, admissions.length]);
 
   useEffect(() => {
     fetchAdmissions();
@@ -270,6 +326,7 @@ export default function StudentsDirectoryPage() {
       .then((res) => {
         if (res && Array.isArray(res.data)) {
           setCourses(res.data);
+          setCachedPortalData(`admin_courses_${instituteId}`, res.data, 15 * 60 * 1000);
           if (res.data.length > 0 && !newStudent.courseId) {
             setNewStudent((prev) => ({ ...prev, courseId: res.data[0].id }));
           }
@@ -282,21 +339,24 @@ export default function StudentsDirectoryPage() {
       .then((res: any) => {
         const raw = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
         setBatches(raw);
-        if (raw.length > 0 && !newStudent.batchId) {
-          setNewStudent((prev) => ({ ...prev, batchId: raw[0].id }));
+        if (raw.length > 0) {
+          setCachedPortalData(`admin_batches_${instituteId}`, raw, 15 * 60 * 1000);
+          if (!newStudent.batchId) {
+            setNewStudent((prev) => ({ ...prev, batchId: raw[0].id }));
+          }
         }
       })
       .catch(() => {});
   }, [instituteId]);
 
-  // Fetch genuine student list from PostgreSQL
+  // Fetch genuine student list from PostgreSQL with instant cache & silent revalidation
   const fetchStudents = useCallback(async () => {
     if (!instituteId) return;
     setErrorMessage(null);
 
     try {
       const cacheKey = `students:${instituteId}:${currentPage}:${pageSize}:${debouncedSearch}:${statusFilter}:${courseFilter}`;
-      const cached = getCached<any>(cacheKey);
+      const cached = getCachedPortalData<any>(cacheKey);
       if (cached && Array.isArray(cached.data)) {
         setStudents(cached.data);
         setTotalCount(cached.meta?.total ?? cached.data.length);
@@ -305,7 +365,7 @@ export default function StudentsDirectoryPage() {
           setLiveStats(cached.meta.stats);
         }
         setIsLoading(false);
-      } else {
+      } else if (students.length === 0) {
         setIsLoading(true);
       }
 
@@ -324,20 +384,25 @@ export default function StudentsDirectoryPage() {
         if ((res.meta as any)?.stats) {
           setLiveStats((res.meta as any).stats);
         }
-        setCached(cacheKey, res, 30000);
+        setCachedPortalData(cacheKey, res, 15 * 60 * 1000);
+        if (currentPage === 1 && !debouncedSearch && statusFilter === 'ALL' && courseFilter === 'ALL') {
+          setCachedPortalData(`admin_students_${instituteId}`, res, 15 * 60 * 1000);
+        }
       } else {
         setStudents([]);
         setTotalCount(0);
         setTotalPages(1);
       }
     } catch (err: any) {
-      setStudents([]);
-      setTotalCount(0);
-      setErrorMessage(err?.message || 'Unable to connect to live students database');
+      if (students.length === 0) {
+        setStudents([]);
+        setTotalCount(0);
+        setErrorMessage(err?.message || 'Unable to connect to live students database');
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [instituteId, currentPage, pageSize, debouncedSearch, statusFilter, courseFilter]);
+  }, [instituteId, currentPage, pageSize, debouncedSearch, statusFilter, courseFilter, students.length]);
 
   useEffect(() => {
     fetchStudents();

@@ -85,6 +85,12 @@ export interface PaginatedResult<T> {
     totalPages: number;
     hasNextPage: boolean;
     hasPrevPage: boolean;
+    stats?: {
+      total: number;
+      activeCount: number;
+      reviewCount: number;
+      inactiveCount: number;
+    };
   };
 }
 

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   FileText,
   Clock,
@@ -57,8 +57,9 @@ interface AssignmentsResponse {
 
 export default function StudentAssignmentsPage() {
   const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
-  const [data, setData] = useState<AssignmentsResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cachedInitialAssignments = getCachedPortalData<AssignmentsResponse>('student_assignments');
+  const [data, setData] = useState<AssignmentsResponse | null>(() => cachedInitialAssignments);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitialAssignments);
 
   // Filters
   const [activeTab, setActiveTab] = useState<'ALL' | 'PENDING' | 'SUBMITTED' | 'GRADED' | 'OVERDUE'>('ALL');
@@ -68,7 +69,9 @@ export default function StudentAssignmentsPage() {
   useEffect(() => {
     async function fetchAssignments() {
       try {
-        setIsLoading(true);
+        if (!data) {
+          setIsLoading(true);
+        }
         const params = new URLSearchParams();
         if (selectedCourse !== 'ALL') params.append('courseId', selectedCourse);
         if (searchQuery.trim()) params.append('q', searchQuery.trim());
@@ -82,13 +85,18 @@ export default function StudentAssignmentsPage() {
         if (!res.ok) throw new Error('Failed to load assignments');
         const json = await res.json();
         setData(json);
+        if (activeTab === 'ALL' && selectedCourse === 'ALL' && !searchQuery.trim()) {
+          setCachedPortalData('student_assignments', json, 15 * 60 * 1000);
+        }
       } catch (err: any) {
         console.error('Failed to load assignments:', err?.message || err);
-        setData({
-          assignments: [],
-          summary: { total: 0, pending: 0, submitted: 0, graded: 0, overdue: 0 },
-          courses: [],
-        });
+        if (!data) {
+          setData({
+            assignments: [],
+            summary: { total: 0, pending: 0, submitted: 0, graded: 0, overdue: 0 },
+            courses: [],
+          });
+        }
       } finally {
         setIsLoading(false);
       }

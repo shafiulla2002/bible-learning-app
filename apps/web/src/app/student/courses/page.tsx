@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { CourseGridLoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   BookOpen,
   Search,
@@ -42,9 +42,12 @@ export interface EnrolledCourseItem {
 
 export default function StudentCoursesPage() {
   const { student, profile, institute } = useStudentAuth();
-  const [courses, setCourses] = useState<EnrolledCourseItem[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cachedInitial = getCachedPortalData<any>('student_courses');
+  const [courses, setCourses] = useState<EnrolledCourseItem[]>(() => {
+    return cachedInitial?.courses || (Array.isArray(cachedInitial) ? cachedInitial : []);
+  });
+  const [categories, setCategories] = useState<string[]>(() => cachedInitial?.categories || []);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitial);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -52,7 +55,9 @@ export default function StudentCoursesPage() {
 
   const fetchCourses = useCallback(async () => {
     try {
-      setIsLoading(true);
+      if (courses.length === 0) {
+        setIsLoading(true);
+      }
       const params = new URLSearchParams();
       if (searchQuery) params.set('q', searchQuery);
       if (selectedCategory !== 'all') params.set('category', selectedCategory);
@@ -67,13 +72,16 @@ export default function StudentCoursesPage() {
         if (json.categories && json.categories.length > 0) {
           setCategories(json.categories);
         }
+        if (!searchQuery && selectedCategory === 'all' && statusFilter === 'ALL') {
+          setCachedPortalData('student_courses', json, 15 * 60 * 1000);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch enrolled courses:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [searchQuery, selectedCategory, statusFilter, sortBy, profile?.studentProfileId, student?.id, institute?.id]);
+  }, [searchQuery, selectedCategory, statusFilter, sortBy, profile?.studentProfileId, student?.id, institute?.id, courses.length]);
 
   useEffect(() => {
     fetchCourses();
