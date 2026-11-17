@@ -5,6 +5,7 @@ import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import { apiFetch } from '@/lib/api';
 import {
   CreditCard,
@@ -244,6 +245,24 @@ export default function StudentPaymentsPage() {
       (inv.notes && inv.notes.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesStatus && matchesSearch;
   });
+
+  if (loading && invoices.length === 0) {
+    return (
+      <StudentShell pageTitle="Fee Payments & Invoices">
+        <SkeletonWithSpinner spinnerText="Loading tuition fees, balances & transaction history...">
+          <div className="space-y-6 animate-pulse">
+            <div className="h-20 bg-slate-200 rounded-2xl w-full" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-28 bg-slate-100 rounded-2xl" />
+              ))}
+            </div>
+            <div className="h-64 bg-slate-100 rounded-2xl" />
+          </div>
+        </SkeletonWithSpinner>
+      </StudentShell>
+    );
+  }
 
   return (
     <StudentShell pageTitle="Fee Payments & Invoices">

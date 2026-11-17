@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StudentShell } from '@/components/layout/student-shell';
+import { LessonLoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
 import { apiFetchResponse, resolveApiUrl } from '@/lib/api';
 import {
@@ -212,6 +213,32 @@ export default function StudentLessonPlayerPage({
     const s = Math.floor(sec % 60);
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
+
+  if (isLoading || !data) {
+    return (
+      <StudentShell pageTitle="Loading Lesson...">
+        <LessonLoadingSkeleton message="Loading lesson stream & lecture notes..." />
+      </StudentShell>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <StudentShell pageTitle="Lesson Error">
+        <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center space-y-4">
+          <h3 className="text-lg font-bold text-slate-900">Unable to load lesson</h3>
+          <p className="text-xs text-slate-500 max-w-md mx-auto">{error}</p>
+          <Link
+            href={`/student/courses/${courseId}`}
+            className="inline-flex items-center gap-2 bg-blue-600 text-white text-xs font-semibold px-4 py-2 rounded-xl"
+          >
+            <ArrowLeft size={14} />
+            <span>Back to Course</span>
+          </Link>
+        </div>
+      </StudentShell>
+    );
+  }
 
   return (
     <StudentShell pageTitle={data?.lesson.title || 'Lesson Player'}>

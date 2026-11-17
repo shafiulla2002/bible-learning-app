@@ -21,6 +21,7 @@ import {
   Check,
   AlertCircle,
 } from 'lucide-react';
+import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 
 interface Certificate {
   id: string;
@@ -150,21 +151,23 @@ export default function StudentCertificatesPage() {
           />
         </div>
 
-        {/* Loading Skeleton State */}
+        {/* Loading Skeleton State with Spinner */}
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3].map((i) => (
-              <Card key={i} className="overflow-hidden border border-slate-200 shadow-xs animate-pulse">
-                <div className="bg-slate-200 h-28 w-full" />
-                <div className="p-5 space-y-3 bg-white">
-                  <div className="h-4 bg-slate-200 rounded w-3/4" />
-                  <div className="h-3 bg-slate-100 rounded w-1/2" />
-                  <div className="h-3 bg-slate-100 rounded w-2/3" />
-                  <div className="h-8 bg-slate-100 rounded mt-4" />
-                </div>
-              </Card>
-            ))}
-          </div>
+          <SkeletonWithSpinner spinnerText="Loading academic certificates & credentials...">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="overflow-hidden border border-slate-200 shadow-xs animate-pulse">
+                  <div className="bg-slate-200 h-28 w-full" />
+                  <div className="p-5 space-y-3 bg-white">
+                    <div className="h-4 bg-slate-200 rounded w-3/4" />
+                    <div className="h-3 bg-slate-100 rounded w-1/2" />
+                    <div className="h-3 bg-slate-100 rounded w-2/3" />
+                    <div className="h-8 bg-slate-100 rounded mt-4" />
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </SkeletonWithSpinner>
         ) : filtered.length === 0 ? (
           /* Empty State */
           <Card className="p-12 text-center border-slate-100 shadow-sm">

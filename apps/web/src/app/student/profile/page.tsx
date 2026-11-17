@@ -6,6 +6,7 @@ import { apiFetchResponse } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import {
   User,
   Mail,
@@ -227,33 +228,35 @@ export default function StudentProfilePage() {
         )}
 
         {loading ? (
-          /* Loading Skeleton State */
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-pulse">
-            <Card className="p-6 text-center border-slate-100 shadow-sm flex flex-col items-center space-y-3">
-              <div className="w-24 h-24 rounded-full bg-slate-200" />
-              <div className="h-5 bg-slate-200 rounded w-36" />
-              <div className="h-4 bg-slate-100 rounded w-24" />
-              <div className="w-full border-t border-slate-100 pt-4 space-y-2">
-                <div className="h-3 bg-slate-100 rounded w-3/4" />
-                <div className="h-3 bg-slate-100 rounded w-2/3" />
-                <div className="h-3 bg-slate-100 rounded w-4/5" />
-              </div>
-            </Card>
-
-            <div className="lg:col-span-2 space-y-6">
-              <Card className="p-6 border-slate-100 shadow-sm space-y-4">
-                <div className="h-5 bg-slate-200 rounded w-48" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="space-y-1">
-                      <div className="h-3 bg-slate-100 rounded w-20" />
-                      <div className="h-9 bg-slate-100 rounded w-full" />
-                    </div>
-                  ))}
+          /* Loading Skeleton State with Spinner */
+          <SkeletonWithSpinner spinnerText="Loading student profile & academic records...">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-pulse">
+              <Card className="p-6 text-center border-slate-100 shadow-sm flex flex-col items-center space-y-3">
+                <div className="w-24 h-24 rounded-full bg-slate-200" />
+                <div className="h-5 bg-slate-200 rounded w-36" />
+                <div className="h-4 bg-slate-100 rounded w-24" />
+                <div className="w-full border-t border-slate-100 pt-4 space-y-2">
+                  <div className="h-3 bg-slate-100 rounded w-3/4" />
+                  <div className="h-3 bg-slate-100 rounded w-2/3" />
+                  <div className="h-3 bg-slate-100 rounded w-4/5" />
                 </div>
               </Card>
+
+              <div className="lg:col-span-2 space-y-6">
+                <Card className="p-6 border-slate-100 shadow-sm space-y-4">
+                  <div className="h-5 bg-slate-200 rounded w-48" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="space-y-1">
+                        <div className="h-3 bg-slate-100 rounded w-20" />
+                        <div className="h-9 bg-slate-100 rounded w-full" />
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
             </div>
-          </div>
+          </SkeletonWithSpinner>
         ) : personal ? (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Column 1: Identity Card & Academic Standings */}

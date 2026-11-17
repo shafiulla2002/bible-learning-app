@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { TeacherShell } from '@/components/teacher/TeacherShell';
 import { useTeacherDashboard } from '@/lib/use-teacher-dashboard';
+import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 
 export default function TeacherDashboardPage() {
   const {
@@ -55,6 +56,27 @@ export default function TeacherDashboardPage() {
   const instituteName = institute?.name || 'Grace Bible Institute';
   const specialization = teacher?.specialization || 'Theology & Biblical Studies';
   const employeeCode = teacher?.employeeCode || 'FACULTY';
+
+  if (isLoading && !data) {
+    return (
+      <TeacherShell pageTitle="Faculty Dashboard">
+        <SkeletonWithSpinner spinnerText="Loading faculty dashboard & cohort analytics...">
+          <div className="space-y-6 animate-pulse">
+            <div className="rounded-3xl bg-slate-200 h-48 w-full" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="h-28 bg-slate-100 rounded-2xl" />
+              ))}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 h-72 bg-slate-100 rounded-2xl" />
+              <div className="h-72 bg-slate-100 rounded-2xl" />
+            </div>
+          </div>
+        </SkeletonWithSpinner>
+      </TeacherShell>
+    );
+  }
 
   return (
     <TeacherShell pageTitle="Faculty Dashboard">

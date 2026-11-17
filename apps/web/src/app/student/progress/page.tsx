@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { BookOpen, CalendarCheck2, Award, RefreshCw, TrendingUp } from 'lucide-react';
+import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import { apiFetch } from '@/lib/api';
 import Link from 'next/link';
 
@@ -92,7 +93,13 @@ export default function StudentProgressPage() {
         </div>
 
         {loading ? (
-          <div className="h-40 bg-white border border-slate-200 rounded-xl animate-pulse" />
+          <SkeletonWithSpinner spinnerText="Loading academic progress & completion metrics...">
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-28 bg-white border border-slate-200 rounded-xl animate-pulse" />
+              ))}
+            </div>
+          </SkeletonWithSpinner>
         ) : courses.length === 0 ? (
           <Card className="p-10 text-center">
             <BookOpen size={32} className="mx-auto text-slate-300 mb-3" />

@@ -20,6 +20,7 @@ import {
   Layers,
   Search,
 } from 'lucide-react';
+import { SkeletonWithSpinner, LoadingSpinner } from '@/components/ui/loading-skeleton';
 
 interface AttendanceRecord {
   id: string;
@@ -125,6 +126,28 @@ export default function StudentAttendancePage() {
 
     fetchAttendance();
   }, [selectedBatch, selectedCourse, selectedStatus, selectedMonth, profile?.studentProfileId, student?.id, institute?.id]);
+
+  if (isLoading && !data) {
+    return (
+      <StudentShell pageTitle="Attendance">
+        <SkeletonWithSpinner spinnerText="Loading academic attendance & lecture history...">
+          <div className="space-y-6 animate-pulse">
+            <div className="h-44 bg-slate-200 rounded-2xl w-full" />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-28 bg-slate-100 rounded-2xl" />
+              ))}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="h-64 bg-slate-100 rounded-2xl" />
+              <div className="h-64 bg-slate-100 rounded-2xl" />
+            </div>
+            <div className="h-72 bg-slate-100 rounded-2xl" />
+          </div>
+        </SkeletonWithSpinner>
+      </StudentShell>
+    );
+  }
 
   const summary = data?.summary || {
     totalSessions: 0,
@@ -392,7 +415,9 @@ export default function StudentAttendancePage() {
 
           {/* Table Content */}
           {isLoading ? (
-            <div className="p-8 text-center text-xs text-slate-400">Loading attendance history...</div>
+            <div className="p-12 flex flex-col items-center justify-center gap-3">
+              <LoadingSpinner size="md" text="Loading filtered attendance records..." />
+            </div>
           ) : records.length === 0 ? (
             <div className="p-12 text-center">
               <CalendarCheck size={36} className="mx-auto text-slate-300 mb-2" />

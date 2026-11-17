@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
+import { DashboardLoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
 import { useStudentDashboard } from '@/lib/use-student-dashboard';
 import {
@@ -83,6 +84,14 @@ export default function StudentDashboardPage() {
   // Resolved live classes from API
   const liveClassesData = (dashboardData as any)?.upcomingClasses || dashboardData?.upcomingLiveClasses;
   const liveClasses = liveClassesData || [];
+
+  if (isLoading && !dashboardData) {
+    return (
+      <StudentShell pageTitle="Dashboard">
+        <DashboardLoadingSkeleton message="Synchronizing student portal..." />
+      </StudentShell>
+    );
+  }
 
   return (
     <StudentShell pageTitle="Dashboard">

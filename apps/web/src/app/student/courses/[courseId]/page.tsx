@@ -4,6 +4,7 @@ import React, { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { StudentShell } from '@/components/layout/student-shell';
+import { CourseDetailLoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
 import { apiFetchResponse } from '@/lib/api';
 import {
@@ -212,11 +213,7 @@ export default function StudentCourseDetailPage({
         </div>
 
         {isLoading ? (
-          <div className="bg-white rounded-3xl p-8 border border-slate-200 animate-pulse space-y-6">
-            <div className="h-64 bg-slate-200 rounded-2xl w-full" />
-            <div className="h-8 bg-slate-200 rounded w-1/2" />
-            <div className="h-4 bg-slate-200 rounded w-3/4" />
-          </div>
+          <CourseDetailLoadingSkeleton message="Loading course curriculum & syllabus materials..." />
         ) : error || !data ? (
           <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center space-y-4">
             <div className="w-16 h-16 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">

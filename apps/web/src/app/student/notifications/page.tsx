@@ -26,6 +26,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { StudentShell } from '@/components/layout/student-shell';
+import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import {
   useStudentNotifications,
   NotificationCategory,
@@ -261,21 +262,23 @@ export default function StudentNotificationsPage() {
         {/* Notification Feed List */}
         <div className="space-y-3">
           {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3, 4].map((i) => (
-                <div
-                  key={i}
-                  className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-xs animate-pulse flex items-start gap-4"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-slate-200 shrink-0" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-slate-200 rounded w-1/3" />
-                    <div className="h-3 bg-slate-100 rounded w-3/4" />
-                    <div className="h-3 bg-slate-100 rounded w-1/2" />
+            <SkeletonWithSpinner spinnerText="Loading notifications & alerts...">
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-xs animate-pulse flex items-start gap-4"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-slate-200 shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 bg-slate-200 rounded w-1/3" />
+                      <div className="h-3 bg-slate-100 rounded w-3/4" />
+                      <div className="h-3 bg-slate-100 rounded w-1/2" />
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </SkeletonWithSpinner>
           ) : error ? (
             <div className="p-8 text-center bg-white rounded-2xl border border-rose-200">
               <AlertCircle size={32} className="mx-auto text-rose-500 mb-2" />

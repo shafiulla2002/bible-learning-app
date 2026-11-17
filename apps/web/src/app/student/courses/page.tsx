@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
+import { CourseGridLoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
 import { apiFetchResponse } from '@/lib/api';
 import {
@@ -159,16 +160,7 @@ export default function StudentCoursesPage() {
 
         {/* Course Cards Grid */}
         {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4 animate-pulse">
-                <div className="w-full h-40 bg-slate-200 rounded-xl" />
-                <div className="w-24 h-4 bg-slate-200 rounded" />
-                <div className="w-3/4 h-5 bg-slate-200 rounded" />
-                <div className="w-full h-10 bg-slate-100 rounded-xl" />
-              </div>
-            ))}
-          </div>
+          <CourseGridLoadingSkeleton message="Loading enrolled courses..." />
         ) : courses.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {courses.map((course, idx) => {

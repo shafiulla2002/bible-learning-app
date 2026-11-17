@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { Calendar as CalendarIcon, Video, FileText, GraduationCap, RefreshCw, Clock } from 'lucide-react';
+import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import { apiFetch } from '@/lib/api';
 import Link from 'next/link';
 
@@ -130,11 +131,13 @@ export default function StudentCalendarPage() {
         )}
 
         {loading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-white border border-slate-200 rounded-xl animate-pulse" />
-            ))}
-          </div>
+          <SkeletonWithSpinner spinnerText="Loading academic calendar & cohort schedules...">
+            <div className="space-y-3">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-20 bg-white border border-slate-200 rounded-xl animate-pulse" />
+              ))}
+            </div>
+          </SkeletonWithSpinner>
         ) : filtered.length === 0 ? (
           <Card className="p-10 text-center">
             <CalendarIcon size={32} className="mx-auto text-slate-300 mb-3" />
