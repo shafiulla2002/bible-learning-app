@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, use } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
 import {
   GraduationCap,
   ArrowLeft,
@@ -28,12 +29,9 @@ import {
   AttemptDetailData,
 } from '@/lib/use-teacher-exam-results';
 
-export default function TeacherExamResultsPage({
-  params,
-}: {
-  params: Promise<{ examId: string }>;
-}) {
-  const { examId } = use(params);
+export default function TeacherExamResultsPage() {
+  const routeParams = useParams();
+  const examId = (routeParams?.examId as string) || '';
   const {
     data,
     isLoading,

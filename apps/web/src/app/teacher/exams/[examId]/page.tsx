@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, use } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
 import {
   FileCheck2,
   ArrowLeft,
@@ -28,12 +29,9 @@ import {
 import { TeacherShell } from '@/components/teacher/TeacherShell';
 import { useTeacherExamDetail, ExamQuestion, ExamQuestionOption } from '@/lib/use-teacher-exam-detail';
 
-export default function TeacherExamDetailPage({
-  params,
-}: {
-  params: Promise<{ examId: string }>;
-}) {
-  const { examId } = use(params);
+export default function TeacherExamDetailPage() {
+  const routeParams = useParams();
+  const examId = (routeParams?.examId as string) || '';
   const {
     exam,
     isLoading,

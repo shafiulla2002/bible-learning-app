@@ -113,20 +113,44 @@ export default function TeacherBatchDetailPage() {
     );
   }
 
-  const { batch, faculty, students, stats, liveSessions, assignments, exams } = data;
+  const batch = data?.batch || {
+    id: batchId,
+    name: 'Cohort Details',
+    code: null,
+    capacity: 50,
+    startDate: null,
+    endDate: null,
+    status: 'ACTIVE',
+    assignedRole: 'LEAD',
+    course: { id: '', title: 'Course Curriculum', code: '' },
+    termName: null,
+    academicYearName: null,
+  };
+  const faculty = Array.isArray(data?.faculty) ? data.faculty : [];
+  const students = Array.isArray(data?.students) ? data.students : [];
+  const liveSessions = Array.isArray(data?.liveSessions) ? data.liveSessions : [];
+  const assignments = Array.isArray(data?.assignments) ? data.assignments : [];
+  const exams = Array.isArray(data?.exams) ? data.exams : [];
+  const stats = data?.stats || {
+    activeEnrolled: students.length,
+    totalAttendanceSessions: 0,
+    averageAttendancePct: 100,
+    totalAssignments: assignments.length,
+    totalExams: exams.length,
+  };
 
   const filteredStudents = students.filter((s) => {
     if (!studentSearch.trim()) return true;
     const q = studentSearch.toLowerCase();
     return (
-      s.fullName.toLowerCase().includes(q) ||
-      s.admissionNo?.toLowerCase().includes(q) ||
-      s.email?.toLowerCase().includes(q)
+      (s.fullName || '').toLowerCase().includes(q) ||
+      (s.admissionNo || '').toLowerCase().includes(q) ||
+      (s.email || '').toLowerCase().includes(q)
     );
   });
 
   return (
-    <TeacherShell pageTitle={`${batch.name} – Cohort Details`}>
+    <TeacherShell pageTitle={`${batch.name || 'Cohort'} – Cohort Details`}>
       <div className="max-w-7xl mx-auto space-y-6 pb-16">
         {/* Navigation Breadcrumb */}
         <div className="flex items-center justify-between">
@@ -146,13 +170,15 @@ export default function TeacherBatchDetailPage() {
               <CalendarCheck size={14} />
               Mark Attendance
             </Link>
-            <Link
-              href={`/teacher/courses/${batch.course.id}`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-50 transition shadow-sm"
-            >
-              <BookOpen size={14} />
-              Course Syllabus
-            </Link>
+            {batch.course?.id && (
+              <Link
+                href={`/teacher/courses/${batch.course.id}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-50 transition shadow-sm"
+              >
+                <BookOpen size={14} />
+                Course Syllabus
+              </Link>
+            )}
             <button
               onClick={() => refresh()}
               className="p-1.5 text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-lg shadow-sm"
@@ -170,10 +196,10 @@ export default function TeacherBatchDetailPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded text-xs font-bold tracking-wide uppercase bg-indigo-50 text-indigo-700 border border-indigo-200">
                   <Award size={12} className="inline mr-1 -mt-0.5" />
-                  {batch.assignedRole} Faculty
+                  {batch.assignedRole || 'Faculty'} Faculty
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  {batch.status}
+                  {batch.status || 'ACTIVE'}
                 </span>
                 {batch.code && (
                   <span className="font-mono text-xs px-2 py-0.5 bg-slate-100 text-slate-700 rounded border border-slate-200">
@@ -186,7 +212,7 @@ export default function TeacherBatchDetailPage() {
               </h1>
               <p className="text-sm font-medium text-slate-600 flex items-center gap-1.5">
                 <BookOpen size={16} className="text-slate-400" />
-                {batch.course.title}
+                {batch.course?.title || 'Assigned Course'}
                 {batch.termName && (
                   <span className="text-slate-400">
                     • {batch.termName} {batch.academicYearName ? `(${batch.academicYearName})` : ''}
@@ -209,7 +235,7 @@ export default function TeacherBatchDetailPage() {
               <div>
                 <p className="text-[11px] font-semibold text-slate-400 uppercase">Capacity</p>
                 <p className="font-medium text-slate-800">
-                  {stats.activeEnrolled} / {batch.capacity} Students
+                  {stats.activeEnrolled ?? students.length} / {batch.capacity || 50} Students
                 </p>
               </div>
             </div>
@@ -394,18 +420,18 @@ export default function TeacherBatchDetailPage() {
                           </div>
                         </td>
                         <td className="py-3 px-4">
-                          {student.attendance.ratePct !== null ? (
+                          {student.attendance?.ratePct != null ? (
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded-full font-semibold text-[11px] ${
-                                student.attendance.ratePct >= 75
+                                (student.attendance?.ratePct ?? 0) >= 75
                                   ? 'bg-emerald-50 text-emerald-700'
-                                  : student.attendance.ratePct >= 50
+                                  : (student.attendance?.ratePct ?? 0) >= 50
                                   ? 'bg-amber-50 text-amber-700'
                                   : 'bg-rose-50 text-rose-700'
                               }`}
                             >
-                              {student.attendance.ratePct}% ({student.attendance.present}/
-                              {student.attendance.total})
+                              {student.attendance.ratePct}% ({student.attendance.present || 0}/
+                              {student.attendance.total || 0})
                             </span>
                           ) : (
                             <span className="text-slate-400">No records</span>
@@ -581,18 +607,20 @@ export default function TeacherBatchDetailPage() {
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
                 <h3 className="text-base font-bold text-slate-900">Course Syllabus & Description</h3>
                 <p className="text-sm text-slate-600 leading-relaxed">
-                  {batch.course.description ||
+                  {batch.course?.description ||
                     'Comprehensive curriculum covering theological foundations, hermeneutics, and ministry practice for this cohort.'}
                 </p>
-                <div className="pt-2">
-                  <Link
-                    href={`/teacher/courses/${batch.course.id}`}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition"
-                  >
-                    Open Complete Course Materials
-                    <ExternalLink size={13} />
-                  </Link>
-                </div>
+                {batch.course?.id && (
+                  <div className="pt-2">
+                    <Link
+                      href={`/teacher/courses/${batch.course.id}`}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition"
+                    >
+                      Open Complete Course Materials
+                      <ExternalLink size={13} />
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
 
