@@ -5,17 +5,23 @@ import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { BookOpen, CalendarCheck2, Award, RefreshCw, TrendingUp } from 'lucide-react';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import Link from 'next/link';
 
 export default function StudentProgressPage() {
-  const [courses, setCourses] = useState<any[]>([]);
-  const [attendanceSummary, setAttendanceSummary] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const cachedCourses = getCachedPortalData<any>('student_courses');
+  const cachedAtt = getCachedPortalData<any>('student_attendance');
+  const [courses, setCourses] = useState<any[]>(() => {
+    return cachedCourses?.courses || (Array.isArray(cachedCourses) ? cachedCourses : []);
+  });
+  const [attendanceSummary, setAttendanceSummary] = useState<any>(() => cachedAtt?.summary || null);
+  const [loading, setLoading] = useState<boolean>(() => !cachedCourses);
   const [error, setError] = useState<string | null>(null);
 
   const loadProgress = async () => {
-    setLoading(true);
+    if (courses.length === 0) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [coursesRes, attRes] = await Promise.all([

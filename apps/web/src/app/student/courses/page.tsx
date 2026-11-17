@@ -55,9 +55,6 @@ export default function StudentCoursesPage() {
 
   const fetchCourses = useCallback(async () => {
     try {
-      if (courses.length === 0) {
-        setIsLoading(true);
-      }
       const params = new URLSearchParams();
       if (searchQuery) params.set('q', searchQuery);
       if (selectedCategory !== 'all') params.set('category', selectedCategory);
@@ -81,7 +78,7 @@ export default function StudentCoursesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [searchQuery, selectedCategory, statusFilter, sortBy, profile?.studentProfileId, student?.id, institute?.id, courses.length]);
+  }, [searchQuery, selectedCategory, statusFilter, sortBy, profile?.studentProfileId, student?.id, institute?.id]);
 
   useEffect(() => {
     fetchCourses();
@@ -167,7 +164,7 @@ export default function StudentCoursesPage() {
         </div>
 
         {/* Course Cards Grid */}
-        {isLoading ? (
+        {isLoading && courses.length === 0 ? (
           <CourseGridLoadingSkeleton message="Loading enrolled courses..." />
         ) : courses.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

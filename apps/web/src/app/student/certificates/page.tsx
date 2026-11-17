@@ -5,7 +5,7 @@ import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { apiFetch, apiFetchResponse } from '@/lib/api';
+import { apiFetch, apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   Award,
   Download,
@@ -40,34 +40,43 @@ interface Certificate {
 }
 
 export default function StudentCertificatesPage() {
-  const [certificates, setCertificates] = useState<Certificate[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const cachedCerts = getCachedPortalData<Certificate[]>('student_certificates');
+  const [certificates, setCertificates] = useState<Certificate[]>(() => cachedCerts || []);
+  const [loading, setLoading] = useState<boolean>(() => !cachedCerts);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   const fetchCertificates = useCallback(async () => {
-    setLoading(true);
+    if (certificates.length === 0) {
+      setLoading(true);
+    }
     setErrorMessage(null);
     try {
       const res = await apiFetchResponse('/students/certificates');
       if (res.ok) {
         const data = await res.json();
-        setCertificates(Array.isArray(data.certificates) ? data.certificates : []);
+        const list = Array.isArray(data.certificates) ? data.certificates : [];
+        setCertificates(list);
+        setCachedPortalData('student_certificates', list, 15 * 60 * 1000);
       } else {
         const errData = await res.json().catch(() => ({}));
         setErrorMessage(errData.message || 'Unable to retrieve certificates from the server.');
-        setCertificates([]);
+        if (certificates.length === 0) {
+          setCertificates([]);
+        }
       }
     } catch (err: any) {
       console.error('Fetch Certificates Error:', err);
       setErrorMessage(err.message || 'Connection error while contacting certificates service.');
-      setCertificates([]);
+      if (certificates.length === 0) {
+        setCertificates([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [certificates.length]);
 
   useEffect(() => {
     fetchCertificates();

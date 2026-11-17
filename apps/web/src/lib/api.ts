@@ -2664,22 +2664,76 @@ export async function preloadStudentPortalData(): Promise<void> {
   studentPreloadInFlight = (async () => {
     try {
       await Promise.allSettled([
+        // 1. Dashboard summary
+        apiFetchResponse('/students/dashboard').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_dashboard', data, 15 * 60 * 1000);
+          }
+        }),
+        // 2. Enrolled Courses & Curriculum
         apiFetchResponse('/students/courses').then(async (res) => {
           if (res.ok) {
             const data = await res.json();
             setCachedPortalData('student_courses', data, 15 * 60 * 1000);
           }
         }),
+        // 3. Academic Assignments & Deadlines
         apiFetchResponse('/students/assignments').then(async (res) => {
           if (res.ok) {
             const data = await res.json();
             setCachedPortalData('student_assignments', data, 15 * 60 * 1000);
           }
         }),
+        // 4. Live Sessions & Seminars
         apiFetchResponse('/students/live-sessions').then(async (res) => {
           if (res.ok) {
             const data = await res.json();
             setCachedPortalData('student_live_sessions', data, 15 * 60 * 1000);
+            setCachedPortalData('student_classes', data, 15 * 60 * 1000);
+          }
+        }),
+        // 5. Attendance & Lecture History (Eliminates revisit loading screen)
+        apiFetchResponse('/students/attendance').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_attendance', data, 15 * 60 * 1000);
+          }
+        }),
+        // 6. Online Examinations & Assessments
+        apiFetchResponse('/students/exams').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_exams', data, 15 * 60 * 1000);
+          }
+        }),
+        // 7. Academic Certificates & Verifications
+        apiFetchResponse('/students/certificates').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_certificates', data, 15 * 60 * 1000);
+          }
+        }),
+        // 8. Tuition Fees, Invoices & Payment History
+        apiFetchResponse('/students/payments').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_payments', data, 15 * 60 * 1000);
+          }
+        }),
+        // 9. Notifications, Alerts & Messages
+        apiFetchResponse('/students/notifications').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_notifications', data, 15 * 60 * 1000);
+            setCachedPortalData('student_messages', data, 15 * 60 * 1000);
+          }
+        }),
+        // 10. Student Profile
+        apiFetchResponse('/students/profile').then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setCachedPortalData('student_profile', data, 15 * 60 * 1000);
           }
         }),
       ]);

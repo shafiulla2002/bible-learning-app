@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 
 export type NotificationCategory =
   | 'STUDENT'
@@ -37,27 +37,34 @@ export function useStudentNotifications(
 ) {
   const { pollingIntervalMs = 30000, initialLimit = 15 } = options;
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [byCategory, setByCategory] = useState<Record<NotificationCategory, number>>({
-    STUDENT: 0,
-    TEACHER: 0,
-    ATTENDANCE: 0,
-    FEE: 0,
-    ACADEMIC: 0,
-    ADMIN: 0,
+  const cachedNotifs = getCachedPortalData<any>('student_notifications');
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+    return cachedNotifs?.data || cachedNotifs?.items || (Array.isArray(cachedNotifs) ? cachedNotifs : []);
+  });
+  const [unreadCount, setUnreadCount] = useState<number>(() => cachedNotifs?.unreadCount ?? 0);
+  const [byCategory, setByCategory] = useState<Record<NotificationCategory, number>>(() => {
+    return (
+      cachedNotifs?.byCategory || {
+        STUDENT: 0,
+        TEACHER: 0,
+        ATTENDANCE: 0,
+        FEE: 0,
+        ACADEMIC: 0,
+        ADMIN: 0,
+      }
+    );
   });
 
-  const [total, setTotal] = useState<number>(0);
+  const [total, setTotal] = useState<number>(() => cachedNotifs?.meta?.total ?? 0);
   const [page, setPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalPages, setTotalPages] = useState<number>(() => cachedNotifs?.meta?.totalPages ?? 1);
   const [limit, setLimit] = useState<number>(initialLimit);
 
   const [category, setCategory] = useState<'ALL' | NotificationCategory>('ALL');
   const [status, setStatus] = useState<'ALL' | 'UNREAD' | 'READ'>('ALL');
   const [search, setSearch] = useState<string>('');
 
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(() => !cachedNotifs);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,7 +90,7 @@ export function useStudentNotifications(
 
   const fetchNotifications = useCallback(
     async (isBackground = false) => {
-      if (!isBackground) {
+      if (!cachedNotifs && notifications.length === 0 && !isBackground) {
         setLoading(true);
       } else {
         setRefreshing(true);
@@ -118,6 +125,9 @@ export function useStudentNotifications(
           if (json.meta) {
             setTotal(json.meta.total || 0);
             setTotalPages(json.meta.totalPages || 1);
+          }
+          if (category === 'ALL' && status === 'ALL' && !search.trim()) {
+            setCachedPortalData('student_notifications', json, 15 * 60 * 1000);
           }
         }
       } catch (err: any) {

@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   CreditCard,
   Receipt,
@@ -78,7 +78,8 @@ function formatPaiseToINR(paise: number): string {
 }
 
 export default function StudentPaymentsPage() {
-  const [summary, setSummary] = useState<PaymentSummary>({
+  const cachedPayments = getCachedPortalData<any>('student_payments');
+  const [summary, setSummary] = useState<PaymentSummary>(() => cachedPayments?.summary || {
     totalFeesPaise: 0,
     totalPaidPaise: 0,
     outstandingBalancePaise: 0,
@@ -86,9 +87,9 @@ export default function StudentPaymentsPage() {
     overdueInvoicesCount: 0,
     currency: 'INR',
   });
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [recentPayments, setRecentPayments] = useState<PaymentTransaction[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [invoices, setInvoices] = useState<Invoice[]>(() => cachedPayments?.invoices || []);
+  const [recentPayments, setRecentPayments] = useState<PaymentTransaction[]>(() => cachedPayments?.recentPayments || []);
+  const [loading, setLoading] = useState<boolean>(() => !cachedPayments);
   const [activeTab, setActiveTab] = useState<'invoices' | 'history'>('invoices');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -104,22 +105,27 @@ export default function StudentPaymentsPage() {
   const [viewingReceipt, setViewingReceipt] = useState<PaymentTransaction | null>(null);
 
   const fetchPaymentsData = useCallback(async () => {
-    setLoading(true);
+    if (!cachedPayments && invoices.length === 0) {
+      setLoading(true);
+    }
     setErrorMessage(null);
     try {
       const data = await apiFetch<any>('/students/payments');
       if (data.summary) setSummary(data.summary);
       if (data.invoices) setInvoices(data.invoices);
       if (data.recentPayments) setRecentPayments(data.recentPayments);
+      setCachedPortalData('student_payments', data, 15 * 60 * 1000);
     } catch (err: any) {
       console.error('Fetch Payments Error:', err);
       setErrorMessage(err?.message || 'Could not retrieve payment records.');
-      setInvoices([]);
-      setRecentPayments([]);
+      if (!cachedPayments) {
+        setInvoices([]);
+        setRecentPayments([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cachedPayments, invoices.length]);
 
   useEffect(() => {
     fetchPaymentsData();

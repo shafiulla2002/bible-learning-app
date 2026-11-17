@@ -5,7 +5,7 @@ import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { Calendar as CalendarIcon, Video, FileText, GraduationCap, RefreshCw, Clock } from 'lucide-react';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import Link from 'next/link';
 
 interface CalendarEventItem {
@@ -19,13 +19,16 @@ interface CalendarEventItem {
 }
 
 export default function StudentCalendarPage() {
-  const [events, setEvents] = useState<CalendarEventItem[]>([]);
+  const cachedEvents = getCachedPortalData<CalendarEventItem[]>('student_calendar');
+  const [events, setEvents] = useState<CalendarEventItem[]>(() => cachedEvents || []);
   const [filterKind, setFilterKind] = useState<'ALL' | 'LIVE_CLASS' | 'ASSIGNMENT' | 'EXAM'>('ALL');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !cachedEvents);
   const [error, setError] = useState<string | null>(null);
 
   const loadSchedule = async () => {
-    setLoading(true);
+    if (events.length === 0) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [sessionsRes, assignmentsRes, examsRes] = await Promise.all([
@@ -79,6 +82,7 @@ export default function StudentCalendarPage() {
 
       merged.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setEvents(merged);
+      setCachedPortalData('student_calendar', merged, 15 * 60 * 1000);
     } catch (err: any) {
       setError(err?.message || 'Failed to load academic calendar events.');
     } finally {

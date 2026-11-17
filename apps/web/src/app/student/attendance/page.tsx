@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
 import { useStudentAuth } from '@/lib/use-student-auth';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   CalendarCheck,
   CheckCircle2,
@@ -83,8 +83,9 @@ interface AttendanceResponse {
 
 export default function StudentAttendancePage() {
   const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
-  const [data, setData] = useState<AttendanceResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cachedInitial = getCachedPortalData<AttendanceResponse>('student_attendance');
+  const [data, setData] = useState<AttendanceResponse | null>(() => cachedInitial);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitial);
   const [error, setError] = useState<string | null>(null);
 
   // Filters
@@ -96,7 +97,9 @@ export default function StudentAttendancePage() {
   useEffect(() => {
     async function fetchAttendance() {
       try {
-        setIsLoading(true);
+        if (!data) {
+          setIsLoading(true);
+        }
         setError(null);
 
         const params = new URLSearchParams();
@@ -115,10 +118,13 @@ export default function StudentAttendancePage() {
         }
         const json = await res.json();
         setData(json);
+        setCachedPortalData('student_attendance', json, 15 * 60 * 1000);
       } catch (err: any) {
         console.error('Failed to load attendance:', err?.message || err);
-        setData(null);
-        setError(err?.message || 'Unable to load attendance records');
+        if (!data) {
+          setData(null);
+          setError(err?.message || 'Unable to load attendance records');
+        }
       } finally {
         setIsLoading(false);
       }

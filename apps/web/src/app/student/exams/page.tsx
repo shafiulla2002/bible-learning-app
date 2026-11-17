@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   GraduationCap,
   Clock,
@@ -56,8 +56,9 @@ interface ExamsResponse {
 
 export default function StudentExamsPage() {
   const { student, profile, institute, logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
-  const [data, setData] = useState<ExamsResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cachedInitial = getCachedPortalData<ExamsResponse>('student_exams');
+  const [data, setData] = useState<ExamsResponse | null>(() => cachedInitial);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitial);
 
   // Filters
   const [activeTab, setActiveTab] = useState<'ALL' | 'AVAILABLE' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
@@ -67,7 +68,9 @@ export default function StudentExamsPage() {
   useEffect(() => {
     async function fetchExams() {
       try {
-        setIsLoading(true);
+        if (!data) {
+          setIsLoading(true);
+        }
         const params = new URLSearchParams();
         if (selectedCourse !== 'ALL') params.append('courseId', selectedCourse);
         if (searchQuery.trim()) params.append('q', searchQuery.trim());
@@ -81,13 +84,18 @@ export default function StudentExamsPage() {
         if (!res.ok) throw new Error('Failed to load examinations');
         const json = await res.json();
         setData(json);
+        if (activeTab === 'ALL' && selectedCourse === 'ALL' && !searchQuery.trim()) {
+          setCachedPortalData('student_exams', json, 15 * 60 * 1000);
+        }
       } catch (err: any) {
         console.error('Failed to load exams:', err?.message || err);
-        setData({
-          exams: [],
-          summary: { total: 0, available: 0, inProgress: 0, completed: 0 },
-          courses: [],
-        });
+        if (!data) {
+          setData({
+            exams: [],
+            summary: { total: 0, available: 0, inProgress: 0, completed: 0 },
+            courses: [],
+          });
+        }
       } finally {
         setIsLoading(false);
       }

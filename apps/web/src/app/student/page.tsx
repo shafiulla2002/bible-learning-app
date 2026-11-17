@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { DashboardLoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
 import { useStudentDashboard } from '@/lib/use-student-dashboard';
+import { preloadStudentPortalData } from '@/lib/api';
 import {
   Users,
   CheckCircle2,
@@ -24,6 +25,10 @@ import {
 export default function StudentDashboardPage() {
   const { student } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
   const { dashboardData, isLoading } = useStudentDashboard();
+
+  useEffect(() => {
+    preloadStudentPortalData();
+  }, []);
 
   // Resolved student identity from database
   const studentFullName = dashboardData?.student?.fullName || student?.fullName || 'Student';

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
-import { apiFetch, apiFetchResponse } from '@/lib/api';
+import { apiFetch, apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import {
   Video,
   Radio,
@@ -66,8 +66,11 @@ interface LiveSessionsResponse {
 
 export default function StudentClassesPage() {
   const { logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
-  const [data, setData] = useState<LiveSessionsResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cachedInitial =
+    getCachedPortalData<LiveSessionsResponse>('student_live_sessions') ||
+    getCachedPortalData<LiveSessionsResponse>('student_classes');
+  const [data, setData] = useState<LiveSessionsResponse | null>(() => cachedInitial);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitial);
   const [error, setError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [joiningId, setJoiningId] = useState<string | null>(null);
@@ -140,7 +143,9 @@ export default function StudentClassesPage() {
   useEffect(() => {
     async function fetchSessions() {
       try {
-        setIsLoading(true);
+        if (!data) {
+          setIsLoading(true);
+        }
         setError(null);
 
         const params = new URLSearchParams();
@@ -158,9 +163,13 @@ export default function StudentClassesPage() {
         }
         const json = await res.json();
         setData(json);
+        setCachedPortalData('student_live_sessions', json, 15 * 60 * 1000);
+        setCachedPortalData('student_classes', json, 15 * 60 * 1000);
       } catch (err: any) {
         setError(err?.message || 'Unable to load live sessions');
-        setData(null);
+        if (!data) {
+          setData(null);
+        }
       } finally {
         setIsLoading(false);
       }

@@ -5,7 +5,7 @@ import { StudentShell } from '@/components/layout/student-shell';
 import { Card } from '@/components/ui/card';
 import { Bell, CheckCheck, ExternalLink, MessageSquare, RefreshCw } from 'lucide-react';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import Link from 'next/link';
 
 interface NotificationItem {
@@ -18,17 +18,23 @@ interface NotificationItem {
 }
 
 export default function StudentMessagesPage() {
-  const [items, setItems] = useState<NotificationItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedItems =
+    getCachedPortalData<NotificationItem[]>('student_messages') ||
+    getCachedPortalData<NotificationItem[]>('student_notifications');
+  const [items, setItems] = useState<NotificationItem[]>(() => (Array.isArray(cachedItems) ? cachedItems : []));
+  const [loading, setLoading] = useState<boolean>(() => !cachedItems);
   const [error, setError] = useState<string | null>(null);
 
   const loadNotifications = async () => {
-    setLoading(true);
+    if (items.length === 0) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const res = await apiFetch<any>('/students/notifications');
       const list = Array.isArray(res) ? res : res?.items || res?.notifications || [];
       setItems(list);
+      setCachedPortalData('student_messages', list, 15 * 60 * 1000);
     } catch (err: any) {
       setError(err?.message || 'Unable to load messages and notices.');
     } finally {

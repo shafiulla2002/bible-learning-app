@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useStudentAuth } from './use-student-auth';
-import { apiFetchSwr, getStaleCached, resolveApiUrl } from './api';
+import {
+  apiFetchSwr,
+  getStaleCached,
+  resolveApiUrl,
+  getCachedPortalData,
+  setCachedPortalData,
+} from './api';
 
 export interface StudentDashboardData {
   student: {
@@ -76,29 +82,39 @@ export interface StudentDashboardData {
 
 export function useStudentDashboard() {
   const { logout } = useStudentAuth({ requireAuth: true, redirectTo: '/login' });
-  const [data, setData] = useState<StudentDashboardData | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const cachedInitial =
+    getCachedPortalData<StudentDashboardData>('student_dashboard') ||
+    getStaleCached<StudentDashboardData>(resolveApiUrl('/students/dashboard'))?.data ||
+    null;
+  const [data, setData] = useState<StudentDashboardData | null>(() => cachedInitial);
+  const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitial);
   const [error, setError] = useState<string | null>(null);
 
   const fetchDashboard = useCallback(async (forceRefresh = false) => {
     try {
       const cached = !forceRefresh
-        ? getStaleCached<StudentDashboardData>(resolveApiUrl('/students/dashboard'))
+        ? getCachedPortalData<StudentDashboardData>('student_dashboard') ||
+          getStaleCached<StudentDashboardData>(resolveApiUrl('/students/dashboard'))?.data ||
+          null
         : null;
-      if (cached?.data) {
-        setData(cached.data);
+      if (cached) {
+        setData(cached);
         setIsLoading(false);
-      } else {
+      } else if (!data) {
         setIsLoading(true);
       }
       setError(null);
 
       const json = await apiFetchSwr<StudentDashboardData>('/students/dashboard', {
-        ttlMs: 120000, // 2 min cache (was 30s) — avoids re-fetching on every tab switch
+        ttlMs: 15 * 60 * 1000, // 15 min cache
         bypassCache: forceRefresh,
-        onRevalidate: (fresh) => setData(fresh),
+        onRevalidate: (fresh) => {
+          setData(fresh);
+          setCachedPortalData('student_dashboard', fresh, 15 * 60 * 1000);
+        },
       });
       setData(json);
+      setCachedPortalData('student_dashboard', json, 15 * 60 * 1000);
     } catch (err: any) {
       const msg = err?.message || 'Unable to load dashboard';
       if (msg.includes('401') || msg.includes('403') || msg.toLowerCase().includes('unauthorized')) {
@@ -106,11 +122,13 @@ export function useStudentDashboard() {
         return;
       }
       setError(msg);
-      setData(null);
+      if (!data) {
+        setData(null);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [logout]);
+  }, [logout, data]);
 
   useEffect(() => {
     fetchDashboard();

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, getCachedPortalData, setCachedPortalData } from '@/lib/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -60,32 +60,36 @@ interface AcademicProfile {
 }
 
 export default function StudentProfilePage() {
-  const [personal, setPersonal] = useState<PersonalProfile | null>(null);
-  const [academic, setAcademic] = useState<AcademicProfile | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const cachedProfile = getCachedPortalData<any>('student_profile');
+  const [personal, setPersonal] = useState<PersonalProfile | null>(() => cachedProfile?.profile?.personal || null);
+  const [academic, setAcademic] = useState<AcademicProfile | null>(() => cachedProfile?.profile?.academic || null);
+  const [loading, setLoading] = useState<boolean>(() => !cachedProfile);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Form states for editable fields
-  const [phone, setPhone] = useState<string>('');
-  const [church, setChurch] = useState<string>('');
-  const [preferredLanguage, setPreferredLanguage] = useState<string>('English');
-  const [addressLine, setAddressLine] = useState<string>('');
-  const [city, setCity] = useState<string>('');
-  const [state, setState] = useState<string>('');
-  const [country, setCountry] = useState<string>('India');
-  const [guardianName, setGuardianName] = useState<string>('');
-  const [guardianPhone, setGuardianPhone] = useState<string>('');
+  const [phone, setPhone] = useState<string>(() => cachedProfile?.profile?.personal?.phone || '');
+  const [church, setChurch] = useState<string>(() => cachedProfile?.profile?.personal?.church || '');
+  const [preferredLanguage, setPreferredLanguage] = useState<string>(() => cachedProfile?.profile?.personal?.preferredLanguage || 'English');
+  const [addressLine, setAddressLine] = useState<string>(() => cachedProfile?.profile?.personal?.address?.line || cachedProfile?.profile?.personal?.address?.street || '');
+  const [city, setCity] = useState<string>(() => cachedProfile?.profile?.personal?.address?.city || '');
+  const [state, setState] = useState<string>(() => cachedProfile?.profile?.personal?.address?.state || '');
+  const [country, setCountry] = useState<string>(() => cachedProfile?.profile?.personal?.address?.country || 'India');
+  const [guardianName, setGuardianName] = useState<string>(() => cachedProfile?.profile?.personal?.guardian?.name || '');
+  const [guardianPhone, setGuardianPhone] = useState<string>(() => cachedProfile?.profile?.personal?.guardian?.phone || '');
 
   const fetchProfile = useCallback(async () => {
-    setLoading(true);
+    if (!cachedProfile) {
+      setLoading(true);
+    }
     setFetchError(null);
     setStatusMessage(null);
     try {
       const res = await apiFetchResponse('/students/profile');
       if (res.ok) {
         const data = await res.json();
+        setCachedPortalData('student_profile', data, 15 * 60 * 1000);
         const p = data.profile?.personal;
         const a = data.profile?.academic;
 
@@ -116,7 +120,7 @@ export default function StudentProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cachedProfile]);
 
   useEffect(() => {
     fetchProfile();

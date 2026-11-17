@@ -229,7 +229,7 @@ export default function StudentAssignmentsPage() {
         </div>
 
         {/* Assignment Cards Grid */}
-        {isLoading ? (
+        {isLoading && !data ? (
           <SkeletonWithSpinner spinnerText="Loading academic assignments & deadlines...">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[1, 2, 3].map((n) => (
