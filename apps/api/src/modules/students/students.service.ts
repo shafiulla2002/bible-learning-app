@@ -1406,6 +1406,7 @@ export class StudentsService {
         description: course.description,
         coverImage: course.coverImage,
         category: course.category?.name || 'Biblical Studies',
+        courseType: course.courseType || 'REGULAR',
         level: course.level,
         instructor,
         totalModules,
