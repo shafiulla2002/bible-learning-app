@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 
 export interface TeacherAssignmentItem {
   id: string;
@@ -36,28 +36,42 @@ export function useTeacherAssignments(initialLimit = 10) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAssignments = useCallback(async () => {
-    setIsLoading(true);
+  const fetchAssignments = useCallback(async (forceRefresh = false) => {
+    const params = new URLSearchParams();
+    params.set('page', page.toString());
+    params.set('limit', limit.toString());
+    if (search.trim()) params.set('search', search.trim());
+    if (courseId && courseId !== 'ALL') params.set('courseId', courseId);
+    if (batchId && batchId !== 'ALL') params.set('batchId', batchId);
+    if (status && status !== 'ALL') params.set('status', status);
+    const endpoint = `/teachers/assignments?${params.toString()}`;
+
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success) {
+      setAssignments(cached.data.data || []);
+      if (cached.data.meta) {
+        setTotalCount(cached.data.meta.total || 0);
+        setTotalPages(cached.data.meta.totalPages || 1);
+      }
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const params = new URLSearchParams();
-      params.set('page', page.toString());
-      params.set('limit', limit.toString());
-      if (search.trim()) params.set('search', search.trim());
-      if (courseId && courseId !== 'ALL') params.set('courseId', courseId);
-      if (batchId && batchId !== 'ALL') params.set('batchId', batchId);
-      if (status && status !== 'ALL') params.set('status', status);
-
-      const res = await apiFetchResponse(`/teachers/assignments?${params.toString()}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success) {
+            setAssignments(fresh.data || []);
+            if (fresh.meta) {
+              setTotalCount(fresh.meta.total || 0);
+              setTotalPages(fresh.meta.totalPages || 1);
+            }
+          }
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
       if (json.success) {
         setAssignments(json.data || []);
         if (json.meta) {

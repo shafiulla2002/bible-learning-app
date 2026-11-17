@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   apiFetchResponse,
+  apiFetchSwr,
   notificationsApi,
   resolveVerifiedAdminContext,
   NotificationItemDto,
@@ -138,13 +139,14 @@ export function NotificationBell({
   const loadUnreadCount = useCallback(async (instId?: string) => {
     try {
       if (role === 'TEACHER' || role === 'STUDENT') {
-        const res = await apiFetchResponse(`${effectiveApiPrefix}/unread-count`, {
-          headers: { Accept: 'application/json' },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setUnreadCount(data.unreadCount ?? 0);
-        }
+        const data = await apiFetchSwr<{ unreadCount?: number }>(
+          `${effectiveApiPrefix}/unread-count`,
+          {
+            ttlMs: 15000,
+            onRevalidate: (fresh) => setUnreadCount(fresh?.unreadCount ?? 0),
+          },
+        );
+        setUnreadCount(data?.unreadCount ?? 0);
         return;
       }
 

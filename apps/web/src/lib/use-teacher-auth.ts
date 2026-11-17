@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetchResponse, clearCache } from './api';
+import { apiFetchResponse, apiFetchSwr, clearCache, getStaleCached, resolveApiUrl } from './api';
 
 export interface TeacherAuthData {
   teacher: {
@@ -86,18 +86,28 @@ export function useTeacherAuth(
     }
   }, [options.redirectTo]);
 
-  const fetchTeacherContext = useCallback(async () => {
-    setIsLoading(true);
+  const fetchTeacherContext = useCallback(async (forceRefresh = false) => {
+    const cachedEntry = !forceRefresh
+      ? getStaleCached<TeacherAuthData & { success?: boolean; message?: string }>(resolveApiUrl('/teachers/me'))
+      : null;
+
+    if (cachedEntry?.data?.success && cachedEntry?.data?.teacher) {
+      setData(cachedEntry.data);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const res = await apiFetchResponse('/teachers/me', { cache: 'no-store' });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.message || `Authentication error (${res.status})`);
-      }
-
-      const json = await res.json();
+      const json = await apiFetchSwr<TeacherAuthData & { success?: boolean; message?: string }>('/teachers/me', {
+        ttlMs: 60000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh && fresh.success && fresh.teacher) {
+            setData(fresh);
+          }
+        },
+      });
       if (json && json.success && json.teacher) {
         setData(json);
         if (typeof window !== 'undefined') {
@@ -132,7 +142,7 @@ export function useTeacherAuth(
     isAuthenticated: !!data,
     error,
     logout,
-    refresh: fetchTeacherContext,
+    refresh: () => fetchTeacherContext(true),
   };
 }
 

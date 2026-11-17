@@ -328,6 +328,8 @@ export interface ResolvedDateWindow {
 
 @Injectable()
 export class DashboardService {
+  private readonly overviewCache = new Map<string, { data: DashboardOverviewDto; expiry: number }>();
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -725,9 +727,11 @@ export class DashboardService {
     filter?: DashboardFilterQueryDto,
     viewer?: { userId: string; fullName: string; role: string },
   ): Promise<DashboardOverviewDto> {
-    try {
-      await this.prisma.reapIdleConnections();
-    } catch {}
+    const cacheKey = `${instituteId}::${viewer?.userId || 'anon'}::${JSON.stringify(filter || {})}`;
+    const cached = this.overviewCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiry) {
+      return cached.data;
+    }
 
     const institute = await this.prisma.institute.findUnique({
       where: { id: instituteId },
@@ -1906,7 +1910,7 @@ export class DashboardService {
         ? enrolmentRulesJson.minAttendancePercentage
         : 75;
 
-    return {
+    const overviewResult: DashboardOverviewDto = {
       institute: {
         id: institute.id,
         name: institute.name,
@@ -2034,6 +2038,16 @@ export class DashboardService {
       upcomingSessions: upcomingSessionsMapped,
       recentPayments: recentPaymentsMapped,
     };
+
+    if (this.overviewCache.size >= 100) {
+      const oldestKey = this.overviewCache.keys().next().value;
+      if (oldestKey) this.overviewCache.delete(oldestKey);
+    }
+    this.overviewCache.set(cacheKey, {
+      data: overviewResult,
+      expiry: Date.now() + 15000,
+    });
+    return overviewResult;
   }
 
   /**

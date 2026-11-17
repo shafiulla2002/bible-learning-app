@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 
 export interface ExamResultItem {
   studentProfileId: string;
@@ -83,25 +83,29 @@ export function useTeacherExamResults(examId: string) {
   const [search, setSearch] = useState('');
   const [isActionLoading, setIsActionLoading] = useState(false);
 
-  const fetchResults = useCallback(async () => {
+  const fetchResults = useCallback(async (forceRefresh = false) => {
     if (!examId) return;
-    setIsLoading(true);
+    const params = new URLSearchParams();
+    if (statusFilter && statusFilter !== 'ALL') params.set('status', statusFilter);
+    if (search.trim()) params.set('search', search.trim());
+    const endpoint = `/teachers/exams/${examId}/results?${params.toString()}`;
+
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success) {
+      setData(cached.data.data);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (statusFilter && statusFilter !== 'ALL') params.set('status', statusFilter);
-      if (search.trim()) params.set('search', search.trim());
-
-      const res = await apiFetchResponse(`/teachers/exams/${examId}/results?${params.toString()}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success) setData(fresh.data);
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
       if (json.success) {
         setData(json.data);
       } else {
@@ -119,14 +123,9 @@ export function useTeacherExamResults(examId: string) {
   }, [fetchResults]);
 
   const fetchAttempt = async (attemptId: string): Promise<AttemptDetailData> => {
-    const res = await apiFetchResponse(`/teachers/exams/${examId}/attempts/${attemptId}`, {
-      cache: 'no-store',
+    const json = await apiFetchSwr<any>(`/teachers/exams/${examId}/attempts/${attemptId}`, {
+      ttlMs: 60000,
     });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error || 'Failed to fetch student attempt');
-    }
-    const json = await res.json();
     if (!json.success) {
       throw new Error(json.error || 'Failed to fetch student attempt');
     }

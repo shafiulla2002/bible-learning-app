@@ -69,20 +69,63 @@ export interface ApiFetchOptions extends RequestInit {
 const inFlightRequests = new Map<string, Promise<any>>();
 
 // Fast In-Memory Request Cache with TTL & Scope Isolation (Phase 5 & 7)
-const memoryCache = new Map<string, { data: any; expiry: number }>();
+const memoryCache = new Map<string, { data: any; expiry: number; cachedAt: number }>();
+const MAX_CACHE_ENTRIES = 300;
+const MAX_STALE_AGE_MS = 10 * 60 * 1000; // 10 minutes stale-while-revalidate window
 
-export function getCached<T>(key: string): T | null {
-  const item = memoryCache.get(key);
+function getCacheScopePrefix(tokenOverride?: string): string {
+  if (typeof window === 'undefined') return 'ssr';
+  const rawToken =
+    tokenOverride ||
+    localStorage.getItem('access_token') ||
+    readBrowserCookie('access_token') ||
+    '';
+  if (!rawToken) return 'anon';
+  // Use trailing token characters as an opaque per-session scope without storing raw JWT in keys
+  return `u_${rawToken.slice(-16)}`;
+}
+
+function buildScopedKey(key: string, tokenOverride?: string): string {
+  const scope = getCacheScopePrefix(tokenOverride);
+  return key.startsWith(`${scope}::`) ? key : `${scope}::${key}`;
+}
+
+export function getCached<T>(key: string, tokenOverride?: string): T | null {
+  const scopedKey = buildScopedKey(key, tokenOverride);
+  const item = memoryCache.get(scopedKey);
   if (!item) return null;
   if (Date.now() > item.expiry) {
-    memoryCache.delete(key);
     return null;
   }
   return item.data as T;
 }
 
-export function setCached<T>(key: string, data: T, ttlMs = 30000): void {
-  memoryCache.set(key, { data, expiry: Date.now() + ttlMs });
+export function getStaleCached<T>(
+  key: string,
+  tokenOverride?: string,
+): { data: T; isStale: boolean } | null {
+  const scopedKey = buildScopedKey(key, tokenOverride);
+  const item = memoryCache.get(scopedKey);
+  if (!item) return null;
+  const now = Date.now();
+  if (now - item.cachedAt > MAX_STALE_AGE_MS) {
+    memoryCache.delete(scopedKey);
+    return null;
+  }
+  return {
+    data: item.data as T,
+    isStale: now > item.expiry,
+  };
+}
+
+export function setCached<T>(key: string, data: T, ttlMs = 30000, tokenOverride?: string): void {
+  const scopedKey = buildScopedKey(key, tokenOverride);
+  if (memoryCache.size >= MAX_CACHE_ENTRIES && !memoryCache.has(scopedKey)) {
+    const oldestKey = memoryCache.keys().next().value;
+    if (oldestKey) memoryCache.delete(oldestKey);
+  }
+  const now = Date.now();
+  memoryCache.set(scopedKey, { data, expiry: now + ttlMs, cachedAt: now });
 }
 
 export function clearCache(prefix?: string): void {
@@ -99,23 +142,39 @@ export function clearCache(prefix?: string): void {
 
 function autoInvalidateOnMutation(endpoint: string) {
   const ep = endpoint.toLowerCase();
-  if (ep.includes('/students')) {
+  if (ep.includes('/teachers')) {
+    clearCache('teachers');
+    clearCache('dashboard');
+  } else if (ep.includes('/students')) {
     clearCache('students');
     clearCache('dashboard');
   } else if (ep.includes('/courses')) {
     clearCache('courses');
+    clearCache('teachers');
+    clearCache('students');
     clearCache('dashboard');
   } else if (ep.includes('/batches')) {
     clearCache('batches');
+    clearCache('teachers');
+    clearCache('students');
     clearCache('dashboard');
   } else if (ep.includes('/attendance')) {
     clearCache('attendance');
+    clearCache('teachers');
+    clearCache('students');
+    clearCache('dashboard');
+  } else if (ep.includes('/live-classes')) {
+    clearCache('live-classes');
+    clearCache('teachers');
+    clearCache('students');
+    clearCache('dashboard');
+  } else if (ep.includes('/assignments') || ep.includes('/exams') || ep.includes('/materials')) {
+    clearCache('teachers');
+    clearCache('students');
     clearCache('dashboard');
   } else if (ep.includes('/finance') || ep.includes('/invoices') || ep.includes('/payments')) {
     clearCache('finance');
-    clearCache('dashboard');
-  } else if (ep.includes('/teachers')) {
-    clearCache('teachers');
+    clearCache('students');
     clearCache('dashboard');
   } else if (ep.includes('/settings')) {
     clearCache('settings');
@@ -169,11 +228,17 @@ export async function apiFetchResponse(
     }
   }
 
-  return fetch(url, {
+  const response = await fetch(url, {
     ...options,
     credentials: options.credentials ?? 'include',
     headers,
   });
+
+  if (response.ok && ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+    autoInvalidateOnMutation(url);
+  }
+
+  return response;
 }
 
 export async function apiFetch<T>(
@@ -183,16 +248,17 @@ export async function apiFetch<T>(
   const { token, instituteId, bypassCache, ttlMs = 120000, headers: customHeaders, ...rest } = options;
   const method = (rest.method || 'GET').toUpperCase();
   const url = resolveApiUrl(endpoint);
+  const inFlightKey = buildScopedKey(url, token);
 
   // 1. GET requests: Check in-memory cache and in-flight deduplication
   if (method === 'GET' && !bypassCache) {
-    const cached = getCached<T>(url);
+    const cached = getCached<T>(url, token);
     if (cached !== null) {
       return cached;
     }
 
-    if (inFlightRequests.has(url)) {
-      return inFlightRequests.get(url) as Promise<T>;
+    if (inFlightRequests.has(inFlightKey)) {
+      return inFlightRequests.get(inFlightKey) as Promise<T>;
     }
   }
 
@@ -242,7 +308,7 @@ export async function apiFetch<T>(
 
       // Cache successful GET responses
       if (method === 'GET' && !bypassCache) {
-        setCached(url, result, ttlMs);
+        setCached(url, result, ttlMs, token);
       }
 
       // Auto-invalidate related caches on mutation
@@ -253,16 +319,50 @@ export async function apiFetch<T>(
       return result as T;
     } finally {
       if (method === 'GET') {
-        inFlightRequests.delete(url);
+        inFlightRequests.delete(inFlightKey);
       }
     }
   })();
 
   if (method === 'GET' && !bypassCache) {
-    inFlightRequests.set(url, executionPromise);
+    inFlightRequests.set(inFlightKey, executionPromise);
   }
 
   return executionPromise;
+}
+
+/**
+ * Stale-while-revalidate GET helper built on top of memoryCache + inFlightRequests.
+ * Returns cached data immediately when available (even if stale, up to MAX_STALE_AGE_MS),
+ * and triggers a background refresh when stale so tab switches render in 0ms.
+ */
+export async function apiFetchSwr<T>(
+  endpoint: string,
+  options: {
+    ttlMs?: number;
+    bypassCache?: boolean;
+    onRevalidate?: (fresh: T) => void;
+  } = {},
+): Promise<T> {
+  const { ttlMs = 45000, bypassCache = false, onRevalidate } = options;
+  const url = resolveApiUrl(endpoint);
+
+  if (!bypassCache) {
+    const entry = getStaleCached<T>(url);
+    if (entry) {
+      if (entry.isStale) {
+        void apiFetch<T>(endpoint, { bypassCache: true, ttlMs })
+          .then((fresh) => {
+            setCached(url, fresh, ttlMs);
+            onRevalidate?.(fresh);
+          })
+          .catch(() => {});
+      }
+      return entry.data;
+    }
+  }
+
+  return apiFetch<T>(endpoint, { bypassCache, ttlMs });
 }
 
 function buildCleanQueryString(params?: Record<string, any>): string {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch, apiFetchResponse, clearCache } from './api';
+import { apiFetchResponse, apiFetchSwr, clearCache, getStaleCached, resolveApiUrl } from './api';
 
 export interface StudentAuthContext {
   student: {
@@ -105,18 +105,28 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     }
   }, [options.redirectTo]);
 
-  const fetchStudentContext = useCallback(async () => {
-    setIsLoading(true);
+  const fetchStudentContext = useCallback(async (forceRefresh = false) => {
+    const cachedEntry = !forceRefresh
+      ? getStaleCached<StudentAuthContext>(resolveApiUrl('/students/me'))
+      : null;
+
+    if (cachedEntry?.data?.student && cachedEntry?.data?.profile) {
+      setData(cachedEntry.data);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const rawRes = await apiFetchResponse('/students/me', {
-        cache: 'no-store',
+      const res = await apiFetchSwr<StudentAuthContext>('/students/me', {
+        ttlMs: 60000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh && fresh.student && fresh.profile) {
+            setData(fresh);
+          }
+        },
       });
-      if (!rawRes.ok) {
-        const errJson = await rawRes.json().catch(() => ({}));
-        throw new Error(errJson?.message || `${rawRes.status} Unauthorized`);
-      }
-      const res: StudentAuthContext = await rawRes.json();
 
       if (res && res.student && res.profile) {
         setData(res);
@@ -157,6 +167,6 @@ export function useStudentAuth(options: UseStudentAuthOptions = { requireAuth: t
     isAuthenticated: !!data,
     error,
     logout,
-    refresh: fetchStudentContext,
+    refresh: () => fetchStudentContext(true),
   };
 }

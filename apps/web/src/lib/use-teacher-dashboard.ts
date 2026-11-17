@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetchResponse, clearCache } from './api';
+import { apiFetchSwr, getStaleCached, resolveApiUrl } from './api';
 
 export interface TeacherScheduleItem {
   id: string;
@@ -121,18 +121,25 @@ export function useTeacherDashboard(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDashboard = useCallback(async () => {
-    setIsLoading(true);
+  const fetchDashboard = useCallback(async (forceRefresh = false) => {
+    const cached = !forceRefresh
+      ? getStaleCached<TeacherDashboardData & { success?: boolean; message?: string }>(resolveApiUrl('/teachers/dashboard'))
+      : null;
+    if (cached?.data?.success) {
+      setData(cached.data);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const res = await apiFetchResponse('/teachers/dashboard', { cache: 'no-store' });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.message || `Failed to load dashboard (${res.status})`);
-      }
-
-      const json = await res.json();
+      const json = await apiFetchSwr<TeacherDashboardData & { success?: boolean; message?: string }>('/teachers/dashboard', {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh && fresh.success) setData(fresh);
+        },
+      });
       if (json && json.success) {
         setData(json);
       } else {

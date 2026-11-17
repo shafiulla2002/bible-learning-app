@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 
 export interface LessonResourceItem {
   id: string;
@@ -109,21 +109,25 @@ export function useTeacherCourseDetail(courseId: string) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchCourse = useCallback(async () => {
+  const fetchCourse = useCallback(async (forceRefresh = false) => {
     if (!courseId) return;
-    setIsLoading(true);
+    const endpoint = `/teachers/courses/${courseId}`;
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success && cached?.data?.course) {
+      setCourse(cached.data.course);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const res = await apiFetchResponse(`/teachers/courses/${courseId}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 45000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success && fresh?.course) setCourse(fresh.course);
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
       if (json.success && json.course) {
         setCourse(json.course);
       } else {

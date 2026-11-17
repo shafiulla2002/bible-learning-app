@@ -1292,8 +1292,12 @@ export class StudentsService {
                         teacherProfile: {
                           include: {
                             membership: {
-                              include: {
-                                user: true,
+                              select: {
+                                user: {
+                                  select: {
+                                    fullName: true,
+                                  },
+                                },
                               },
                             },
                           },
@@ -1301,18 +1305,30 @@ export class StudentsService {
                       },
                     },
                     modules: {
-                      include: {
+                      select: {
+                        id: true,
                         chapters: {
-                          include: {
-                            lessons: true,
+                          select: {
+                            _count: {
+                              select: {
+                                lessons: true,
+                              },
+                            },
                           },
                         },
                       },
                     },
                   },
                 },
-                batch: true,
-                progressRecords: true,
+                batch: {
+                  select: {
+                    name: true,
+                  },
+                },
+                progressRecords: {
+                  where: { isCompleted: true },
+                  select: { isCompleted: true },
+                },
               },
             },
           },
@@ -1365,7 +1381,7 @@ export class StudentsService {
         for (const m of course.modules) {
           if (m.chapters) {
             for (const ch of m.chapters) {
-              totalLessons += ch.lessons?.length || 0;
+              totalLessons += ch._count?.lessons || 0;
             }
           }
         }

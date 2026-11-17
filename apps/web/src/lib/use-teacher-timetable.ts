@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 import { AssignedOption } from './use-teacher-live-classes';
 
 export interface TimetableEvent {
@@ -78,27 +78,43 @@ export function useTeacherTimetable() {
     return { start, end };
   }, [currentDate, viewMode]);
 
-  const fetchTimetable = useCallback(async () => {
-    setIsLoading(true);
+  const fetchTimetable = useCallback(async (forceRefresh = false) => {
+    const { start, end } = getDateRange();
+    const params = new URLSearchParams();
+    params.set('startDate', start.toISOString());
+    params.set('endDate', end.toISOString());
+    if (courseId !== 'ALL') params.set('courseId', courseId);
+    if (batchId !== 'ALL') params.set('batchId', batchId);
+    const endpoint = `/teachers/timetable?${params.toString()}`;
+
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success && cached?.data?.data) {
+      setEvents(cached.data.data.events || []);
+      if (cached.data.data.summary) setSummary(cached.data.data.summary);
+      if (cached.data.data.filters) {
+        if (cached.data.data.filters.courses) setCourses(cached.data.data.filters.courses);
+        if (cached.data.data.filters.batches) setBatches(cached.data.data.filters.batches);
+      }
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const { start, end } = getDateRange();
-      const params = new URLSearchParams();
-      params.set('startDate', start.toISOString());
-      params.set('endDate', end.toISOString());
-      if (courseId !== 'ALL') params.set('courseId', courseId);
-      if (batchId !== 'ALL') params.set('batchId', batchId);
-
-      const res = await apiFetchResponse(`/teachers/timetable?${params.toString()}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success && fresh?.data) {
+            setEvents(fresh.data.events || []);
+            if (fresh.data.summary) setSummary(fresh.data.summary);
+            if (fresh.data.filters) {
+              if (fresh.data.filters.courses) setCourses(fresh.data.filters.courses);
+              if (fresh.data.filters.batches) setBatches(fresh.data.filters.batches);
+            }
+          }
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.message || `Failed to fetch timetable (${res.status})`);
-      }
-
-      const json = await res.json();
       if (json.success && json.data) {
         setEvents(json.data.events || []);
         if (json.data.summary) setSummary(json.data.summary);
@@ -171,7 +187,7 @@ export function useTeacherTimetable() {
     goToToday,
     goToPrevious,
     goToNext,
-    refresh: fetchTimetable,
+    refresh: () => fetchTimetable(true),
   };
 }
 

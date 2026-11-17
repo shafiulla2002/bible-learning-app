@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 
 export interface TeacherBatchItem {
   id: string;
@@ -45,24 +45,32 @@ export function useTeacherBatches() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchBatches = useCallback(async () => {
-    setIsLoading(true);
+  const fetchBatches = useCallback(async (forceRefresh = false) => {
+    const params = new URLSearchParams();
+    if (search.trim()) params.set('search', search.trim());
+    if (status && status !== 'ALL') params.set('status', status);
+    const endpoint = `/teachers/batches?${params.toString()}`;
+
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success) {
+      setBatches(cached.data.data || []);
+      if (cached.data.metrics) setMetrics(cached.data.metrics);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (search.trim()) params.set('search', search.trim());
-      if (status && status !== 'ALL') params.set('status', status);
-
-      const res = await apiFetchResponse(`/teachers/batches?${params.toString()}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 45000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success) {
+            setBatches(fresh.data || []);
+            if (fresh.metrics) setMetrics(fresh.metrics);
+          }
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
       if (json.success) {
         setBatches(json.data || []);
         if (json.metrics) {
@@ -187,21 +195,25 @@ export function useTeacherBatchDetail(batchId: string) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDetail = useCallback(async () => {
+  const fetchDetail = useCallback(async (forceRefresh = false) => {
     if (!batchId) return;
-    setIsLoading(true);
+    const endpoint = `/teachers/batches/${batchId}`;
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success) {
+      setData(cached.data.data);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const res = await apiFetchResponse(`/teachers/batches/${batchId}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 45000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success) setData(fresh.data);
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
       if (json.success) {
         setData(json.data);
       } else {

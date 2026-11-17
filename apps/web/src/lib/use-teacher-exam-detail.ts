@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 
 export interface ExamQuestionOption {
   id?: string;
@@ -51,21 +51,25 @@ export function useTeacherExamDetail(examId: string) {
   const [error, setError] = useState<string | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
 
-  const fetchExam = useCallback(async () => {
+  const fetchExam = useCallback(async (forceRefresh = false) => {
     if (!examId) return;
-    setIsLoading(true);
+    const endpoint = `/teachers/exams/${examId}`;
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success) {
+      setExam(cached.data.data);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const res = await apiFetchResponse(`/teachers/exams/${examId}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success) setExam(fresh.data);
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
       if (json.success) {
         setExam(json.data);
       } else {

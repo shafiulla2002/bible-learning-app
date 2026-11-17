@@ -35,6 +35,8 @@ import { Role, MembershipStatus, LiveSessionStatus, AttendanceStatus, Attendance
 
 @Injectable()
 export class TeachersService {
+  private readonly teacherDashboardCache = new Map<string, { data: any; expiry: number }>();
+
   constructor(
     private prisma: PrismaService,
     @Optional() private readonly notificationsService?: NotificationsService,
@@ -1149,6 +1151,11 @@ export class TeachersService {
 
     const teacherProfileId = teacherProfile.id;
     const instituteId = i.id;
+    const cacheKey = `${teacherProfileId}::${instituteId}`;
+    const cachedDashboard = this.teacherDashboardCache.get(cacheKey);
+    if (cachedDashboard && Date.now() < cachedDashboard.expiry) {
+      return cachedDashboard.data;
+    }
 
     const [
       batchesCount,
@@ -1340,7 +1347,7 @@ export class TeachersService {
       })),
     ];
 
-    return {
+    const dashboardResult = {
       success: true,
       teacher: {
         teacherProfileId: teacherProfile.id,
@@ -1386,6 +1393,16 @@ export class TeachersService {
         attendanceRatePct,
       },
     };
+
+    if (this.teacherDashboardCache.size >= 200) {
+      const oldestKey = this.teacherDashboardCache.keys().next().value;
+      if (oldestKey) this.teacherDashboardCache.delete(oldestKey);
+    }
+    this.teacherDashboardCache.set(cacheKey, {
+      data: dashboardResult,
+      expiry: Date.now() + 15000,
+    });
+    return dashboardResult;
   }
 
   /**

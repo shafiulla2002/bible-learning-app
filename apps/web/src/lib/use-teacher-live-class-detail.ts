@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 import { TeacherLiveClassItem } from './use-teacher-live-classes';
 
 export interface RosterStudentItem {
@@ -40,36 +40,56 @@ export function useTeacherLiveClassDetail(sessionId: string) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDetail = useCallback(async () => {
+  const fetchDetail = useCallback(async (forceRefresh = false) => {
     if (!sessionId) return;
-    setIsLoading(true);
+    const detailEndpoint = `/teachers/live-classes/${sessionId}`;
+    const attEndpoint = `/teachers/live-classes/${sessionId}/attendance`;
+    const cachedDetail = !forceRefresh ? getStaleCached<any>(resolveApiUrl(detailEndpoint)) : null;
+    const cachedAtt = !forceRefresh ? getStaleCached<any>(resolveApiUrl(attEndpoint)) : null;
+
+    if (cachedDetail?.data?.success) {
+      setSession(cachedDetail.data.data);
+      if (cachedAtt?.data?.success && cachedAtt.data.data) {
+        setRoster(cachedAtt.data.data.roster || []);
+        if (cachedAtt.data.data.summary) setAttendanceSummary(cachedAtt.data.data.summary);
+      }
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
 
     try {
-      const [detailRes, attendanceRes] = await Promise.all([
-        apiFetchResponse(`/teachers/live-classes/${sessionId}`, { cache: 'no-store' }),
-        apiFetchResponse(`/teachers/live-classes/${sessionId}/attendance`, { cache: 'no-store' }),
+      const [detailJson, attendanceJson] = await Promise.all([
+        apiFetchSwr<any>(detailEndpoint, {
+          ttlMs: 15000,
+          bypassCache: forceRefresh,
+          onRevalidate: (fresh) => {
+            if (fresh?.success) setSession(fresh.data);
+          },
+        }),
+        apiFetchSwr<any>(attEndpoint, {
+          ttlMs: 15000,
+          bypassCache: forceRefresh,
+          onRevalidate: (fresh) => {
+            if (fresh?.success && fresh?.data) {
+              setRoster(fresh.data.roster || []);
+              if (fresh.data.summary) setAttendanceSummary(fresh.data.summary);
+            }
+          },
+        }).catch(() => null),
       ]);
 
-      if (!detailRes.ok) {
-        const errJson = await detailRes.json().catch(() => ({}));
-        throw new Error(errJson.message || `Failed to fetch class details (${detailRes.status})`);
-      }
-
-      const detailJson = await detailRes.json();
       if (detailJson.success) {
         setSession(detailJson.data);
       } else {
         throw new Error(detailJson.message || 'Failed to fetch class details');
       }
 
-      if (attendanceRes.ok) {
-        const attendanceJson = await attendanceRes.json();
-        if (attendanceJson.success && attendanceJson.data) {
-          setRoster(attendanceJson.data.roster || []);
-          if (attendanceJson.data.summary) {
-            setAttendanceSummary(attendanceJson.data.summary);
-          }
+      if (attendanceJson?.success && attendanceJson.data) {
+        setRoster(attendanceJson.data.roster || []);
+        if (attendanceJson.data.summary) {
+          setAttendanceSummary(attendanceJson.data.summary);
         }
       }
     } catch (err: any) {
@@ -163,7 +183,7 @@ export function useTeacherLiveClassDetail(sessionId: string) {
     updateClass,
     cancelClass,
     markAttendance,
-    refresh: fetchDetail,
+    refresh: () => fetchDetail(true),
   };
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 
 export interface TeacherLiveClassItem {
   id: string;
@@ -70,28 +70,52 @@ export function useTeacherLiveClasses(initialLimit = 10) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSessions = useCallback(async () => {
-    setIsLoading(true);
+  const fetchSessions = useCallback(async (forceRefresh = false) => {
+    const params = new URLSearchParams();
+    params.set('page', page.toString());
+    params.set('limit', limit.toString());
+    if (search.trim()) params.set('search', search.trim());
+    if (courseId && courseId !== 'ALL') params.set('courseId', courseId);
+    if (batchId && batchId !== 'ALL') params.set('batchId', batchId);
+    if (status && status !== 'ALL') params.set('status', status);
+    const endpoint = `/teachers/live-classes?${params.toString()}`;
+
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success) {
+      setSessions(cached.data.data || []);
+      if (cached.data.metrics) setMetrics(cached.data.metrics);
+      if (cached.data.meta) {
+        setTotalCount(cached.data.meta.total || 0);
+        setTotalPages(cached.data.meta.totalPages || 1);
+      }
+      if (cached.data.filters) {
+        if (cached.data.filters.courses) setCourses(cached.data.filters.courses);
+        if (cached.data.filters.batches) setBatches(cached.data.filters.batches);
+      }
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const params = new URLSearchParams();
-      params.set('page', page.toString());
-      params.set('limit', limit.toString());
-      if (search.trim()) params.set('search', search.trim());
-      if (courseId && courseId !== 'ALL') params.set('courseId', courseId);
-      if (batchId && batchId !== 'ALL') params.set('batchId', batchId);
-      if (status && status !== 'ALL') params.set('status', status);
-
-      const res = await apiFetchResponse(`/teachers/live-classes?${params.toString()}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success) {
+            setSessions(fresh.data || []);
+            if (fresh.metrics) setMetrics(fresh.metrics);
+            if (fresh.meta) {
+              setTotalCount(fresh.meta.total || 0);
+              setTotalPages(fresh.meta.totalPages || 1);
+            }
+            if (fresh.filters) {
+              if (fresh.filters.courses) setCourses(fresh.filters.courses);
+              if (fresh.filters.batches) setBatches(fresh.filters.batches);
+            }
+          }
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.message || `Failed to fetch live classes (${res.status})`);
-      }
-
-      const json = await res.json();
       if (json.success) {
         setSessions(json.data || []);
         if (json.metrics) setMetrics(json.metrics);
@@ -188,7 +212,7 @@ export function useTeacherLiveClasses(initialLimit = 10) {
     setStatus,
     scheduleClass,
     cancelClass,
-    refresh: fetchSessions,
+    refresh: () => fetchSessions(true),
   };
 }
 

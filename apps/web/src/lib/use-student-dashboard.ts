@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useStudentAuth } from './use-student-auth';
-import { apiFetchResponse } from './api';
+import { apiFetchSwr, getStaleCached, resolveApiUrl } from './api';
 
 export interface StudentDashboardData {
   student: {
@@ -80,30 +80,32 @@ export function useStudentDashboard() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchDashboard = useCallback(async () => {
+  const fetchDashboard = useCallback(async (forceRefresh = false) => {
     try {
-      setIsLoading(true);
+      const cached = !forceRefresh
+        ? getStaleCached<StudentDashboardData>(resolveApiUrl('/students/dashboard'))
+        : null;
+      if (cached?.data) {
+        setData(cached.data);
+        setIsLoading(false);
+      } else {
+        setIsLoading(true);
+      }
       setError(null);
 
-      const response = await apiFetchResponse('/students/dashboard', {
-        method: 'GET',
-        cache: 'no-store',
+      const json = await apiFetchSwr<StudentDashboardData>('/students/dashboard', {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => setData(fresh),
       });
-
-      if (response.status === 401 || response.status === 403) {
+      setData(json);
+    } catch (err: any) {
+      const msg = err?.message || 'Unable to load dashboard';
+      if (msg.includes('401') || msg.includes('403') || msg.toLowerCase().includes('unauthorized')) {
         logout();
         return;
       }
-
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        throw new Error(errBody?.message || `Failed to load dashboard (${response.status})`);
-      }
-
-      const json = await response.json();
-      setData(json);
-    } catch (err: any) {
-      setError(err?.message || 'Unable to load dashboard');
+      setError(msg);
       setData(null);
     } finally {
       setIsLoading(false);
@@ -118,6 +120,6 @@ export function useStudentDashboard() {
     dashboardData: data,
     isLoading,
     error,
-    refresh: () => fetchDashboard(),
+    refresh: () => fetchDashboard(true),
   };
 }

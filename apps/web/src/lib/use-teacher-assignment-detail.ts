@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetchResponse } from '@/lib/api';
+import { apiFetchResponse, apiFetchSwr, getStaleCached, resolveApiUrl } from '@/lib/api';
 
 export interface StudentSubmissionItem {
   studentProfileId: string;
@@ -50,21 +50,25 @@ export function useTeacherAssignmentDetail(assignmentId: string) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAssignment = useCallback(async () => {
+  const fetchAssignment = useCallback(async (forceRefresh = false) => {
     if (!assignmentId) return;
-    setIsLoading(true);
+    const endpoint = `/teachers/assignments/${assignmentId}`;
+    const cached = !forceRefresh ? getStaleCached<any>(resolveApiUrl(endpoint)) : null;
+    if (cached?.data?.success && cached?.data?.assignment) {
+      setAssignment(cached.data.assignment);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
     try {
-      const res = await apiFetchResponse(`/teachers/assignments/${assignmentId}`, {
-        cache: 'no-store',
+      const json = await apiFetchSwr<any>(endpoint, {
+        ttlMs: 30000,
+        bypassCache: forceRefresh,
+        onRevalidate: (fresh) => {
+          if (fresh?.success && fresh?.assignment) setAssignment(fresh.assignment);
+        },
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
       if (json.success && json.assignment) {
         setAssignment(json.assignment);
       } else {
