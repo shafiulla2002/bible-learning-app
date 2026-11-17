@@ -2626,7 +2626,7 @@ export async function preloadAdminPortalData(instituteId?: string): Promise<void
         // 3. Courses & Curriculum
         courseApi.getCourses(targetInstituteId, { limit: 100 }).then((res) => {
           if (res && Array.isArray(res.data)) {
-            setCachedPortalData(`admin_courses_${targetInstituteId}`, res, 15 * 60 * 1000);
+            setCachedPortalData(`admin_courses_${targetInstituteId}`, res.data, 15 * 60 * 1000);
           }
         }),
 
@@ -2641,7 +2641,7 @@ export async function preloadAdminPortalData(instituteId?: string): Promise<void
         // 5. Teachers & Faculty
         teacherApi.getTeachers(targetInstituteId, { limit: 50 }).then((res) => {
           if (res && Array.isArray(res.data)) {
-            setCachedPortalData(`admin_teachers_${targetInstituteId}`, res, 15 * 60 * 1000);
+            setCachedPortalData(`admin_teachers_${targetInstituteId}`, res.data, 15 * 60 * 1000);
           }
         }),
       ]);

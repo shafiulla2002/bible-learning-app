@@ -172,7 +172,7 @@ export default function TeachersDirectoryPage() {
 
   // Add Teacher Form State
   const [formFullName, setFormFullName] = useState('');
-  const [formPhoneE164, setFormPhoneE164] = useState('+91 ');
+  const [formPhoneE164, setFormPhoneE164] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
@@ -377,7 +377,7 @@ export default function TeachersDirectoryPage() {
       // Reset form & close modal
       setIsAddModalOpen(false);
       setFormFullName('');
-      setFormPhoneE164('+91 ');
+      setFormPhoneE164('');
       setFormEmail('');
       setFormPassword('');
       setFormPhotoUrl('');
@@ -1068,7 +1068,7 @@ export default function TeachersDirectoryPage() {
                           required
                           value={formPhoneE164}
                           onChange={(e) => setFormPhoneE164(e.target.value)}
-                          placeholder="+91 98765 43210"
+                          placeholder="e.g. +91 98765 43210"
                           className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                         />
                       </div>

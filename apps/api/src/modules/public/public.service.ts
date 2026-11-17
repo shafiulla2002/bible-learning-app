@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   Optional,
   NotFoundException,
   BadRequestException,
@@ -40,6 +41,8 @@ import {
 
 @Injectable()
 export class PublicService {
+  private readonly logger = new Logger(PublicService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -922,19 +925,31 @@ export class PublicService {
 
     // Resolve or provision StudentProfile cleanly
     let studentProfile: any = null;
+    let authUser: any = null;
+
     if (authenticatedUserId) {
-      studentProfile = await this.prisma.studentProfile.findFirst({
-        where: { instituteId, membership: { userId: authenticatedUserId } },
+      authUser = await this.prisma.user.findUnique({
+        where: { id: authenticatedUserId },
+        include: {
+          memberships: {
+            where: { instituteId },
+            include: { studentProfile: true },
+          },
+        },
       });
+      studentProfile =
+        authUser?.memberships?.find((m: any) => m.studentProfile)?.studentProfile || null;
     }
+
     if (!studentProfile) {
-      if (!input.phoneNumber || !input.fullName) {
+      const emailClean = input.email?.trim().toLowerCase() || authUser?.email?.trim().toLowerCase() || null;
+      let rawPhone = input.phoneNumber || authUser?.phoneE164 || '';
+      if (!rawPhone && !authUser) {
         throw new BadRequestException('Applicant phone number and full name are required for checkout');
       }
-      const phone = this.normalizePhone(input.phoneNumber);
-      const emailClean = input.email?.trim().toLowerCase() || null;
+      const phone = rawPhone ? this.normalizePhone(rawPhone) : authUser?.phoneE164;
 
-      if (emailClean) {
+      if (!authUser && emailClean) {
         const emailOwner = await this.prisma.user.findFirst({
           where: { email: { equals: emailClean, mode: 'insensitive' } },
         });
@@ -947,17 +962,28 @@ export class PublicService {
 
       const admNo = await this.generateAdmissionNo(instituteId);
       studentProfile = await this.prisma.$transaction(async (tx) => {
-        let user = await tx.user.findUnique({ where: { phoneE164: phone } });
+        let user = authUser;
         if (!user) {
-          user = await tx.user.create({
-            data: {
-              phoneE164: phone,
-              fullName: input.fullName!.trim(),
-              email: emailClean,
-              status: 'ACTIVE',
-            },
-          });
+          if (phone) {
+            user = await tx.user.findUnique({ where: { phoneE164: phone } });
+          }
+          if (!user && emailClean) {
+            user = await tx.user.findFirst({
+              where: { email: { equals: emailClean, mode: 'insensitive' } },
+            });
+          }
+          if (!user) {
+            user = await tx.user.create({
+              data: {
+                phoneE164: phone || `+91${Date.now().toString().slice(-10)}`,
+                fullName: input.fullName?.trim() || 'Student',
+                email: emailClean,
+                status: 'ACTIVE',
+              },
+            });
+          }
         }
+
         const membership = await tx.membership.upsert({
           where: {
             userId_instituteId_role: {
@@ -974,10 +1000,12 @@ export class PublicService {
             status: MembershipStatus.ACTIVE,
           },
         });
+
         const existingProfile = await tx.studentProfile.findUnique({
           where: { membershipId: membership.id },
         });
         if (existingProfile) return existingProfile;
+
         return tx.studentProfile.create({
           data: {
             instituteId,
@@ -1019,99 +1047,109 @@ export class PublicService {
     if (total === 0 || !rzpConfigured) {
       const orderId = crypto.randomUUID();
       const receiptId = crypto.randomUUID();
-      const receiptNumber = `REC-${Date.now()}`;
+      const receiptNumber = `REC-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
       const now = new Date();
 
-      await this.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`
-          INSERT INTO "Order" ("id", "instituteId", "studentProfileId", "orderNumber", "subtotal", "discount", "total", "status", "createdAt", "updatedAt")
-          VALUES (${orderId}, ${instituteId}, ${studentProfile.id}, ${orderNumber}, ${subtotal}, ${discount}, ${total}, 'PAID'::"OrderStatus", ${now}, ${now})
-        `;
-
-        for (const c of courses) {
-          const itemId = crypto.randomUUID();
-          const itemPrice = c.pricing === 'PAID' ? (c.salePrice ?? c.price) : 0;
+      try {
+        await this.prisma.$transaction(async (tx) => {
           await tx.$executeRaw`
-            INSERT INTO "OrderItem" ("id", "instituteId", "orderId", "courseId", "titleSnapshot", "price")
-            VALUES (${itemId}, ${instituteId}, ${orderId}, ${c.id}, ${c.title}, ${itemPrice})
+            INSERT INTO "Order" ("id", "instituteId", "studentProfileId", "orderNumber", "subtotal", "discount", "total", "status", "createdAt", "updatedAt")
+            VALUES (${orderId}, ${instituteId}, ${studentProfile.id}, ${orderNumber}, ${subtotal}, ${discount}, ${total}, 'PAID'::"OrderStatus", ${now}, ${now})
           `;
-        }
 
-        await tx.$executeRaw`
-          INSERT INTO "Receipt" ("id", "instituteId", "orderId", "receiptNumber", "issuedAt")
-          VALUES (${receiptId}, ${instituteId}, ${orderId}, ${receiptNumber}, ${now})
-        `;
+          for (const c of courses) {
+            const itemId = crypto.randomUUID();
+            const itemPrice = c.pricing === 'PAID' ? (c.salePrice ?? c.price) : 0;
+            await tx.$executeRaw`
+              INSERT INTO "OrderItem" ("id", "instituteId", "orderId", "courseId", "titleSnapshot", "price")
+              VALUES (${itemId}, ${instituteId}, ${orderId}, ${c.id}, ${c.title}, ${itemPrice})
+            `;
+          }
 
-        if (total > 0) {
-          const paymentId = crypto.randomUUID();
-          const mockProviderPaymentId = `mock_pay_${Date.now()}`;
           await tx.$executeRaw`
-            INSERT INTO "Payment" ("id", "instituteId", "orderId", "amount", "providerPaymentId", "status", "method", "createdAt", "updatedAt")
-            VALUES (${paymentId}, ${instituteId}, ${orderId}, ${total}, ${mockProviderPaymentId}, 'CAPTURED'::"PaymentStatus", 'MOCK_GATEWAY', ${now}, ${now})
+            INSERT INTO "Receipt" ("id", "instituteId", "orderId", "receiptNumber", "issuedAt")
+            VALUES (${receiptId}, ${instituteId}, ${orderId}, ${receiptNumber}, ${now})
           `;
-        }
 
-        if (couponRecord) {
-          await tx.coupon.update({
-            where: { id: couponRecord.id },
-            data: { usedCount: { increment: 1 } },
-          });
-          await tx.couponRedemption.create({
-            data: { couponId: couponRecord.id, orderId },
-          });
-        }
+          if (total > 0) {
+            const paymentId = crypto.randomUUID();
+            const mockProviderPaymentId = `mock_pay_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+            await tx.$executeRaw`
+              INSERT INTO "Payment" ("id", "instituteId", "orderId", "amount", "providerPaymentId", "status", "method", "createdAt", "updatedAt")
+              VALUES (${paymentId}, ${instituteId}, ${orderId}, ${total}, ${mockProviderPaymentId}, 'CAPTURED'::"PaymentStatus", 'MOCK_GATEWAY', ${now}, ${now})
+            `;
+          }
 
-        const enrolmentSource =
-          total > 0
-            ? EnrolmentSource.PURCHASE
-            : discount > 0
-              ? EnrolmentSource.SCHOLARSHIP
-              : EnrolmentSource.FREE;
-
-        for (const c of courses) {
-          let activeBatch = await tx.batch.findFirst({
-            where: { instituteId, courseId: c.id, status: { in: ['ACTIVE', 'UPCOMING'] } },
-            orderBy: { startDate: 'asc' },
-          });
-          if (!activeBatch && c.courseType !== 'BOOK') {
-            const codePrefix = c.slug.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'CRS';
-            activeBatch = await tx.batch.create({
-              data: {
-                instituteId,
-                courseId: c.id,
-                name: `${c.title} - Main Cohort`,
-                code: `${codePrefix}-${now.getFullYear()}-${String(Date.now()).slice(-3)}`,
-                status: 'ACTIVE',
-                startDate: now,
-                endDate: new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000),
-                capacity: 60,
-              },
+          if (couponRecord) {
+            await tx.coupon.update({
+              where: { id: couponRecord.id },
+              data: { usedCount: { increment: 1 } },
+            });
+            await tx.couponRedemption.create({
+              data: { couponId: couponRecord.id, orderId },
             });
           }
 
-          await tx.enrolment.upsert({
-            where: {
-              studentProfileId_courseId: {
+          const enrolmentSource =
+            total > 0
+              ? EnrolmentSource.PURCHASE
+              : discount > 0
+                ? EnrolmentSource.SCHOLARSHIP
+                : EnrolmentSource.FREE;
+
+          for (const c of courses) {
+            let activeBatch = await tx.batch.findFirst({
+              where: { instituteId, courseId: c.id, status: { in: ['ACTIVE', 'UPCOMING'] } },
+              orderBy: { startDate: 'asc' },
+            });
+            if (!activeBatch && c.courseType !== 'BOOK') {
+              const codePrefix = c.slug.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'CRS';
+              const uniqueSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+              activeBatch = await tx.batch.create({
+                data: {
+                  instituteId,
+                  courseId: c.id,
+                  name: `${c.title} - Main Cohort`,
+                  code: `${codePrefix}-${now.getFullYear()}-${uniqueSuffix}`,
+                  status: 'ACTIVE',
+                  startDate: now,
+                  endDate: new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000),
+                  capacity: 60,
+                },
+              });
+            }
+
+            await tx.enrolment.upsert({
+              where: {
+                studentProfileId_courseId: {
+                  studentProfileId: studentProfile.id,
+                  courseId: c.id,
+                },
+              },
+              update: {
+                source: enrolmentSource,
+                status: EnrolmentStatus.ACTIVE,
+                ...(activeBatch ? { batchId: activeBatch.id } : {}),
+              },
+              create: {
+                instituteId,
                 studentProfileId: studentProfile.id,
                 courseId: c.id,
+                batchId: activeBatch?.id || null,
+                source: enrolmentSource,
+                status: EnrolmentStatus.ACTIVE,
               },
-            },
-            update: {
-              source: enrolmentSource,
-              status: EnrolmentStatus.ACTIVE,
-              ...(activeBatch ? { batchId: activeBatch.id } : {}),
-            },
-            create: {
-              instituteId,
-              studentProfileId: studentProfile.id,
-              courseId: c.id,
-              batchId: activeBatch?.id || null,
-              source: enrolmentSource,
-              status: EnrolmentStatus.ACTIVE,
-            },
-          });
-        }
-      });
+            });
+          }
+        });
+      } catch (txError: any) {
+        this.logger.error(`Order direct checkout transaction failed: ${txError.message}`, txError.stack);
+        throw new BadRequestException(
+          txError.message?.includes('Unique constraint')
+            ? 'A temporary duplicate record conflict occurred. Please click Proceed to Payment again.'
+            : `Order processing failed: ${txError.message || 'database error'}`
+        );
+      }
 
       const studentUserRecord = await this.prisma.user.findFirst({
         where: { memberships: { some: { studentProfile: { id: studentProfile.id } } } },
@@ -1190,26 +1228,31 @@ export class PublicService {
     const createdPaymentId = crypto.randomUUID();
     const now = new Date();
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`
-        INSERT INTO "Order" ("id", "instituteId", "studentProfileId", "orderNumber", "subtotal", "discount", "total", "status", "providerOrderId", "createdAt", "updatedAt")
-        VALUES (${createdOrderId}, ${instituteId}, ${studentProfile.id}, ${orderNumber}, ${subtotal}, ${discount}, ${total}, 'AWAITING_PAYMENT'::"OrderStatus", ${rzpOrder.id}, ${now}, ${now})
-      `;
-
-      for (const c of courses) {
-        const itemId = crypto.randomUUID();
-        const itemPrice = c.pricing === 'PAID' ? (c.salePrice ?? c.price) : 0;
+    try {
+      await this.prisma.$transaction(async (tx) => {
         await tx.$executeRaw`
-          INSERT INTO "OrderItem" ("id", "instituteId", "orderId", "courseId", "titleSnapshot", "price")
-          VALUES (${itemId}, ${instituteId}, ${createdOrderId}, ${c.id}, ${c.title}, ${itemPrice})
+          INSERT INTO "Order" ("id", "instituteId", "studentProfileId", "orderNumber", "subtotal", "discount", "total", "status", "providerOrderId", "createdAt", "updatedAt")
+          VALUES (${createdOrderId}, ${instituteId}, ${studentProfile.id}, ${orderNumber}, ${subtotal}, ${discount}, ${total}, 'AWAITING_PAYMENT'::"OrderStatus", ${rzpOrder.id}, ${now}, ${now})
         `;
-      }
 
-      await tx.$executeRaw`
-        INSERT INTO "Payment" ("id", "instituteId", "orderId", "amount", "status", "createdAt", "updatedAt")
-        VALUES (${createdPaymentId}, ${instituteId}, ${createdOrderId}, ${total}, 'CREATED'::"PaymentStatus", ${now}, ${now})
-      `;
-    });
+        for (const c of courses) {
+          const itemId = crypto.randomUUID();
+          const itemPrice = c.pricing === 'PAID' ? (c.salePrice ?? c.price) : 0;
+          await tx.$executeRaw`
+            INSERT INTO "OrderItem" ("id", "instituteId", "orderId", "courseId", "titleSnapshot", "price")
+            VALUES (${itemId}, ${instituteId}, ${createdOrderId}, ${c.id}, ${c.title}, ${itemPrice})
+          `;
+        }
+
+        await tx.$executeRaw`
+          INSERT INTO "Payment" ("id", "instituteId", "orderId", "amount", "status", "createdAt", "updatedAt")
+          VALUES (${createdPaymentId}, ${instituteId}, ${createdOrderId}, ${total}, 'CREATED'::"PaymentStatus", ${now}, ${now})
+        `;
+      });
+    } catch (txError: any) {
+      this.logger.error(`Order awaiting payment transaction failed: ${txError.message}`, txError.stack);
+      throw new BadRequestException(`Unable to create payment order: ${txError.message || 'database error'}`);
+    }
 
     return {
       orderId: createdOrderId,

@@ -125,9 +125,9 @@ export default function StudentsDirectoryPage() {
   const [adminName, setAdminName] = useState<string>('Institute Admin');
   const [activeSection, setActiveSection] = useState<'DIRECTORY' | 'ADMISSIONS'>('DIRECTORY');
   const [admissions, setAdmissions] = useState<any[]>(() => {
-    return cachedInitialAdmissions?.data && Array.isArray(cachedInitialAdmissions.data)
-      ? cachedInitialAdmissions.data
-      : [];
+    if (Array.isArray(cachedInitialAdmissions)) return cachedInitialAdmissions;
+    if (Array.isArray(cachedInitialAdmissions?.data)) return cachedInitialAdmissions.data;
+    return [];
   });
   const [admissionSummary, setAdmissionSummary] = useState<Record<string, number>>(() => {
     return cachedInitialAdmissions?.summary || {};
@@ -143,18 +143,22 @@ export default function StudentsDirectoryPage() {
 
   // Live Database State (Strict Zero-Mock: initialized synchronously from cached portal data)
   const [students, setStudents] = useState<StudentProfileSummaryDto[]>(() => {
-    return cachedInitialStudents?.data && Array.isArray(cachedInitialStudents.data)
-      ? cachedInitialStudents.data
-      : [];
+    if (Array.isArray(cachedInitialStudents)) return cachedInitialStudents;
+    if (Array.isArray(cachedInitialStudents?.data)) return cachedInitialStudents.data;
+    return [];
   });
   const [liveStats, setLiveStats] = useState<{ total: number; activeCount: number; reviewCount: number; inactiveCount: number } | null>(() => {
     if (cachedInitialStudents?.meta?.stats) {
       return cachedInitialStudents.meta.stats;
     }
-    if (cachedInitialStudents?.data && Array.isArray(cachedInitialStudents.data)) {
-      const list = cachedInitialStudents.data;
+    const list = Array.isArray(cachedInitialStudents)
+      ? cachedInitialStudents
+      : Array.isArray(cachedInitialStudents?.data)
+        ? cachedInitialStudents.data
+        : null;
+    if (list) {
       return {
-        total: cachedInitialStudents.meta?.total || list.length,
+        total: cachedInitialStudents?.meta?.total || list.length,
         activeCount: list.filter((s: any) => s.status === 'ACTIVE').length,
         reviewCount: list.filter((s: any) => s.status === 'UNDER_REVIEW' || s.status === 'SUSPENDED').length,
         inactiveCount: list.filter((s: any) => s.status === 'INACTIVE' || s.status === 'DROPPED').length,
@@ -163,7 +167,12 @@ export default function StudentsDirectoryPage() {
     return null;
   });
   const [totalCount, setTotalCount] = useState<number>(() => {
-    return cachedInitialStudents?.meta?.total || (cachedInitialStudents?.data?.length ?? 0);
+    return (
+      cachedInitialStudents?.meta?.total ||
+      (Array.isArray(cachedInitialStudents)
+        ? cachedInitialStudents.length
+        : cachedInitialStudents?.data?.length ?? 0)
+    );
   });
   const [totalPages, setTotalPages] = useState<number>(() => {
     return cachedInitialStudents?.meta?.totalPages || 1;
@@ -171,7 +180,10 @@ export default function StudentsDirectoryPage() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize] = useState<number>(10);
   const [isLoading, setIsLoading] = useState<boolean>(() => {
-    return !cachedInitialStudents || !cachedInitialStudents.data || cachedInitialStudents.data.length === 0;
+    const list = Array.isArray(cachedInitialStudents)
+      ? cachedInitialStudents
+      : cachedInitialStudents?.data;
+    return !list || list.length === 0;
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -185,9 +197,17 @@ export default function StudentsDirectoryPage() {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [courseFilter, setCourseFilter] = useState<string>('ALL');
 
-  // Available options for selects
-  const [courses, setCourses] = useState<CourseDto[]>(() => cachedInitialCourses || []);
-  const [batches, setBatches] = useState<BatchDto[]>(() => cachedInitialBatches || []);
+  // Available options for selects (clean Array guaranteed)
+  const [courses, setCourses] = useState<CourseDto[]>(() => {
+    if (Array.isArray(cachedInitialCourses)) return cachedInitialCourses;
+    if (Array.isArray((cachedInitialCourses as any)?.data)) return (cachedInitialCourses as any).data;
+    return [];
+  });
+  const [batches, setBatches] = useState<BatchDto[]>(() => {
+    if (Array.isArray(cachedInitialBatches)) return cachedInitialBatches;
+    if (Array.isArray((cachedInitialBatches as any)?.data)) return (cachedInitialBatches as any).data;
+    return [];
+  });
 
   // Add Student Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -197,7 +217,7 @@ export default function StudentsDirectoryPage() {
   const [newStudent, setNewStudent] = useState({
     avatarUrl: '',
     fullName: '',
-    phoneNumber: '+91 ',
+    phoneNumber: '',
     email: '',
     dateOfBirth: '',
     gender: 'MALE',
@@ -205,7 +225,7 @@ export default function StudentsDirectoryPage() {
     preferredLanguage: 'English',
     addressStreet: '',
     addressCity: '',
-    academicYear: '2026-2027',
+    academicYear: '',
     admissionDate: new Date().toISOString().slice(0, 10),
     courseId: '',
     batchId: '',
@@ -276,7 +296,7 @@ export default function StudentsDirectoryPage() {
     } finally {
       setIsLoadingAdmissions(false);
     }
-  }, [instituteId, admissionStatusFilter, debouncedSearch, admissions.length]);
+  }, [instituteId, admissionStatusFilter, debouncedSearch]);
 
   useEffect(() => {
     fetchAdmissions();
@@ -402,7 +422,7 @@ export default function StudentsDirectoryPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [instituteId, currentPage, pageSize, debouncedSearch, statusFilter, courseFilter, students.length]);
+  }, [instituteId, currentPage, pageSize, debouncedSearch, statusFilter, courseFilter]);
 
   useEffect(() => {
     fetchStudents();
@@ -515,7 +535,7 @@ export default function StudentsDirectoryPage() {
       setNewStudent({
         avatarUrl: '',
         fullName: '',
-        phoneNumber: '+91 ',
+        phoneNumber: '',
         email: '',
         dateOfBirth: '',
         gender: 'MALE',
@@ -523,7 +543,7 @@ export default function StudentsDirectoryPage() {
         preferredLanguage: 'English',
         addressStreet: '',
         addressCity: '',
-        academicYear: '2026-2027',
+        academicYear: '',
         admissionDate: new Date().toISOString().slice(0, 10),
         courseId: courses[0]?.id || '',
         batchId: batches[0]?.id || '',
@@ -816,7 +836,7 @@ export default function StudentsDirectoryPage() {
                       <td colSpan={6} className="py-10 text-center text-slate-400">No admission applications match this filter.</td>
                     </tr>
                   ) : (
-                    admissions.map((adm) => (
+                    (Array.isArray(admissions) ? admissions : []).map((adm) => (
                       <tr key={adm.id} className="hover:bg-slate-50/70">
                         <td className="py-3 px-4 font-mono font-semibold text-slate-800">{adm.applicationNumber}</td>
                         <td className="py-3 px-4">
@@ -931,7 +951,7 @@ export default function StudentsDirectoryPage() {
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="ALL">All Courses</option>
-                {courses.map((c) => (
+                {(Array.isArray(courses) ? courses : []).map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.title}
                   </option>
@@ -993,7 +1013,7 @@ export default function StudentsDirectoryPage() {
                     </td>
                   </tr>
                 ) : (
-                  students.map((s) => (
+                  (Array.isArray(students) ? students : []).map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/60 transition group">
                       {/* Name & Contact */}
                       <td className="py-3.5 px-4">
@@ -1008,9 +1028,11 @@ export default function StudentsDirectoryPage() {
                             <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0">
                               {(s.fullName || 'Student')
                                 .split(' ')
+                                .filter(Boolean)
                                 .map((n: string) => n[0])
                                 .slice(0, 2)
-                                .join('')}
+                                .join('')
+                                .toUpperCase() || 'ST'}
                             </div>
                           )}
                           <div>
@@ -1253,10 +1275,11 @@ export default function StudentsDirectoryPage() {
                           {newStudent.fullName
                             ? newStudent.fullName
                                 .split(' ')
+                                .filter(Boolean)
                                 .map((n) => n[0])
-                                .join('')
                                 .slice(0, 2)
-                                .toUpperCase()
+                                .join('')
+                                .toUpperCase() || 'STU'
                             : 'STU'}
                         </span>
                       )}
@@ -1324,7 +1347,7 @@ export default function StudentsDirectoryPage() {
                       <input
                         type="tel"
                         required
-                        placeholder="+91 98765 43210"
+                        placeholder="e.g. +91 98765 43210"
                         value={newStudent.phoneNumber}
                         onChange={(e) => setNewStudent({ ...newStudent, phoneNumber: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
@@ -1337,7 +1360,7 @@ export default function StudentsDirectoryPage() {
                       </label>
                       <input
                         type="email"
-                        placeholder="timothy@example.com"
+                        placeholder="e.g. timothy@example.com"
                         value={newStudent.email}
                         onChange={(e) => setNewStudent({ ...newStudent, email: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
@@ -1465,7 +1488,7 @@ export default function StudentsDirectoryPage() {
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">-- Select Course --</option>
-                        {courses.map((c) => (
+                        {(Array.isArray(courses) ? courses : []).map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.title}
                           </option>
@@ -1481,7 +1504,7 @@ export default function StudentsDirectoryPage() {
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">-- Select Cohort Batch --</option>
-                        {batches.map((b) => (
+                        {(Array.isArray(batches) ? batches : []).map((b) => (
                           <option key={b.id} value={b.id}>
                             {b.name} ({b.code})
                           </option>
@@ -1531,7 +1554,7 @@ export default function StudentsDirectoryPage() {
                       </label>
                       <input
                         type="tel"
-                        placeholder="+91 98765 00000"
+                        placeholder="e.g. +91 98765 00000"
                         value={newStudent.guardianPhone}
                         onChange={(e) => setNewStudent({ ...newStudent, guardianPhone: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
@@ -1544,7 +1567,7 @@ export default function StudentsDirectoryPage() {
                       </label>
                       <input
                         type="email"
-                        placeholder="parent@example.com"
+                        placeholder="e.g. parent@example.com"
                         value={newStudent.guardianEmail}
                         onChange={(e) => setNewStudent({ ...newStudent, guardianEmail: e.target.value })}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:bg-white"
