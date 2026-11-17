@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, use } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, use } from 'react';
 import Link from 'next/link';
 import {
   batchApi,
@@ -19,35 +19,40 @@ import {
   Plus,
   Search,
   CheckCircle,
+  CheckCircle2,
   AlertCircle,
   AlertTriangle,
   ArrowRightLeft,
   ShieldCheck,
-  ShieldAlert,
   X,
   Sparkles,
   MapPin,
-  Video,
-  FileText,
-  UserCheck,
   CalendarDays,
   Repeat,
   Info,
+  LayoutDashboard,
+  CreditCard,
+  Settings,
+  Copy,
+  Check,
+  ChevronRight,
+  UserPlus,
+  CalendarPlus,
+  Layers,
+  Filter,
 } from 'lucide-react';
 import { PortalShell } from '@/components/layout/portal-shell';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { StatCard } from '@/components/ui/stat-card';
 import {
-  LayoutDashboard,
-  CreditCard,
-  Settings,
-} from 'lucide-react';
+  usePercentageProgress,
+  PercentageProgressLoader,
+} from '@/components/ui/loading-skeleton';
 
 const adminNav = [
   { label: 'Overview', href: '/admin', icon: <LayoutDashboard size={18} /> },
-  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} />, badge: '3 Pending' },
+  { label: 'Students & Admissions', href: '/admin/students', icon: <Users size={18} /> },
   { label: 'Faculty & Teachers', href: '/admin/teachers', icon: <GraduationCap size={18} /> },
   { label: 'Courses & Curriculum', href: '/admin/courses', icon: <BookOpen size={18} /> },
   { label: 'Batches & Classes', href: '/admin/batches', icon: <Calendar size={18} /> },
@@ -62,42 +67,62 @@ export default function BatchDetailPage({
 }) {
   const unwrappedParams = use(params);
   const batchId = unwrappedParams.id;
-  const [instituteId, setInstituteId] = useState<string>(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') || '' : '',
-  );
 
-  useEffect(() => {
-    if (!instituteId) {
-      resolveActiveInstituteId().then((id) => {
-        if (id) setInstituteId(id);
-      });
+  const [instituteId, setInstituteId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('current_institute_id') || '';
     }
-  }, [instituteId]);
+    return '';
+  });
 
   const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'faculty' | 'timetable'>('overview');
-  const [isLiveApi, setIsLiveApi] = useState(false);
   const [adminName, setAdminName] = useState('Institute Administrator');
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [studentSearch, setStudentSearch] = useState('');
 
-  // Batch Details State
-  const [batch, setBatch] = useState({
-    id: batchId,
-    courseId: '',
-    name: 'Loading Cohort...',
-    code: '—',
-    courseTitle: '—',
-    courseSlug: '',
-    academicYear: '—',
-    term: '—',
-    startDate: '—',
-    endDate: '—',
-    capacity: 40,
-    status: 'ACTIVE' as 'UPCOMING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED',
+  // 1. Initial State with instant cache retrieval to eliminate lag
+  const [batch, setBatch] = useState<{
+    id: string;
+    courseId: string;
+    name: string;
+    code: string;
+    courseTitle: string;
+    courseSlug: string;
+    academicYear: string;
+    term: string;
+    startDate: string;
+    endDate: string;
+    capacity: number;
+    status: 'UPCOMING' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED';
+  }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = sessionStorage.getItem(`batch_detail_${batchId}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.name && parsed.name !== 'Loading Cohort...') return parsed;
+        }
+      } catch {}
+    }
+    return {
+      id: batchId,
+      courseId: '',
+      name: '',
+      code: '',
+      courseTitle: '',
+      courseSlug: '',
+      academicYear: '',
+      term: '',
+      startDate: '',
+      endDate: '',
+      capacity: 40,
+      status: 'ACTIVE',
+    };
   });
 
-  // Live PostgreSQL State (Zero Mock Data)
   const [students, setStudents] = useState<Array<{
     id: string;
     admissionNo: string;
@@ -108,6 +133,37 @@ export default function BatchDetailPage({
     status: string;
   }>>([]);
 
+  const [teachers, setTeachers] = useState<Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: 'LEAD' | 'ASSISTANT';
+    specialization: string;
+  }>>([]);
+
+  const [sessions, setSessions] = useState<Array<{
+    id: string;
+    title: string;
+    teacherName: string;
+    room: string;
+    startsAt: string;
+    endsAt: string;
+    isRecurring: boolean;
+    status: string;
+  }>>([]);
+
+  const [transferLogs, setTransferLogs] = useState<Array<{
+    id: string;
+    studentName: string;
+    admissionNo: string;
+    sourceBatch: string;
+    targetBatch: string;
+    reason: string;
+    transferredBy: string;
+    transferredAt: string;
+  }>>([]);
+
+  // Async Modal Datasets
   const [instituteStudents, setInstituteStudents] = useState<Array<{
     id: string;
     admissionNo: string;
@@ -130,35 +186,13 @@ export default function BatchDetailPage({
     enrolledCount: number;
   }>>([]);
 
-  const [transferLogs, setTransferLogs] = useState<Array<{
-    id: string;
-    studentName: string;
-    admissionNo: string;
-    sourceBatch: string;
-    targetBatch: string;
-    reason: string;
-    transferredBy: string;
-    transferredAt: string;
-  }>>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(!batch.name);
 
-  const [teachers, setTeachers] = useState<Array<{
-    id: string;
-    name: string;
-    email: string;
-    role: 'LEAD' | 'ASSISTANT';
-    specialization: string;
-  }>>([]);
-
-  const [sessions, setSessions] = useState<Array<{
-    id: string;
-    title: string;
-    teacherName: string;
-    room: string;
-    startsAt: string;
-    endsAt: string;
-    isRecurring: boolean;
-    status: string;
-  }>>([]);
+  // Smooth Percentage Progress (0% -> 100%)
+  const { progress, isComplete, stageMessage } = usePercentageProgress({
+    isLoading: isLoading && !batch.name,
+    minDurationMs: 800,
+  });
 
   // Modals state
   const [showEnrolModal, setShowEnrolModal] = useState(false);
@@ -166,12 +200,11 @@ export default function BatchDetailPage({
   const [selectedStudentForTransfer, setSelectedStudentForTransfer] = useState<any>(null);
   const [transferTargetBatchId, setTransferTargetBatchId] = useState('');
   const [transferReason, setTransferReason] = useState('');
-
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [showAssignTeacherModal, setShowAssignTeacherModal] = useState(false);
 
-  // New Single Class Form
+  // Forms
   const [newClass, setNewClass] = useState({
     title: '',
     teacherProfileId: '',
@@ -181,12 +214,11 @@ export default function BatchDetailPage({
   });
   const [conflictWarning, setConflictWarning] = useState<string | null>(null);
 
-  // Recurring Schedule Form
   const [recurringForm, setRecurringForm] = useState({
     title: 'Weekly Practicum Session',
     teacherProfileId: '',
     room: 'Lecture Hall A',
-    daysOfWeek: [1, 3], // Mon, Wed
+    daysOfWeek: [1, 3],
     startTime: '10:00',
     endTime: '11:30',
     startDate: new Date().toISOString().slice(0, 10),
@@ -194,11 +226,7 @@ export default function BatchDetailPage({
     exceptions: '',
   });
   const [recurringPreview, setRecurringPreview] = useState<string | null>(null);
-
-  // Selected Student Enrolment Form
   const [selectedEnrollStudentId, setSelectedEnrollStudentId] = useState('');
-
-  // Assign Teacher Modal Form
   const [assignTeacherForm, setAssignTeacherForm] = useState<{
     teacherProfileId: string;
     role: 'LEAD' | 'ASSISTANT';
@@ -207,45 +235,52 @@ export default function BatchDetailPage({
     role: 'ASSISTANT',
   });
 
-  useEffect(() => {
-    let active = true;
-    resolveVerifiedAdminContext()
-      .then((ctx) => {
-        if (active && ctx?.user?.fullName) {
-          setAdminName(ctx.user.fullName);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
+  // Copy Code helper
+  const handleCopyCode = () => {
+    if (!batch.code) return;
+    navigator.clipboard.writeText(batch.code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
 
-  const loadBatchDetail = useCallback(async () => {
-    if (!instituteId || !batchId) return;
+  const showNotice = (msg: string) => {
+    setActionNotice(msg);
+    setTimeout(() => setActionNotice(null), 4000);
+  };
+
+  // 2. Fetch primary batch data immediately (Fast Path)
+  const loadBatchDetail = useCallback(async (explicitInstId?: string) => {
+    const activeInstId = explicitInstId || instituteId || (typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : '') || '';
+    if (!activeInstId || !batchId) return;
+
     try {
-      const [live, studRes, teachRes, allBatches] = await Promise.all([
-        batchApi.getBatch(instituteId, batchId),
-        studentApi.getStudents(instituteId, { limit: 100 }).catch(() => ({ data: [] as any[] })),
-        teacherApi.getTeachers(instituteId, { limit: 100 }).catch(() => ({ data: [] as any[] })),
-        batchApi.getBatches(instituteId).catch(() => []),
-      ]);
+      if (!batch.name) setIsLoading(true);
+
+      // Primary fast fetch: single batch query returns instantly (<100ms)
+      const live = await batchApi.getBatch(activeInstId, batchId);
       if (!live) return;
 
-      setBatch({
+      const updatedBatch = {
         id: live.id,
         courseId: live.courseId || '',
         name: live.name,
         code: live.code,
         courseTitle: live.courseTitle || 'Course Program',
         courseSlug: live.courseSlug || '',
-        academicYear: live.academicYearName || 'Current Year',
-        term: live.termName || 'Current Term',
+        academicYear: live.academicYearName || 'Current Academic Year',
+        term: live.termName || 'Term 1',
         startDate: live.startDate?.slice(0, 10) || '—',
         endDate: live.endDate?.slice(0, 10) || '—',
         capacity: live.capacity || 40,
-        status: live.status || 'ACTIVE',
-      });
+        status: (live.status || 'ACTIVE') as any,
+      };
+
+      setBatch(updatedBatch);
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem(`batch_detail_${batchId}`, JSON.stringify(updatedBatch));
+        } catch {}
+      }
 
       const enrolledList = Array.isArray(live.enrolments)
         ? live.enrolments.map((enr: any) => ({
@@ -263,64 +298,13 @@ export default function BatchDetailPage({
       const batchTeachersList = Array.isArray(live.teachers)
         ? live.teachers.map((t: any) => ({
             id: t.teacherProfileId || t.id,
-            name: t.fullName || t.name || 'Faculty',
+            name: t.fullName || t.name || 'Faculty Member',
             email: t.email || '',
             role: (t.role === 'LEAD' ? 'LEAD' : 'ASSISTANT') as 'LEAD' | 'ASSISTANT',
             specialization: t.specialization || 'Theological Studies',
           }))
         : [];
       setTeachers(batchTeachersList);
-
-      const mappedTeachers = (teachRes?.data || []).map((t: any) => ({
-        id: t.id,
-        name: t.fullName || t.user?.fullName || 'Faculty Member',
-        email: t.email || t.user?.email || '',
-        specialization: t.specialization || 'Bible & Theology',
-      }));
-      setInstituteTeachers(mappedTeachers);
-
-      const defaultTeacherId = batchTeachersList[0]?.id || mappedTeachers[0]?.id || '';
-      setNewClass((prev) =>
-        prev.teacherProfileId ? prev : { ...prev, teacherProfileId: defaultTeacherId },
-      );
-      setRecurringForm((prev) =>
-        prev.teacherProfileId ? prev : { ...prev, teacherProfileId: defaultTeacherId },
-      );
-      setAssignTeacherForm((prev) =>
-        prev.teacherProfileId ? prev : { ...prev, teacherProfileId: mappedTeachers[0]?.id || '' },
-      );
-
-      const enrolledIds = new Set(enrolledList.map((s: any) => s.id));
-      const availableStudents = (studRes?.data || [])
-        .map((s: any) => ({
-          id: s.id,
-          admissionNo: s.admissionNo || 'N/A',
-          fullName: s.fullName || s.membership?.user?.fullName || 'Student',
-          email: s.email || s.membership?.user?.email || '',
-        }))
-        .filter((s: any) => !enrolledIds.has(s.id));
-      setInstituteStudents(availableStudents);
-      setSelectedEnrollStudentId((prev) =>
-        prev && availableStudents.some((s: any) => s.id === prev)
-          ? prev
-          : availableStudents[0]?.id || '',
-      );
-
-      const transferTargets = (Array.isArray(allBatches) ? allBatches : [])
-        .filter((b: any) => b.id !== batchId && (!live.courseId || b.courseId === live.courseId))
-        .map((b: any) => ({
-          id: b.id,
-          name: b.name,
-          code: b.code,
-          capacity: b.capacity || 40,
-          enrolledCount: b.enrolledCount ?? b._count?.enrolments ?? 0,
-        }));
-      setEligibleTargetBatches(transferTargets);
-      setTransferTargetBatchId((prev) =>
-        prev && transferTargets.some((b: any) => b.id === prev)
-          ? prev
-          : transferTargets[0]?.id || '',
-      );
 
       if (Array.isArray(live.timetable)) {
         setSessions(
@@ -352,22 +336,116 @@ export default function BatchDetailPage({
         );
       }
 
-      setIsLiveApi(true);
+      setIsLoading(false);
+
+      // Secondary non-blocking async queries for modals
+      Promise.all([
+        studentApi.getStudents(activeInstId, { limit: 100 }).catch(() => ({ data: [] as any[] })),
+        teacherApi.getTeachers(activeInstId, { limit: 100 }).catch(() => ({ data: [] as any[] })),
+        batchApi.getBatches(activeInstId).catch(() => []),
+      ]).then(([studRes, teachRes, allBatches]) => {
+        const mappedTeachers = (teachRes?.data || []).map((t: any) => ({
+          id: t.id,
+          name: t.fullName || t.user?.fullName || 'Faculty Member',
+          email: t.email || t.user?.email || '',
+          specialization: t.specialization || 'Bible & Theology',
+        }));
+        setInstituteTeachers(mappedTeachers);
+
+        const defaultTeacherId = batchTeachersList[0]?.id || mappedTeachers[0]?.id || '';
+        setNewClass((prev) =>
+          prev.teacherProfileId ? prev : { ...prev, teacherProfileId: defaultTeacherId },
+        );
+        setRecurringForm((prev) =>
+          prev.teacherProfileId ? prev : { ...prev, teacherProfileId: defaultTeacherId },
+        );
+        setAssignTeacherForm((prev) =>
+          prev.teacherProfileId ? prev : { ...prev, teacherProfileId: mappedTeachers[0]?.id || '' },
+        );
+
+        const enrolledIds = new Set(enrolledList.map((s: any) => s.id));
+        const availableStudents = (studRes?.data || [])
+          .map((s: any) => ({
+            id: s.id,
+            admissionNo: s.admissionNo || 'N/A',
+            fullName: s.fullName || s.membership?.user?.fullName || 'Student',
+            email: s.email || s.membership?.user?.email || '',
+          }))
+          .filter((st: any) => !enrolledIds.has(st.id));
+        setInstituteStudents(availableStudents);
+        if (availableStudents.length > 0) {
+          setSelectedEnrollStudentId(availableStudents[0].id);
+        }
+
+        const transferTargets = (allBatches || [])
+          .filter((b: any) => b.id !== batchId && b.courseId === live.courseId && b.status === 'ACTIVE')
+          .map((b: any) => ({
+            id: b.id,
+            name: b.name,
+            code: b.code,
+            capacity: b.capacity || 40,
+            enrolledCount: b.enrolledCount || 0,
+          }));
+        setEligibleTargetBatches(transferTargets);
+        if (transferTargets.length > 0) {
+          setTransferTargetBatchId((prev) => (prev ? prev : transferTargets[0].id));
+        }
+      });
     } catch (err: any) {
       setActionError(err?.message || 'Failed to load batch detail from PostgreSQL.');
+      setIsLoading(false);
     }
-  }, [instituteId, batchId]);
+  }, [instituteId, batchId, batch.name]);
 
+  // Context resolution & Mount trigger
   useEffect(() => {
-    loadBatchDetail();
-  }, [loadBatchDetail]);
+    let active = true;
+    const init = async () => {
+      let activeId = instituteId || (typeof window !== 'undefined' ? localStorage.getItem('current_institute_id') : '') || '';
+      if (activeId) {
+        loadBatchDetail(activeId);
+      }
+      try {
+        const ctx = await resolveVerifiedAdminContext();
+        if (!active) return;
+        if (ctx?.user?.fullName) setAdminName(ctx.user.fullName);
+        if (ctx?.instituteId && ctx.instituteId !== activeId) {
+          setInstituteId(ctx.instituteId);
+          loadBatchDetail(ctx.instituteId);
+        }
+      } catch {
+        const stored = await resolveActiveInstituteId();
+        if (stored && active && stored !== activeId) {
+          setInstituteId(stored);
+          loadBatchDetail(stored);
+        }
+      }
+    };
+    init();
+    return () => {
+      active = false;
+    };
+  }, [batchId, loadBatchDetail, instituteId]);
 
-  const showNotice = (msg: string) => {
-    setActionNotice(msg);
-    setTimeout(() => setActionNotice(null), 4000);
-  };
+  // Dynamic calculations
+  const fillPercentage = Math.round((students.length / Math.max(batch.capacity, 1)) * 100);
+  const remainingSeats = Math.max(0, batch.capacity - students.length);
+  const leadTeachers = useMemo(() => teachers.filter((t) => t.role === 'LEAD'), [teachers]);
+  const assistantTeachers = useMemo(() => teachers.filter((t) => t.role === 'ASSISTANT'), [teachers]);
+  const leadTeacherName = leadTeachers[0]?.name || (teachers.length > 0 ? teachers[0].name : 'No Lead Assigned');
 
-  // Real API Scheduling Conflict Check
+  const filteredStudents = useMemo(() => {
+    if (!studentSearch.trim()) return students;
+    const q = studentSearch.toLowerCase();
+    return students.filter(
+      (s) =>
+        s.fullName.toLowerCase().includes(q) ||
+        s.admissionNo.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q),
+    );
+  }, [students, studentSearch]);
+
+  // Conflict Checking
   const handleCheckConflict = async (overrides?: Partial<typeof newClass>) => {
     const candidate = { ...newClass, ...overrides };
     if (!candidate.startsAt || !candidate.endsAt) return;
@@ -412,10 +490,9 @@ export default function BatchDetailPage({
       });
       await loadBatchDetail();
       setShowScheduleModal(false);
-      setNewClass((prev) => ({ ...prev, title: '' }));
-      showNotice('Class session scheduled and saved.');
+      showNotice('Single class session scheduled successfully.');
     } catch (err: any) {
-      setActionError(err?.message || 'Failed to create class schedule.');
+      setActionError(err?.message || 'Failed to schedule class.');
     } finally {
       setSubmittingAction(false);
     }
@@ -424,13 +501,17 @@ export default function BatchDetailPage({
   const handleGenerateRecurring = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recurringForm.teacherProfileId) {
-      setActionError('Select an instructor before generating recurring sessions.');
+      setActionError('Select a teacher before generating recurring sessions.');
       return;
     }
 
     setSubmittingAction(true);
     setActionError(null);
     try {
+      const exceptionDates = recurringForm.exceptions
+        ? recurringForm.exceptions.split(',').map((d) => d.trim()).filter(Boolean)
+        : [];
+
       const res = await batchApi.generateRecurringWeeklySchedule(instituteId, {
         batchId,
         teacherProfileId: recurringForm.teacherProfileId,
@@ -441,9 +522,10 @@ export default function BatchDetailPage({
         endTime: recurringForm.endTime,
         startDate: recurringForm.startDate,
         endDate: recurringForm.endDate,
-        exceptions: recurringForm.exceptions.split(',').map((s) => s.trim()).filter(Boolean),
+        exceptions: exceptionDates,
       });
-      setRecurringPreview(`Validated 0 conflicts! Created ${res.generatedCount ?? res.created ?? 0} recurring occurrences.`);
+
+      setRecurringPreview(`Successfully generated ${res.createdCount || 0} weekly recurring sessions!`);
       await loadBatchDetail();
       setTimeout(() => {
         setShowRecurringModal(false);
@@ -474,7 +556,7 @@ export default function BatchDetailPage({
       await batchApi.enrollStudent(instituteId, batchId, selectedEnrollStudentId);
       await loadBatchDetail();
       setShowEnrolModal(false);
-      showNotice('Student enrolled in cohort.');
+      showNotice('Student enrolled in cohort successfully.');
     } catch (err: any) {
       setActionError(err?.message || 'Failed to enroll student in cohort.');
     } finally {
@@ -501,7 +583,7 @@ export default function BatchDetailPage({
       setShowTransferModal(false);
       setSelectedStudentForTransfer(null);
       setTransferReason('');
-      showNotice('Student transferred and audit trail preserved.');
+      showNotice('Student transferred and academic audit trail preserved.');
     } catch (err: any) {
       setActionError(err?.message || 'Failed to execute batch transfer.');
     } finally {
@@ -524,7 +606,7 @@ export default function BatchDetailPage({
       });
       await loadBatchDetail();
       setShowAssignTeacherModal(false);
-      showNotice('Faculty assigned to cohort.');
+      showNotice('Faculty member assigned to cohort.');
     } catch (err: any) {
       setActionError(err?.message || 'Failed to assign faculty member.');
     } finally {
@@ -543,8 +625,6 @@ export default function BatchDetailPage({
     }
   };
 
-  const fillPercentage = Math.round((students.length / Math.max(batch.capacity, 1)) * 100);
-
   return (
     <PortalShell
       portalTitle="Institute Admin"
@@ -553,507 +633,703 @@ export default function BatchDetailPage({
       userName={adminName}
       userRoleLabel="Institute Administrator"
     >
-      <div className="space-y-6">
+      <div className="space-y-6 pb-12">
+        {/* Error and Notice Alerts */}
         {actionError && (
-          <div className="bg-rose-500/10 border border-rose-500/30 p-3 rounded-lg text-xs text-rose-700 flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2"><AlertCircle size={15} /> {actionError}</span>
-            <button onClick={() => setActionError(null)} className="text-rose-700 hover:underline">Dismiss</button>
-          </div>
-        )}
-        {actionNotice && (
-          <div className="bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-lg text-xs text-emerald-800 flex items-center gap-2">
-            <CheckCircle size={15} className="text-emerald-600" /> {actionNotice}
-          </div>
-        )}
-        {/* Back Link & Header */}
-        <div>
-          <Link
-            href="/admin/batches"
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3 transition-colors"
-          >
-            <ArrowLeft size={16} />
-            Back to Batches & Cohorts
-          </Link>
-
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold tracking-tight text-foreground">{batch.name}</h1>
-                <Badge variant={batch.status === 'ACTIVE' ? 'success' : 'neutral'}>
-                  {batch.status}
-                </Badge>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground mt-1">
-                <span className="font-mono bg-muted px-2 py-0.5 rounded font-medium text-foreground">
-                  {batch.code}
-                </span>
-                <span>•</span>
-                <span className="font-semibold text-foreground flex items-center gap-1">
-                  <BookOpen size={15} className="text-primary" />
-                  {batch.courseTitle}
-                </span>
-                <span>•</span>
-                <span>{batch.term} ({batch.academicYear})</span>
-              </div>
-            </div>
-
-            {/* Quick Actions */}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowRecurringModal(true)}
-                className="flex items-center gap-1.5"
-              >
-                <Repeat size={14} />
-                Recurring Weekly Schedule
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowScheduleModal(true)}
-                className="flex items-center gap-1.5"
-              >
-                <Plus size={14} />
-                Add Single Class
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowEnrolModal(true)}
-                className="flex items-center gap-1.5"
-              >
-                <Users size={14} />
-                Enrol Student
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Studio Tabs Navigation */}
-        <div className="border-b flex items-center gap-1 overflow-x-auto">
-          {[
-            { id: 'overview', label: 'Cohort Overview', icon: <Info size={16} /> },
-            {
-              id: 'students',
-              label: `Enrolled Students (${students.length}/${batch.capacity})`,
-              icon: <Users size={16} />,
-            },
-            {
-              id: 'faculty',
-              label: `Teaching Faculty (${teachers.length})`,
-              icon: <GraduationCap size={16} />,
-            },
-            {
-              id: 'timetable',
-              label: `Timetable & Live Sessions (${sessions.length})`,
-              icon: <Clock size={16} />,
-            },
-          ].map((tab) => (
+          <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl text-xs text-rose-800 flex items-center justify-between gap-3 shadow-xs">
+            <span className="flex items-center gap-2 font-medium">
+              <AlertCircle size={16} className="text-rose-600 shrink-0" />
+              {actionError}
+            </span>
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'border-primary text-primary font-semibold'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
+              onClick={() => setActionError(null)}
+              className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
             >
-              {tab.icon}
-              {tab.label}
+              Dismiss
             </button>
-          ))}
-        </div>
-
-        {/* TAB 1: OVERVIEW */}
-        {activeTab === 'overview' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <Card className="p-5 space-y-3">
-                <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                  Enrolment Capacity
-                </span>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-3xl font-extrabold text-foreground">
-                    {students.length} / {batch.capacity}
-                  </span>
-                  <span className="text-sm font-medium text-emerald-600">{fillPercentage}% Filled</span>
-                </div>
-                <div className="w-full bg-muted rounded-full h-2.5 overflow-hidden">
-                  <div
-                    className="bg-emerald-500 h-full rounded-full transition-all"
-                    style={{ width: `${fillPercentage}%` }}
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Concurrency-safe backend capacity locks protect against simultaneous over-enrolment.
-                </p>
-              </Card>
-
-              <Card className="p-5 space-y-3">
-                <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                  Active Faculty
-                </span>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-3xl font-extrabold text-foreground">{teachers.length}</span>
-                  <Badge variant="info">1 Lead • 2 Assistants</Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Lead Teacher: <strong>{teachers.find((t) => t.role === 'LEAD')?.name}</strong>
-                </p>
-              </Card>
-
-              <Card className="p-5 space-y-3">
-                <span className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-                  Scheduled Classes
-                </span>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-3xl font-extrabold text-foreground">{sessions.length}</span>
-                  <Badge variant="success">Conflict-Free</Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Includes live lecture hours with teacher & room double-booking prevention.
-                </p>
-              </Card>
-            </div>
-
-            {/* Batch Parameters Form */}
-            <Card className="p-6 space-y-5">
-              <div className="border-b pb-3 flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-semibold text-foreground">Batch Parameters & Settings</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Academic dates, codes, and lifecycle status for this cohort.
-                  </p>
-                </div>
-                <Badge variant="neutral" className="flex items-center gap-1">
-                  <ShieldCheck size={14} className="text-emerald-500" />
-                  Tenant Isolated
-                </Badge>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                <div className="bg-muted/40 p-3 rounded-lg">
-                  <span className="text-xs text-muted-foreground block">Cohort Name</span>
-                  <span className="font-semibold text-foreground">{batch.name}</span>
-                </div>
-                <div className="bg-muted/40 p-3 rounded-lg">
-                  <span className="text-xs text-muted-foreground block">Unique Code</span>
-                  <span className="font-mono font-semibold text-foreground">{batch.code}</span>
-                </div>
-                <div className="bg-muted/40 p-3 rounded-lg">
-                  <span className="text-xs text-muted-foreground block">Course Syllabus</span>
-                  <span className="font-semibold text-foreground">{batch.courseTitle}</span>
-                </div>
-                <div className="bg-muted/40 p-3 rounded-lg">
-                  <span className="text-xs text-muted-foreground block">Academic Period</span>
-                  <span className="font-semibold text-foreground">{batch.academicYear} — {batch.term}</span>
-                </div>
-                <div className="bg-muted/40 p-3 rounded-lg">
-                  <span className="text-xs text-muted-foreground block">Start Date</span>
-                  <span className="font-semibold text-foreground">{batch.startDate}</span>
-                </div>
-                <div className="bg-muted/40 p-3 rounded-lg">
-                  <span className="text-xs text-muted-foreground block">End Date</span>
-                  <span className="font-semibold text-foreground">{batch.endDate}</span>
-                </div>
-              </div>
-            </Card>
           </div>
         )}
 
-        {/* TAB 2: ENROLLED STUDENTS & TRANSFERS */}
-        {activeTab === 'students' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-foreground">Enrolled Students Roster</h3>
-                <p className="text-xs text-muted-foreground">
-                  Manage student admissions, capacity constraints, and inter-batch student transfers.
-                </p>
-              </div>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowEnrolModal(true)}
-                className="flex items-center gap-2"
-              >
-                <Plus size={16} />
-                Enrol Student
-              </Button>
-            </div>
+        {actionNotice && (
+          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-xs text-emerald-800 flex items-center gap-2.5 shadow-xs">
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <span className="font-semibold">{actionNotice}</span>
+          </div>
+        )}
 
-            {/* Students Table */}
-            <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-muted/50 text-xs font-semibold text-muted-foreground border-b">
-                    <tr>
-                      <th className="py-3 px-4">Admission No</th>
-                      <th className="py-3 px-4">Student Name</th>
-                      <th className="py-3 px-4">Contact</th>
-                      <th className="py-3 px-4">Enrolment Date</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {students.map((student) => (
-                      <tr key={student.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="py-3 px-4 font-mono font-medium text-foreground">
-                          {student.admissionNo}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-foreground">{student.fullName}</div>
-                          <div className="text-xs text-muted-foreground">{student.email}</div>
-                        </td>
-                        <td className="py-3 px-4 text-xs text-muted-foreground">
-                          {student.phone}
-                        </td>
-                        <td className="py-3 px-4 text-xs">{student.enrolledAt}</td>
-                        <td className="py-3 px-4">
-                          <Badge variant="success">Enrolled</Badge>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedStudentForTransfer(student);
-                              setShowTransferModal(true);
-                            }}
-                            className="flex items-center gap-1.5 ml-auto text-xs"
-                          >
-                            <ArrowRightLeft size={13} />
-                            Transfer Batch
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-
-            {/* Batch Transfer History Log (Requirement 2) */}
-            <Card className="p-5 space-y-4">
-              <div className="flex items-center justify-between border-b pb-3">
-                <div className="flex items-center gap-2">
-                  <ArrowRightLeft className="text-primary" size={18} />
-                  <h4 className="font-semibold text-foreground">Batch Transfer Audit Trail</h4>
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  Permanent history of learning preservation
-                </span>
+        {/* ── PERCENTAGE PROGRESS LOADER (Shown while loading initial batch data) ── */}
+        {!batch.name || (!isComplete && isLoading) ? (
+          <PercentageProgressLoader
+            progress={progress}
+            stageMessage={stageMessage}
+            title="Synchronizing Batch & Cohort Records"
+            subtitle="Fetching live PostgreSQL curriculum, active student enrolments, assigned faculty, and scheduled timetable..."
+            variant="hero"
+            showCheckpoints={true}
+          />
+        ) : (
+          <>
+            {/* ── 1. MODERN BREADCRUMB & HERO HEADER ── */}
+            <div className="space-y-3">
+              {/* Breadcrumb Navigation */}
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                <Link
+                  href="/admin/batches"
+                  className="inline-flex items-center gap-1.5 text-slate-600 hover:text-blue-600 transition-colors font-medium"
+                >
+                  <ArrowLeft size={14} />
+                  <span>Batches & Classes</span>
+                </Link>
+                <ChevronRight size={13} className="text-slate-300" />
+                <span className="text-slate-800 font-bold truncate max-w-xs">{batch.name}</span>
               </div>
 
-              {transferLogs.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-4">
-                  No transfer records logged yet for this cohort.
-                </p>
-              ) : (
-                <div className="divide-y text-xs">
-                  {transferLogs.map((log) => (
-                    <div key={log.id} className="py-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
-                      <div>
-                        <div className="font-semibold text-foreground flex items-center gap-2">
-                          <span>{log.studentName}</span>
-                          <span className="font-mono text-muted-foreground">({log.admissionNo})</span>
-                        </div>
-                        <div className="text-muted-foreground mt-0.5">
-                          From <strong className="text-foreground">{log.sourceBatch}</strong> → To{' '}
-                          <strong className="text-foreground">{log.targetBatch}</strong>
-                        </div>
-                        <div className="text-primary mt-0.5 font-medium">
-                          Reason: {log.reason}
-                        </div>
-                      </div>
-                      <div className="text-right text-muted-foreground">
-                        <div>Initiated by: {log.transferredBy}</div>
-                        <div className="text-[11px]">{log.transferredAt}</div>
-                      </div>
+              {/* Hero Banner Card */}
+              <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-xs relative overflow-hidden">
+                {/* Subtle decorative background gradient */}
+                <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-blue-500/5 via-indigo-500/5 to-transparent rounded-full pointer-events-none" />
+
+                <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  {/* Left Column: Title & Metadata Tags */}
+                  <div className="space-y-3 max-w-2xl">
+                    {/* Meta Tags Row */}
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      {/* Cohort Code Badge with Copy button */}
+                      <button
+                        onClick={handleCopyCode}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-800 font-mono font-bold text-xs transition border border-slate-200 cursor-pointer"
+                        title="Click to copy cohort code"
+                      >
+                        <span>{batch.code}</span>
+                        {copiedCode ? (
+                          <Check size={12} className="text-emerald-600" />
+                        ) : (
+                          <Copy size={12} className="text-slate-400" />
+                        )}
+                      </button>
+
+                      {/* Course Title Badge */}
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-blue-50 text-blue-700 font-semibold border border-blue-200/70">
+                        <BookOpen size={13} className="text-blue-600" />
+                        <span>{batch.courseTitle}</span>
+                      </span>
+
+                      {/* Academic Period Pill */}
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-50 text-purple-700 font-semibold border border-purple-200/70">
+                        <CalendarDays size={13} className="text-purple-600" />
+                        <span>{batch.academicYear} • {batch.term}</span>
+                      </span>
+
+                      {/* Status Badge */}
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200/80">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                        <span>{batch.status}</span>
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          </div>
-        )}
 
-        {/* TAB 3: TEACHING FACULTY */}
-        {activeTab === 'faculty' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-foreground">Assigned Faculty Staff</h3>
-                <p className="text-xs text-muted-foreground">
-                  Requirement 5: Support one Lead Teacher and multiple Assistant Teachers.
-                </p>
+                    {/* Main Cohort Title */}
+                    <div>
+                      <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                        {batch.name}
+                      </h1>
+                      <p className="text-xs sm:text-sm text-slate-500 mt-1 flex items-center gap-3">
+                        <span>Cohort Schedule: <strong className="text-slate-700">{batch.startDate}</strong> to <strong className="text-slate-700">{batch.endDate}</strong></span>
+                        <span className="text-slate-300">•</span>
+                        <span>Capacity: <strong className="text-slate-700">{batch.capacity} Students</strong></span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Primary Action Buttons */}
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowRecurringModal(true)}
+                      className="text-xs font-semibold rounded-xl border-slate-200 hover:bg-slate-50 gap-1.5 py-2 px-3.5"
+                    >
+                      <Repeat size={14} className="text-slate-600" />
+                      <span>Recurring Schedule</span>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowScheduleModal(true)}
+                      className="text-xs font-semibold rounded-xl border-slate-200 hover:bg-slate-50 gap-1.5 py-2 px-3.5"
+                    >
+                      <CalendarPlus size={14} className="text-slate-600" />
+                      <span>Add Single Class</span>
+                    </Button>
+
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setShowEnrolModal(true)}
+                      className="text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-xs gap-1.5 py-2 px-4 cursor-pointer"
+                    >
+                      <UserPlus size={14} />
+                      <span>Enrol Student</span>
+                    </Button>
+                  </div>
+                </div>
               </div>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowAssignTeacherModal(true)}
-                className="flex items-center gap-2"
-              >
-                <Plus size={16} />
-                Assign Teacher
-              </Button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {teachers.map((t) => (
-                <Card
-                  key={t.id}
-                  className={`p-5 space-y-3 border-2 ${
-                    t.role === 'LEAD' ? 'border-primary/40 bg-primary/5' : 'border-border'
+            {/* ── 2. SEGMENTED NAVIGATION TABS ── */}
+            <div className="bg-slate-100/90 p-1.5 rounded-2xl flex items-center gap-1.5 overflow-x-auto text-xs font-semibold text-slate-600">
+              {[
+                { id: 'overview', label: 'Cohort Overview', icon: <Info size={15} /> },
+                {
+                  id: 'students',
+                  label: `Enrolled Students (${students.length}/${batch.capacity})`,
+                  icon: <Users size={15} />,
+                  countBadge: `${students.length}/${batch.capacity}`,
+                },
+                {
+                  id: 'faculty',
+                  label: `Teaching Faculty (${teachers.length})`,
+                  icon: <GraduationCap size={15} />,
+                  countBadge: `${teachers.length}`,
+                },
+                {
+                  id: 'timetable',
+                  label: `Timetable & Live Sessions (${sessions.length})`,
+                  icon: <Clock size={15} />,
+                  countBadge: `${sessions.length}`,
+                },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all whitespace-nowrap cursor-pointer ${
+                    activeTab === tab.id
+                      ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                      : 'hover:text-slate-900 text-slate-600'
                   }`}
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-base">
-                      {t.name[0]}
-                    </div>
-                    <Badge variant={t.role === 'LEAD' ? 'primary' : 'neutral'}>
-                      {t.role === 'LEAD' ? 'Lead Faculty' : 'Assistant Teacher'}
-                    </Badge>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-foreground">{t.name}</h4>
-                    <p className="text-xs text-muted-foreground">{t.email}</p>
-                    <p className="text-xs text-primary font-medium mt-1">{t.specialization}</p>
-                  </div>
-                  <div className="pt-2 border-t flex items-center justify-between">
-                    <span className="text-[11px] text-muted-foreground">
-                      Tenant Verified
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveTeacher(t.id)}
-                      className="text-[11px] text-rose-600 hover:underline font-medium"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </Card>
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </button>
               ))}
             </div>
-          </div>
-        )}
 
-        {/* TAB 4: TIMETABLE & LIVE SESSIONS */}
-        {activeTab === 'timetable' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-foreground">Class Timetable & Live Sessions</h3>
-                <p className="text-xs text-muted-foreground">
-                  Conflict-protected class schedule preventing teacher, room, and cohort double-booking.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowRecurringModal(true)}
-                  className="flex items-center gap-1.5"
-                >
-                  <Repeat size={14} />
-                  Recurring Schedule
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setShowScheduleModal(true)}
-                  className="flex items-center gap-1.5"
-                >
-                  <Plus size={14} />
-                  Schedule Class
-                </Button>
-              </div>
-            </div>
+            {/* ── TAB 1: OVERVIEW ── */}
+            {activeTab === 'overview' && (
+              <div className="space-y-6">
+                {/* 3 Redesigned KPI Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {/* Card 1: Enrolment Capacity */}
+                  <Card className="p-6 rounded-3xl border border-slate-200/90 bg-white shadow-xs flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        Enrolment Capacity
+                      </span>
+                      <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <Users size={17} />
+                      </div>
+                    </div>
 
-            {/* Sessions Table */}
-            <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-muted/50 text-xs font-semibold text-muted-foreground border-b">
-                    <tr>
-                      <th className="py-3 px-4">Class Topic</th>
-                      <th className="py-3 px-4">Instructor</th>
-                      <th className="py-3 px-4">Location / Room</th>
-                      <th className="py-3 px-4">Time Slot</th>
-                      <th className="py-3 px-4">Type</th>
-                      <th className="py-3 px-4 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {sessions.map((sess) => (
-                      <tr key={sess.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="py-3 px-4 font-semibold text-foreground">
-                          {sess.title}
-                        </td>
-                        <td className="py-3 px-4 text-xs font-medium">
-                          {sess.teacherName}
-                        </td>
-                        <td className="py-3 px-4 text-xs text-muted-foreground flex items-center gap-1.5">
-                          <MapPin size={14} className="text-primary" />
-                          {sess.room}
-                        </td>
-                        <td className="py-3 px-4 text-xs">
-                          {sess.startsAt.replace('T', ' ')} to {sess.endsAt.slice(11, 16)}
-                        </td>
-                        <td className="py-3 px-4">
-                          {sess.isRecurring ? (
-                            <Badge variant="neutral" className="flex items-center gap-1 w-fit">
-                              <Repeat size={11} /> Weekly Recurring
-                            </Badge>
-                          ) : (
-                            <Badge variant="neutral" className="w-fit">Single Class</Badge>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <Badge variant="info">Scheduled</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-baseline justify-between">
+                        <div className="text-3xl font-black text-slate-900 tracking-tight">
+                          {students.length} <span className="text-xl font-bold text-slate-400">/ {batch.capacity}</span>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200/60">
+                          {fillPercentage}% Filled
+                        </span>
+                      </div>
+
+                      {/* Smooth Progress Bar */}
+                      <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden p-0.5 border border-slate-200/60">
+                        <div
+                          className="bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-500 h-full rounded-full transition-all duration-300"
+                          style={{ width: `${Math.min(100, fillPercentage)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <ShieldCheck size={14} className="text-emerald-600" />
+                        <span>Concurrency-safe Lock</span>
+                      </span>
+                      <span className="font-bold text-slate-700">{remainingSeats} seats available</span>
+                    </div>
+                  </Card>
+
+                  {/* Card 2: Active Faculty */}
+                  <Card className="p-6 rounded-3xl border border-slate-200/90 bg-white shadow-xs flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        Active Faculty
+                      </span>
+                      <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                        <GraduationCap size={17} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 mb-4">
+                      <div className="flex items-baseline justify-between">
+                        <div className="text-3xl font-black text-slate-900 tracking-tight">
+                          {teachers.length}
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200/60">
+                          {leadTeachers.length} Lead • {assistantTeachers.length} Assistants
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 pt-1">
+                        Lead Instructor: <strong className="text-slate-800 font-semibold">{leadTeacherName}</strong>
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                      <span className="font-medium text-slate-500">Curriculum Exegesis Staff</span>
+                      <button
+                        onClick={() => setShowAssignTeacherModal(true)}
+                        className="text-blue-600 hover:text-blue-800 font-bold cursor-pointer"
+                      >
+                        + Assign
+                      </button>
+                    </div>
+                  </Card>
+
+                  {/* Card 3: Scheduled Classes */}
+                  <Card className="p-6 rounded-3xl border border-slate-200/90 bg-white shadow-xs flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        Scheduled Classes
+                      </span>
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                        <Clock size={17} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 mb-4">
+                      <div className="flex items-baseline justify-between">
+                        <div className="text-3xl font-black text-slate-900 tracking-tight">
+                          {sessions.length}
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 flex items-center gap-1">
+                          <CheckCircle2 size={12} />
+                          <span>Conflict-Free</span>
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 pt-1">
+                        Lecture hours protected with teacher & hall double-booking prevention.
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                      <span className="font-medium text-slate-500">Weekly Live Practicum</span>
+                      <button
+                        onClick={() => setShowScheduleModal(true)}
+                        className="text-blue-600 hover:text-blue-800 font-bold cursor-pointer"
+                      >
+                        + Schedule
+                      </button>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Batch Parameters & Settings Card */}
+                <Card className="p-6 sm:p-7 rounded-3xl border border-slate-200/90 bg-white shadow-xs space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                    <div>
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+                        Cohort Parameters & Academic Configuration
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Verified dates, curriculum syllabi linkage, and isolation parameters for this cohort.
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80 w-fit">
+                      <ShieldCheck size={14} className="text-emerald-600" />
+                      <span>Tenant Isolated</span>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                    {/* Item 1 */}
+                    <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/70 space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Cohort Name</span>
+                      <span className="text-sm font-bold text-slate-900 block">{batch.name}</span>
+                    </div>
+
+                    {/* Item 2 */}
+                    <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/70 space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Unique Identifier Code</span>
+                      <span className="text-sm font-mono font-bold text-blue-600 block">{batch.code}</span>
+                    </div>
+
+                    {/* Item 3 */}
+                    <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/70 space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Course Program Syllabus</span>
+                      <span className="text-sm font-bold text-slate-900 block">{batch.courseTitle}</span>
+                    </div>
+
+                    {/* Item 4 */}
+                    <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/70 space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Academic Period & Term</span>
+                      <span className="text-sm font-bold text-slate-900 block">{batch.academicYear} — {batch.term}</span>
+                    </div>
+
+                    {/* Item 5 */}
+                    <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/70 space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Start Date</span>
+                      <span className="text-sm font-bold text-slate-900 block">{batch.startDate}</span>
+                    </div>
+
+                    {/* Item 6 */}
+                    <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/70 space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Graduation / End Date</span>
+                      <span className="text-sm font-bold text-slate-900 block">{batch.endDate}</span>
+                    </div>
+                  </div>
+                </Card>
               </div>
-            </Card>
-          </div>
+            )}
+
+            {/* ── TAB 2: ENROLLED STUDENTS & TRANSFERS ── */}
+            {activeTab === 'students' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 tracking-tight">Enrolled Students Roster</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Manage student admissions, capacity constraints, and inter-batch student transfers.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search student or admission no..."
+                        value={studentSearch}
+                        onChange={(e) => setStudentSearch(e.target.value)}
+                        className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 w-56"
+                      />
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setShowEnrolModal(true)}
+                      className="text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white gap-1.5 py-2 px-3.5"
+                    >
+                      <UserPlus size={14} />
+                      <span>Enrol Student</span>
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Students Table */}
+                <Card className="rounded-3xl border border-slate-200/90 bg-white shadow-xs overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50/80 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        <tr>
+                          <th className="py-3 px-5">Admission No</th>
+                          <th className="py-3 px-5">Student Name</th>
+                          <th className="py-3 px-5">Contact Details</th>
+                          <th className="py-3 px-5">Enrolment Date</th>
+                          <th className="py-3 px-5">Status</th>
+                          <th className="py-3 px-5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredStudents.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-slate-400">
+                              No students found in this cohort.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredStudents.map((st) => (
+                            <tr key={st.id} className="hover:bg-slate-50/60 transition-colors">
+                              <td className="py-3.5 px-5 font-mono font-bold text-blue-600">
+                                {st.admissionNo}
+                              </td>
+                              <td className="py-3.5 px-5">
+                                <div className="font-bold text-slate-900">{st.fullName}</div>
+                                <div className="text-[11px] text-slate-400">{st.email}</div>
+                              </td>
+                              <td className="py-3.5 px-5 text-slate-500">
+                                {st.phone || '—'}
+                              </td>
+                              <td className="py-3.5 px-5 text-slate-500 font-medium">
+                                {st.enrolledAt || '—'}
+                              </td>
+                              <td className="py-3.5 px-5">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  <span>Enrolled</span>
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-5 text-right">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedStudentForTransfer(st);
+                                    setShowTransferModal(true);
+                                  }}
+                                  className="text-xs font-semibold rounded-xl border-slate-200 hover:bg-slate-50 gap-1.5 ml-auto"
+                                >
+                                  <ArrowRightLeft size={13} className="text-slate-500" />
+                                  <span>Transfer Batch</span>
+                                </Button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                {/* Batch Transfer History Log */}
+                <Card className="p-6 rounded-3xl border border-slate-200/90 bg-white shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <ArrowRightLeft className="text-blue-600" size={18} />
+                      <h4 className="font-bold text-slate-900 text-sm">Batch Transfer Audit Trail</h4>
+                    </div>
+                    <span className="text-xs text-slate-400 font-medium">
+                      Permanent audit trail of academic progression
+                    </span>
+                  </div>
+
+                  {transferLogs.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-4">
+                      No transfer records logged yet for this cohort.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100 text-xs">
+                      {transferLogs.map((log) => (
+                        <div key={log.id} className="py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-slate-900 flex items-center gap-2">
+                              <span>{log.studentName}</span>
+                              <span className="font-mono text-slate-400">({log.admissionNo})</span>
+                            </div>
+                            <div className="text-slate-600 mt-0.5">
+                              From <strong className="text-slate-800">{log.sourceBatch}</strong> &rarr; To{' '}
+                              <strong className="text-blue-600">{log.targetBatch}</strong>
+                            </div>
+                            <div className="text-blue-700 mt-0.5 font-medium">
+                              Reason: {log.reason}
+                            </div>
+                          </div>
+                          <div className="text-right text-slate-400">
+                            <div>Initiated by: <span className="font-medium text-slate-600">{log.transferredBy}</span></div>
+                            <div className="text-[11px] font-mono mt-0.5">{log.transferredAt}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </div>
+            )}
+
+            {/* ── TAB 3: TEACHING FACULTY ── */}
+            {activeTab === 'faculty' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 tracking-tight">Assigned Faculty Staff</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Support for one Lead Instructor and multiple Assistant Teaching Faculty members.
+                    </p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setShowAssignTeacherModal(true)}
+                    className="text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white gap-1.5 py-2 px-3.5"
+                  >
+                    <Plus size={15} />
+                    <span>Assign Teacher</span>
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {teachers.map((t) => (
+                    <Card
+                      key={t.id}
+                      className={`p-6 rounded-3xl border shadow-xs space-y-4 ${
+                        t.role === 'LEAD' ? 'border-blue-200 bg-blue-50/30' : 'border-slate-200/90 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+                          {t.name[0]}
+                        </div>
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            t.role === 'LEAD'
+                              ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                              : 'bg-slate-100 text-slate-700 border border-slate-200'
+                          }`}
+                        >
+                          {t.role === 'LEAD' ? 'Lead Faculty' : 'Assistant Teacher'}
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-sm">{t.name}</h4>
+                        <p className="text-xs text-slate-400 mt-0.5">{t.email}</p>
+                        <p className="text-xs text-blue-700 font-semibold mt-2">{t.specialization}</p>
+                      </div>
+                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                        <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                          <CheckCircle2 size={12} />
+                          <span>Tenant Verified</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTeacher(t.id)}
+                          className="text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB 4: TIMETABLE & LIVE SESSIONS ── */}
+            {activeTab === 'timetable' && (
+              <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 tracking-tight">Class Timetable & Live Sessions</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Conflict-protected schedule preventing teacher, room, and cohort double-booking.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowRecurringModal(true)}
+                      className="text-xs font-semibold rounded-xl border-slate-200 hover:bg-slate-50 gap-1.5"
+                    >
+                      <Repeat size={14} className="text-slate-600" />
+                      <span>Recurring Schedule</span>
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setShowScheduleModal(true)}
+                      className="text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+                    >
+                      <Plus size={14} />
+                      <span>Schedule Class</span>
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Sessions Table */}
+                <Card className="rounded-3xl border border-slate-200/90 bg-white shadow-xs overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50/80 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        <tr>
+                          <th className="py-3 px-5">Class Topic</th>
+                          <th className="py-3 px-5">Instructor</th>
+                          <th className="py-3 px-5">Location / Room</th>
+                          <th className="py-3 px-5">Time Slot</th>
+                          <th className="py-3 px-5">Type</th>
+                          <th className="py-3 px-5 text-right">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {sessions.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-slate-400">
+                              No sessions scheduled yet. Click &quot;Schedule Class&quot; or &quot;Recurring Schedule&quot; above.
+                            </td>
+                          </tr>
+                        ) : (
+                          sessions.map((sess) => (
+                            <tr key={sess.id} className="hover:bg-slate-50/60 transition-colors">
+                              <td className="py-3.5 px-5 font-bold text-slate-900">
+                                {sess.title}
+                              </td>
+                              <td className="py-3.5 px-5 text-slate-700 font-medium">
+                                {sess.teacherName}
+                              </td>
+                              <td className="py-3.5 px-5 text-slate-500 flex items-center gap-1.5">
+                                <MapPin size={13} className="text-blue-600 shrink-0" />
+                                <span>{sess.room}</span>
+                              </td>
+                              <td className="py-3.5 px-5 text-slate-600 font-mono text-[11px]">
+                                {sess.startsAt.replace('T', ' ')} to {sess.endsAt.slice(11, 16)}
+                              </td>
+                              <td className="py-3.5 px-5">
+                                {sess.isRecurring ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200/70">
+                                    <Repeat size={11} /> Weekly Recurring
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                                    Single Class
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-5 text-right">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200/60">
+                                  Scheduled
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </div>
+            )}
+          </>
         )}
       </div>
 
+      {/* ── MODALS (Functionality 100% Preserved) ── */}
+
       {/* MODAL 1: ENROL STUDENT */}
       {showEnrolModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-background rounded-xl border max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <Users className="text-primary" size={20} />
-                Enrol Student in Batch
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                <Users className="text-blue-600" size={20} />
+                <span>Enrol Student in Batch</span>
               </h3>
               <button
                 onClick={() => setShowEnrolModal(false)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleEnrollStudent} className="space-y-3.5">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold">Select Institute Student *</label>
+            <form onSubmit={handleEnrollStudent} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">Select Institute Student *</label>
                 {instituteStudents.length === 0 ? (
-                  <p className="text-xs text-muted-foreground p-3 border rounded-lg bg-muted/30">
-                    All active students in this institute are already enrolled in this cohort, or no students exist yet.
+                  <p className="text-xs text-slate-500 p-3 border border-slate-200 rounded-xl bg-slate-50">
+                    All active students are enrolled in this cohort, or no other student profiles exist.
                   </p>
                 ) : (
                   <select
                     required
                     value={selectedEnrollStudentId}
                     onChange={(e) => setSelectedEnrollStudentId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   >
                     {instituteStudents.map((st) => (
                       <option key={st.id} value={st.id}>
@@ -1064,18 +1340,23 @@ export default function BatchDetailPage({
                 )}
               </div>
 
-              <div className="bg-muted/50 p-3 rounded-lg text-xs text-muted-foreground flex items-center gap-2">
-                <ShieldCheck size={16} className="text-emerald-500 shrink-0" />
+              <div className="bg-blue-50/70 border border-blue-200/60 p-3 rounded-2xl text-xs text-blue-800 flex items-center gap-2">
+                <ShieldCheck size={16} className="text-blue-600 shrink-0" />
                 <span>
-                  Current capacity: {students.length}/{batch.capacity}. Capacity limit is enforced concurrency-safely.
+                  Current capacity: <strong>{students.length}/{batch.capacity}</strong>. Concurrency-safe limit enforcement.
                 </span>
               </div>
 
-              <div className="pt-3 border-t flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setShowEnrolModal(false)}>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setShowEnrolModal(false)} className="rounded-xl text-xs">
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary" disabled={submittingAction || !selectedEnrollStudentId}>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={submittingAction || !selectedEnrollStudentId}
+                  className="rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                >
                   {submittingAction ? 'Enrolling...' : 'Confirm Enrolment'}
                 </Button>
               </div>
@@ -1084,53 +1365,53 @@ export default function BatchDetailPage({
         </div>
       )}
 
-      {/* MODAL 2: TRANSFER STUDENT (Requirement 2) */}
+      {/* MODAL 2: TRANSFER STUDENT */}
       {showTransferModal && selectedStudentForTransfer && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-background rounded-xl border max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <ArrowRightLeft className="text-primary" size={20} />
-                Student Batch Transfer
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                <ArrowRightLeft className="text-blue-600" size={20} />
+                <span>Student Batch Transfer</span>
               </h3>
               <button
                 onClick={() => setShowTransferModal(false)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
 
             <form onSubmit={handleTransferStudent} className="space-y-4">
-              <div className="bg-muted/40 p-3 rounded-lg space-y-1 text-xs">
-                <span className="text-muted-foreground">Transferring Student:</span>
-                <div className="font-semibold text-foreground text-sm">
+              <div className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl space-y-1 text-xs">
+                <span className="text-slate-400 font-semibold block">Transferring Student:</span>
+                <div className="font-bold text-slate-900 text-sm">
                   {selectedStudentForTransfer.fullName} ({selectedStudentForTransfer.admissionNo})
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Source Batch (Current)</label>
+                <label className="text-xs font-bold text-slate-700">Source Batch (Current)</label>
                 <input
                   type="text"
                   disabled
                   value={batch.name}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-muted text-muted-foreground"
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-100 text-slate-600 font-medium"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Target Batch (Same Course Only) *</label>
+                <label className="text-xs font-bold text-slate-700">Target Batch (Same Course Program) *</label>
                 {eligibleTargetBatches.length === 0 ? (
-                  <p className="text-xs text-muted-foreground p-3 border rounded-lg bg-muted/30">
-                    No other batches exist for this course yet. Create another cohort for this course first.
+                  <p className="text-xs text-slate-500 p-3 border border-slate-200 rounded-xl bg-slate-50">
+                    No other active cohorts exist for this course program. Create another cohort first.
                   </p>
                 ) : (
                   <select
                     required
                     value={transferTargetBatchId}
                     onChange={(e) => setTransferTargetBatchId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   >
                     {eligibleTargetBatches.map((tb) => (
                       <option key={tb.id} value={tb.id}>
@@ -1139,35 +1420,32 @@ export default function BatchDetailPage({
                     ))}
                   </select>
                 )}
-                <span className="text-[11px] text-muted-foreground block">
-                  Requirement 2: Only cohorts offering the exact same course curriculum are eligible.
-                </span>
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Transfer Reason *</label>
+                <label className="text-xs font-bold text-slate-700">Transfer Reason *</label>
                 <textarea
                   required
                   rows={2}
-                  placeholder="Provide an administrative reason (e.g. Schedule clash, medical relocation)..."
+                  placeholder="Provide an administrative reason (e.g. Schedule clash, relocation)..."
                   value={transferReason}
                   onChange={(e) => setTransferReason(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
-              <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg text-xs text-emerald-800 flex items-start gap-2">
-                <CheckCircle size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+              <div className="bg-emerald-50 border border-emerald-200/80 p-3 rounded-2xl text-xs text-emerald-800 flex items-start gap-2">
+                <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
                 <span>
-                  <strong>Academic Record Preservation:</strong> Historical learning records, submissions, grades, and completed attendance will not be deleted.
+                  <strong>Academic Record Preservation:</strong> Historical learning records, submissions, grades, and completed attendance will not be lost.
                 </span>
               </div>
 
-              <div className="pt-3 border-t flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setShowTransferModal(false)}>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setShowTransferModal(false)} className="rounded-xl text-xs">
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary">
+                <Button type="submit" variant="primary" className="rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white">
                   Execute Atomic Transfer
                 </Button>
               </div>
@@ -1176,18 +1454,18 @@ export default function BatchDetailPage({
         </div>
       )}
 
-      {/* MODAL 3: SCHEDULE SINGLE CLASS WITH CONFLICT DETECTOR (Requirement 1) */}
+      {/* MODAL 3: SCHEDULE SINGLE CLASS WITH CONFLICT DETECTOR */}
       {showScheduleModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-background rounded-xl border max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <Clock className="text-primary" size={20} />
-                Schedule Single Class
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                <Clock className="text-blue-600" size={20} />
+                <span>Schedule Single Class</span>
               </h3>
               <button
                 onClick={() => setShowScheduleModal(false)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg"
               >
                 <X size={18} />
               </button>
@@ -1195,20 +1473,20 @@ export default function BatchDetailPage({
 
             <form onSubmit={handleCreateClass} className="space-y-3.5">
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Class Title / Topic *</label>
+                <label className="text-xs font-bold text-slate-700">Class Title / Topic *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Introduction to Biblical Manuscripts"
                   value={newClass.title}
                   onChange={(e) => setNewClass({ ...newClass, title: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Instructor *</label>
+                  <label className="text-xs font-bold text-slate-700">Instructor *</label>
                   <select
                     required
                     value={newClass.teacherProfileId}
@@ -1217,7 +1495,7 @@ export default function BatchDetailPage({
                       setNewClass({ ...newClass, teacherProfileId: val });
                       handleCheckConflict({ teacherProfileId: val });
                     }}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   >
                     {instituteTeachers.length === 0 && (
                       <option value="">No faculty profiles available</option>
@@ -1231,7 +1509,7 @@ export default function BatchDetailPage({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Classroom / Hall</label>
+                  <label className="text-xs font-bold text-slate-700">Classroom / Hall</label>
                   <input
                     type="text"
                     value={newClass.room}
@@ -1240,14 +1518,14 @@ export default function BatchDetailPage({
                       setNewClass({ ...newClass, room: val });
                       handleCheckConflict({ room: val });
                     }}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Starts At *</label>
+                  <label className="text-xs font-bold text-slate-700">Starts At *</label>
                   <input
                     type="datetime-local"
                     required
@@ -1257,12 +1535,12 @@ export default function BatchDetailPage({
                       setNewClass({ ...newClass, startsAt: val });
                       handleCheckConflict({ startsAt: val });
                     }}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Ends At *</label>
+                  <label className="text-xs font-bold text-slate-700">Ends At *</label>
                   <input
                     type="datetime-local"
                     required
@@ -1272,29 +1550,28 @@ export default function BatchDetailPage({
                       setNewClass({ ...newClass, endsAt: val });
                       handleCheckConflict({ endsAt: val });
                     }}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
 
-              {/* Conflict Detection Alert Simulator */}
               {conflictWarning ? (
-                <div className="bg-rose-500/10 border border-rose-500/30 p-3 rounded-lg text-xs text-rose-700 flex items-start gap-2">
+                <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-800 flex items-start gap-2">
                   <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
                   <span>{conflictWarning}</span>
                 </div>
               ) : (
-                <div className="bg-emerald-500/10 border border-emerald-500/20 p-2.5 rounded-lg text-xs text-emerald-700 flex items-center gap-2">
-                  <CheckCircle size={15} className="text-emerald-600 shrink-0" />
+                <div className="bg-emerald-50 border border-emerald-200/80 p-2.5 rounded-2xl text-xs text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
                   <span>No scheduling conflicts detected for this teacher, room, and batch slot.</span>
                 </div>
               )}
 
-              <div className="pt-3 border-t flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setShowScheduleModal(false)}>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setShowScheduleModal(false)} className="rounded-xl text-xs">
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary" disabled={!!conflictWarning}>
+                <Button type="submit" variant="primary" disabled={!!conflictWarning} className="rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white">
                   Save Schedule
                 </Button>
               </div>
@@ -1303,23 +1580,23 @@ export default function BatchDetailPage({
         </div>
       )}
 
-      {/* MODAL 4: RECURRING WEEKLY SCHEDULING (Requirement 4) */}
+      {/* MODAL 4: RECURRING WEEKLY SCHEDULING */}
       {showRecurringModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-background rounded-xl border max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b pb-3">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h3 className="font-bold text-lg flex items-center gap-2">
-                  <Repeat className="text-primary" size={20} />
-                  Generate Recurring Weekly Schedule
+                <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                  <Repeat className="text-blue-600" size={20} />
+                  <span>Generate Recurring Weekly Schedule</span>
                 </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Requirement 4: Validates conflicts for every generated occurrence with exception dates.
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Validates conflict detection for every occurrence with exception dates.
                 </p>
               </div>
               <button
                 onClick={() => setShowRecurringModal(false)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg"
               >
                 <X size={18} />
               </button>
@@ -1328,22 +1605,22 @@ export default function BatchDetailPage({
             <form onSubmit={handleGenerateRecurring} className="space-y-3.5">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Weekly Series Title *</label>
+                  <label className="text-xs font-bold text-slate-700">Weekly Series Title *</label>
                   <input
                     type="text"
                     required
                     value={recurringForm.title}
                     onChange={(e) => setRecurringForm({ ...recurringForm, title: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Instructor *</label>
+                  <label className="text-xs font-bold text-slate-700">Instructor *</label>
                   <select
                     required
                     value={recurringForm.teacherProfileId}
                     onChange={(e) => setRecurringForm({ ...recurringForm, teacherProfileId: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   >
                     {instituteTeachers.length === 0 && (
                       <option value="">No faculty available</option>
@@ -1358,7 +1635,7 @@ export default function BatchDetailPage({
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Days of Week *</label>
+                <label className="text-xs font-bold text-slate-700">Days of Week *</label>
                 <div className="flex gap-2">
                   {[
                     { label: 'Mon', val: 1 },
@@ -1380,10 +1657,10 @@ export default function BatchDetailPage({
                             : [...recurringForm.daysOfWeek, d.val],
                         });
                       }}
-                      className={`px-3 py-1.5 rounded text-xs font-semibold border ${
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
                         recurringForm.daysOfWeek.includes(d.val)
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'bg-background text-muted-foreground'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
                       {d.label}
@@ -1394,73 +1671,73 @@ export default function BatchDetailPage({
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Daily Start Time</label>
+                  <label className="text-xs font-bold text-slate-700">Daily Start Time</label>
                   <input
                     type="time"
                     required
                     value={recurringForm.startTime}
                     onChange={(e) => setRecurringForm({ ...recurringForm, startTime: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Daily End Time</label>
+                  <label className="text-xs font-bold text-slate-700">Daily End Time</label>
                   <input
                     type="time"
                     required
                     value={recurringForm.endTime}
                     onChange={(e) => setRecurringForm({ ...recurringForm, endTime: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Series Start Date</label>
+                  <label className="text-xs font-bold text-slate-700">Series Start Date</label>
                   <input
                     type="date"
                     required
                     value={recurringForm.startDate}
                     onChange={(e) => setRecurringForm({ ...recurringForm, startDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold">Series End Date</label>
+                  <label className="text-xs font-bold text-slate-700">Series End Date</label>
                   <input
                     type="date"
                     required
                     value={recurringForm.endDate}
                     onChange={(e) => setRecurringForm({ ...recurringForm, endDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold">Exception / Holiday Dates (Comma Separated)</label>
+                <label className="text-xs font-bold text-slate-700">Exception / Holiday Dates (Comma Separated)</label>
                 <input
                   type="text"
                   placeholder="e.g. 2026-10-02, 2026-11-14"
                   value={recurringForm.exceptions}
                   onChange={(e) => setRecurringForm({ ...recurringForm, exceptions: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
               {recurringPreview && (
-                <div className="bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-lg text-xs text-emerald-800 flex items-center gap-2">
-                  <CheckCircle size={16} className="text-emerald-600 shrink-0" />
-                  <span>{recurringPreview}</span>
+                <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-xs text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                  <span className="font-semibold">{recurringPreview}</span>
                 </div>
               )}
 
-              <div className="pt-3 border-t flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setShowRecurringModal(false)}>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setShowRecurringModal(false)} className="rounded-xl text-xs">
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary">
+                <Button type="submit" variant="primary" className="rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white">
                   Generate Recurring Classes
                 </Button>
               </div>
@@ -1469,28 +1746,28 @@ export default function BatchDetailPage({
         </div>
       )}
 
-      {/* MODAL 5: ASSIGN TEACHER (Requirement 5) */}
+      {/* MODAL 5: ASSIGN TEACHER */}
       {showAssignTeacherModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-background rounded-xl border max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <GraduationCap className="text-primary" size={20} />
-                Assign Teaching Faculty
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                <GraduationCap className="text-blue-600" size={20} />
+                <span>Assign Teaching Faculty</span>
               </h3>
               <button
                 onClick={() => setShowAssignTeacherModal(false)}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleAssignTeacher} className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold">Teacher *</label>
+            <form onSubmit={handleAssignTeacher} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">Teacher *</label>
                 {instituteTeachers.length === 0 ? (
-                  <p className="text-xs text-muted-foreground p-3 border rounded-lg bg-muted/30">
+                  <p className="text-xs text-slate-500 p-3 border border-slate-200 rounded-xl bg-slate-50">
                     No active faculty members found in this institute. Create a teacher profile first.
                   </p>
                 ) : (
@@ -1500,7 +1777,7 @@ export default function BatchDetailPage({
                     onChange={(e) =>
                       setAssignTeacherForm({ ...assignTeacherForm, teacherProfileId: e.target.value })
                     }
-                    className="w-full px-3 py-2 text-sm border rounded-lg bg-background"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   >
                     {instituteTeachers.map((t) => (
                       <option key={t.id} value={t.id}>
@@ -1511,8 +1788,8 @@ export default function BatchDetailPage({
                 )}
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-semibold">Faculty Role</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">Faculty Role</label>
                 <select
                   value={assignTeacherForm.role}
                   onChange={(e) =>
@@ -1521,21 +1798,22 @@ export default function BatchDetailPage({
                       role: e.target.value === 'LEAD' ? 'LEAD' : 'ASSISTANT',
                     })
                   }
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-background"
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option value="ASSISTANT">Assistant Teacher</option>
                   <option value="LEAD">Lead Teacher (Demotes existing lead)</option>
                 </select>
               </div>
 
-              <div className="pt-3 border-t flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setShowAssignTeacherModal(false)}>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setShowAssignTeacherModal(false)} className="rounded-xl text-xs">
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   variant="primary"
                   disabled={submittingAction || !assignTeacherForm.teacherProfileId}
+                  className="rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
                 >
                   {submittingAction ? 'Assigning...' : 'Assign Faculty'}
                 </Button>
