@@ -7,6 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { ROLE_PORTAL_MAP, DEFAULT_ROLE_PERMISSIONS, RoleType } from '@bible-lms/shared';
+import { Role, MembershipStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { getRequiredJwtSecret } from './jwt-secret.util';
@@ -343,6 +344,46 @@ export class AuthService {
     }
 
     if (!user) {
+      // Auto-provision verified student account on phone OTP verification
+      const defaultInst = await this.prisma.institute.findFirst({
+        where: { status: 'ACTIVE' },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (defaultInst) {
+        const admissionNo = `ADM-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
+        user = await this.prisma.$transaction(async (tx) => {
+          const newUser = await tx.user.create({
+            data: {
+              phoneE164: phoneNumber.startsWith('+') ? phoneNumber : `+91${bare10}`,
+              fullName: `Student ${bare10.slice(-4) || 'Learner'}`,
+              status: 'ACTIVE',
+            },
+          });
+          const newMembership = await tx.membership.create({
+            data: {
+              userId: newUser.id,
+              instituteId: defaultInst.id,
+              role: Role.STUDENT,
+              status: MembershipStatus.ACTIVE,
+            },
+          });
+          await tx.studentProfile.create({
+            data: {
+              instituteId: defaultInst.id,
+              membershipId: newMembership.id,
+              admissionNo,
+              status: 'ACTIVE',
+            },
+          });
+          return tx.user.findUnique({
+            where: { id: newUser.id },
+            include: this.getActiveMembershipInclude(),
+          });
+        });
+      }
+    }
+
+    if (!user) {
       throw new UnauthorizedException(
         'No active account found for this phone number. Please register or contact your institute administrator.',
       );
@@ -364,14 +405,54 @@ export class AuthService {
         (m) => m.role === normalizedRole || this.normalizeRoleAlias(String(m.role)) === normalizedRole,
       );
       if (matching.length === 0) {
-        throw new ForbiddenException(
-          'Your account does not hold an active membership for the requested role',
-        );
+        // If user is logging in as STUDENT and has no student membership, auto-provision active STUDENT membership
+        if (normalizedRole === Role.STUDENT) {
+          const defaultInst = await this.prisma.institute.findFirst({
+            where: { status: 'ACTIVE' },
+            orderBy: { createdAt: 'asc' },
+          });
+          if (defaultInst) {
+            const admissionNo = `ADM-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
+            const newMem = await this.prisma.membership.upsert({
+              where: {
+                userId_instituteId_role: {
+                  userId: user.id,
+                  instituteId: defaultInst.id,
+                  role: Role.STUDENT,
+                },
+              },
+              update: { status: MembershipStatus.ACTIVE },
+              create: {
+                userId: user.id,
+                instituteId: defaultInst.id,
+                role: Role.STUDENT,
+                status: MembershipStatus.ACTIVE,
+              },
+            });
+            await this.prisma.studentProfile.upsert({
+              where: { membershipId: newMem.id },
+              update: {},
+              create: {
+                instituteId: defaultInst.id,
+                membershipId: newMem.id,
+                admissionNo,
+                status: 'ACTIVE',
+              },
+            });
+            selectedMembership = newMem;
+          }
+        }
+        if (!selectedMembership) {
+          throw new ForbiddenException(
+            'Your account does not hold an active membership for the requested role',
+          );
+        }
+      } else {
+        // If a user holds multiple memberships for the same role (e.g. across institutes),
+        // prefer the one with existing enrolments so returning students always keep course access.
+        selectedMembership =
+          matching.find((m) => (m.studentProfile?._count?.enrolments || 0) > 0) || matching[0];
       }
-      // If a user holds multiple memberships for the same role (e.g. across institutes),
-      // prefer the one with existing enrolments so returning students always keep course access.
-      selectedMembership =
-        matching.find((m) => (m.studentProfile?._count?.enrolments || 0) > 0) || matching[0];
     } else if (activeMemberships.length > 1) {
       selectedMembership =
         activeMemberships.find((m) => (m.studentProfile?._count?.enrolments || 0) > 0) ||
