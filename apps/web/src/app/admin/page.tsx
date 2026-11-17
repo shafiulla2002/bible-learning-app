@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { PortalShell } from '@/components/layout/portal-shell';
+import { usePercentageProgress, PercentageProgressLoader } from '@/components/ui/loading-skeleton';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -193,10 +194,30 @@ export default function AdminDashboardPage() {
   const [dateFilter, setDateFilter] = useState<'7D' | '30D' | 'THIS_MONTH' | 'ALL'>('30D');
 
   // Real Database Dashboard Overview State (Strict Data Integrity: null by default in production)
-  const [overview, setOverview] = useState<DashboardOverviewDto | null>(null);
+  const [overview, setOverview] = useState<DashboardOverviewDto | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const storedId = localStorage.getItem('current_institute_id');
+        if (storedId) {
+          const cached = sessionStorage.getItem(`admin_overview_${storedId}_30D`);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.kpi) return parsed;
+          }
+        }
+      } catch {}
+    }
+    return null;
+  });
   const [isLiveConnected, setIsLiveConnected] = useState<boolean>(false);
   const [isLoadingOverview, setIsLoadingOverview] = useState<boolean>(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+
+  // Smooth percentage-based progress bar (0% -> 100%)
+  const { progress, isComplete, stageMessage } = usePercentageProgress({
+    isLoading: isLoadingOverview && !overview,
+    minDurationMs: 800,
+  });
 
   // Real Database Transactions State (Strict Data Integrity: empty by default in production)
   const [transactions, setTransactions] = useState<TransactionItemDto[]>([]);
@@ -444,7 +465,7 @@ export default function AdminDashboardPage() {
               </span>
               <span className="text-slate-300">•</span>
               <span className="text-slate-500">
-                {isLoadingOverview && !overview ? 'Synchronizing Database...' : 'Live PostgreSQL Records'}
+                {!isComplete && !overview ? `Synchronizing Database (${progress}%)...` : 'Live PostgreSQL Records'}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
@@ -583,7 +604,46 @@ export default function AdminDashboardPage() {
 
         
 
-        {/* ── 2. EXACTLY 4 SUMMARY CARDS (Screenshot 8 Reference Style) ───────── */}
+        {/* ── 2. CARDS & CHARTS / PERCENTAGE PROGRESS LOADER ───────── */}
+        {overviewError && !overview ? (
+          <Card className="p-8 text-center rounded-3xl border border-rose-200 bg-rose-50/50">
+            <AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-rose-900">Database Connection Required</h3>
+            <p className="text-xs text-rose-700 mt-1 max-w-md mx-auto">{overviewError}</p>
+            <Button
+              onClick={() => {
+                fetchDashboardData();
+                fetchTransactionsData();
+              }}
+              className="mt-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs gap-2"
+            >
+              <RefreshCw size={14} />
+              <span>Retry Connection</span>
+            </Button>
+          </Card>
+        ) : (!overview || !isComplete) ? (
+          <PercentageProgressLoader
+            progress={progress}
+            stageMessage={stageMessage}
+            title="Synchronizing Live Institute Performance"
+            subtitle="Retrieving verified PostgreSQL records across students, courses, batches and finances..."
+            variant="hero"
+            showCheckpoints={true}
+          />
+        ) : (
+          <>
+            {/* Background Revalidation Indicator */}
+            {isLoadingOverview && (
+              <div className="w-full bg-blue-50/80 border border-blue-200/60 rounded-2xl p-2.5 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-blue-700 font-semibold">
+                  <RefreshCw size={14} className="animate-spin text-blue-600" />
+                  <span>Synchronizing live database updates...</span>
+                </div>
+                <span className="font-mono font-bold text-blue-700 text-[11px]">100% Up-to-Date</span>
+              </div>
+            )}
+
+            {/* ── 2. EXACTLY 4 SUMMARY CARDS (Screenshot 8 Reference Style) ───────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           {/* Card 1: Total Students */}
           <Link href="/admin/students" className="block group">
@@ -827,6 +887,10 @@ export default function AdminDashboardPage() {
             )}
           </Card>
         </div>
+
+        
+          </>
+        )}
 
         {/* ── 4. TRANSACTION TABLE (Real Database Ledger) ──────────────────────── */}
         <Card className="rounded-2xl border border-slate-200/90 bg-white shadow-xs overflow-hidden">
