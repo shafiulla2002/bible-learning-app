@@ -48,15 +48,23 @@ export default function StudentCertificatesPage() {
     : [];
   const [certificates, setCertificates] = useState<Certificate[]>(() => cachedList);
   const [loading, setLoading] = useState<boolean>(() => cachedList.length === 0 && !cachedRaw);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
-  const fetchCertificates = useCallback(async () => {
+  const fetchCertificates = useCallback(async (isManual = false) => {
+    if (isManual) {
+      setIsRefreshing(true);
+    }
     setErrorMessage(null);
     try {
-      const res = await apiFetchResponse('/students/certificates');
+      const timestamp = Date.now();
+      const res = await apiFetchResponse(`/students/certificates?_t=${timestamp}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', Pragma: 'no-cache' },
+      });
       if (res.ok) {
         const data = await res.json();
         const list: Certificate[] = Array.isArray(data)
@@ -75,6 +83,7 @@ export default function StudentCertificatesPage() {
       setErrorMessage(err?.message || 'Connection error while contacting certificates service.');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
@@ -124,11 +133,12 @@ export default function StudentCertificatesPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchCertificates}
-              className="h-9 gap-1.5 text-xs text-slate-600 hover:text-slate-900"
+              onClick={() => fetchCertificates(true)}
+              disabled={isRefreshing || loading}
+              className="h-9 gap-1.5 text-xs text-slate-600 hover:text-slate-900 border-slate-200 bg-white hover:bg-slate-50 transition shadow-2xs"
             >
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              Refresh
+              <RefreshCw size={14} className={isRefreshing || loading ? 'animate-spin text-blue-600' : ''} />
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
             </Button>
           </div>
         </div>
@@ -143,10 +153,11 @@ export default function StudentCertificatesPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchCertificates}
+              onClick={() => fetchCertificates(true)}
+              disabled={isRefreshing || loading}
               className="h-7 text-[11px] text-red-700 border-red-200 hover:bg-red-100"
             >
-              Try Again
+              {isRefreshing ? 'Retrying...' : 'Try Again'}
             </Button>
           </div>
         )}

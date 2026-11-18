@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { StudentShell } from '@/components/layout/student-shell';
 import { SkeletonWithSpinner } from '@/components/ui/loading-skeleton';
 import { useStudentAuth } from '@/lib/use-student-auth';
@@ -22,6 +22,7 @@ import {
   Sparkles,
   MapPin,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 
 interface LiveSessionItem {
@@ -139,6 +140,13 @@ export default function StudentClassesPage() {
   const [activeTab, setActiveTab] = useState<'ALL' | 'LIVE_NOW' | 'UPCOMING' | 'RECORDED' | 'COMPLETED'>('ALL');
   const [selectedBatch, setSelectedBatch] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [tabLoading, setTabLoading] = useState<string | null>(null);
+
+  const handleTabChange = (tab: 'ALL' | 'LIVE_NOW' | 'UPCOMING' | 'RECORDED' | 'COMPLETED') => {
+    setTabLoading(tab);
+    setActiveTab(tab);
+    setTimeout(() => setTabLoading(null), 120);
+  };
 
   useEffect(() => {
     async function fetchSessions() {
@@ -148,12 +156,7 @@ export default function StudentClassesPage() {
         }
         setError(null);
 
-        const params = new URLSearchParams();
-        if (selectedBatch !== 'ALL') params.append('batchId', selectedBatch);
-        if (searchQuery.trim()) params.append('q', searchQuery.trim());
-        if (activeTab !== 'ALL') params.append('status', activeTab);
-
-        const res = await apiFetchResponse(`/students/live-sessions?${params.toString()}`);
+        const res = await apiFetchResponse('/students/live-sessions');
         if (res.status === 401 || res.status === 403) {
           logout();
           return;
@@ -176,11 +179,43 @@ export default function StudentClassesPage() {
     }
 
     fetchSessions();
-  }, [selectedBatch, searchQuery, activeTab, logout]);
+  }, [logout]);
 
-  const sessions = data?.sessions || [];
+  const rawSessions = data?.sessions || [];
   const summary = data?.summary || { total: 0, upcoming: 0, liveNow: 0, completed: 0, recorded: 0, cancelled: 0 };
   const batches = data?.batches || [];
+
+  // Instant 0ms Client-Side Filtering
+  const filteredSessions = useMemo(() => {
+    let list = [...rawSessions];
+
+    if (activeTab === 'LIVE_NOW') {
+      list = list.filter((s) => s.status === 'LIVE_NOW');
+    } else if (activeTab === 'UPCOMING') {
+      list = list.filter((s) => s.status === 'UPCOMING' || s.status === 'STARTING_SOON');
+    } else if (activeTab === 'RECORDED') {
+      list = list.filter((s) => s.hasRecording);
+    } else if (activeTab === 'COMPLETED') {
+      list = list.filter((s) => s.status === 'COMPLETED');
+    }
+
+    if (selectedBatch !== 'ALL') {
+      list = list.filter((s) => s.batchId === selectedBatch);
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (s) =>
+          (s.title || '').toLowerCase().includes(q) ||
+          (s.courseTitle || '').toLowerCase().includes(q) ||
+          (s.teacherName || '').toLowerCase().includes(q) ||
+          (s.batchName || '').toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [rawSessions, activeTab, selectedBatch, searchQuery]);
 
   return (
     <StudentShell pageTitle="Live Classes">
@@ -235,55 +270,63 @@ export default function StudentClassesPage() {
           {/* Tab Navigation */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-2 lg:pb-0 scrollbar-none">
             <button
-              onClick={() => setActiveTab('ALL')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              onClick={() => handleTabChange('ALL')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
                 activeTab === 'ALL'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80'
               }`}
             >
-              All Sessions ({summary.total})
+              {tabLoading === 'ALL' && <Loader2 size={13} className="animate-spin text-white" />}
+              <span>All Sessions ({summary.total})</span>
             </button>
             <button
-              onClick={() => setActiveTab('LIVE_NOW')}
+              onClick={() => handleTabChange('LIVE_NOW')}
               className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
                 activeTab === 'LIVE_NOW'
                   ? 'bg-red-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${activeTab === 'LIVE_NOW' ? 'bg-white' : 'bg-red-500 animate-pulse'}`} />
-              Live Now ({summary.liveNow})
+              {tabLoading === 'LIVE_NOW' ? (
+                <Loader2 size={13} className="animate-spin text-white" />
+              ) : (
+                <span className={`w-2 h-2 rounded-full ${activeTab === 'LIVE_NOW' ? 'bg-white' : 'bg-red-500 animate-pulse'}`} />
+              )}
+              <span>Live Now ({summary.liveNow})</span>
             </button>
             <button
-              onClick={() => setActiveTab('UPCOMING')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              onClick={() => handleTabChange('UPCOMING')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
                 activeTab === 'UPCOMING'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80'
               }`}
             >
-              Upcoming ({summary.upcoming})
+              {tabLoading === 'UPCOMING' && <Loader2 size={13} className="animate-spin text-white" />}
+              <span>Upcoming ({summary.upcoming})</span>
             </button>
             <button
-              onClick={() => setActiveTab('RECORDED')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              onClick={() => handleTabChange('RECORDED')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
                 activeTab === 'RECORDED'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80'
               }`}
             >
-              Recordings ({summary.recorded})
+              {tabLoading === 'RECORDED' && <Loader2 size={13} className="animate-spin text-white" />}
+              <span>Recordings ({summary.recorded})</span>
             </button>
             <button
-              onClick={() => setActiveTab('COMPLETED')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              onClick={() => handleTabChange('COMPLETED')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
                 activeTab === 'COMPLETED'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80'
               }`}
             >
-              Past ({summary.completed})
+              {tabLoading === 'COMPLETED' && <Loader2 size={13} className="animate-spin text-white" />}
+              <span>Past ({summary.completed})</span>
             </button>
           </div>
 
@@ -318,7 +361,7 @@ export default function StudentClassesPage() {
         </div>
 
         {/* Sessions Grid */}
-        {isLoading ? (
+        {isLoading && rawSessions.length === 0 ? (
           <SkeletonWithSpinner spinnerText="Loading live seminars & cohort sessions...">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[1, 2, 3].map((n) => (
@@ -331,7 +374,7 @@ export default function StudentClassesPage() {
               ))}
             </div>
           </SkeletonWithSpinner>
-        ) : sessions.length === 0 ? (
+        ) : filteredSessions.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-sm">
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
               <Video size={28} />
@@ -353,7 +396,7 @@ export default function StudentClassesPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sessions.map((s) => {
+            {filteredSessions.map((s) => {
               const starts = new Date(s.startsAt);
               const ends = new Date(s.endsAt);
               const dateFormatted = starts.toLocaleDateString('en-US', {

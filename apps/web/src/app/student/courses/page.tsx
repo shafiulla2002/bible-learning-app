@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { StudentShell } from '@/components/layout/student-shell';
 import { CourseGridLoadingSkeleton } from '@/components/ui/loading-skeleton';
@@ -19,6 +19,7 @@ import {
   ChevronRight,
   User,
   Layers,
+  Loader2,
 } from 'lucide-react';
 
 export interface EnrolledCourseItem {
@@ -50,39 +51,87 @@ export default function StudentCoursesPage() {
   const [isLoading, setIsLoading] = useState<boolean>(() => !cachedInitial);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
   const [sortBy, setSortBy] = useState<string>('recent');
+  const [tabLoading, setTabLoading] = useState<string | null>(null);
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
 
   const fetchCourses = useCallback(async () => {
     try {
-      const params = new URLSearchParams();
-      if (searchQuery) params.set('q', searchQuery);
-      if (selectedCategory !== 'all') params.set('category', selectedCategory);
-      if (statusFilter !== 'ALL') params.set('status', statusFilter);
-      if (sortBy) params.set('sort', sortBy);
-
-      const res = await apiFetchResponse(`/students/courses?${params.toString()}`);
+      const res = await apiFetchResponse('/students/courses');
 
       if (res.ok) {
         const json = await res.json();
-        setCourses(json.courses || []);
+        const list = json.courses || [];
+        setCourses(list);
         if (json.categories && json.categories.length > 0) {
           setCategories(json.categories);
         }
-        if (!searchQuery && selectedCategory === 'all' && statusFilter === 'ALL') {
-          setCachedPortalData('student_courses', json, 15 * 60 * 1000);
-        }
+        setCachedPortalData('student_courses', json, 15 * 60 * 1000);
       }
     } catch (err) {
       console.error('Failed to fetch enrolled courses:', err);
     } finally {
       setIsLoading(false);
+      setTabLoading(null);
     }
-  }, [searchQuery, selectedCategory, statusFilter, sortBy, profile?.studentProfileId, student?.id, institute?.id]);
+  }, []);
 
   useEffect(() => {
     fetchCourses();
   }, [fetchCourses]);
+
+  const handleTabChange = (tab: 'ALL' | 'IN_PROGRESS' | 'COMPLETED') => {
+    setTabLoading(tab);
+    setStatusFilter(tab);
+    setTimeout(() => setTabLoading(null), 120);
+  };
+
+  // Accurate Counts for all 3 tabs
+  const allCount = courses.length;
+  const inProgressCount = courses.filter(
+    (c) => (c.progressPct ?? 0) < 100 && c.status !== 'COMPLETED'
+  ).length;
+  const completedCount = courses.filter(
+    (c) => (c.progressPct ?? 0) >= 100 || c.status === 'COMPLETED'
+  ).length;
+
+  // Instant 0ms Filtered Courses
+  const filteredCourses = useMemo(() => {
+    let result = [...courses];
+
+    if (statusFilter === 'IN_PROGRESS') {
+      result = result.filter((c) => (c.progressPct ?? 0) < 100 && c.status !== 'COMPLETED');
+    } else if (statusFilter === 'COMPLETED') {
+      result = result.filter((c) => (c.progressPct ?? 0) >= 100 || c.status === 'COMPLETED');
+    }
+
+    if (selectedCategory !== 'all') {
+      result = result.filter(
+        (c) => (c.category || '').toLowerCase() === selectedCategory.toLowerCase()
+      );
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (c) =>
+          (c.title || '').toLowerCase().includes(q) ||
+          (c.instructor || '').toLowerCase().includes(q) ||
+          (c.category || '').toLowerCase().includes(q)
+      );
+    }
+
+    if (sortBy === 'progress') {
+      result.sort((a, b) => (b.progressPct ?? 0) - (a.progressPct ?? 0));
+    } else if (sortBy === 'title') {
+      result.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    } else {
+      result.sort((a, b) => new Date(b.enrolledAt || 0).getTime() - new Date(a.enrolledAt || 0).getTime());
+    }
+
+    return result;
+  }, [courses, statusFilter, selectedCategory, searchQuery, sortBy]);
 
   return (
     <StudentShell pageTitle="My Courses">
@@ -114,37 +163,46 @@ export default function StudentCoursesPage() {
 
         {/* Filter Pills & Status Tabs */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
-          {/* Status Tabs */}
+          {/* Status Tabs with counts on ALL tabs and loading spinners */}
           <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl w-fit">
             <button
-              onClick={() => setStatusFilter('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              onClick={() => handleTabChange('ALL')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
                 statusFilter === 'ALL'
                   ? 'bg-white text-blue-600 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              All Courses ({courses.length})
+              {tabLoading === 'ALL' ? (
+                <Loader2 size={13} className="animate-spin text-blue-600" />
+              ) : null}
+              <span>All Courses ({allCount})</span>
             </button>
             <button
-              onClick={() => setStatusFilter('IN_PROGRESS')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              onClick={() => handleTabChange('IN_PROGRESS')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
                 statusFilter === 'IN_PROGRESS'
                   ? 'bg-white text-blue-600 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              In Progress
+              {tabLoading === 'IN_PROGRESS' ? (
+                <Loader2 size={13} className="animate-spin text-blue-600" />
+              ) : null}
+              <span>In Progress ({inProgressCount})</span>
             </button>
             <button
-              onClick={() => setStatusFilter('COMPLETED')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              onClick={() => handleTabChange('COMPLETED')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
                 statusFilter === 'COMPLETED'
                   ? 'bg-white text-blue-600 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Completed
+              {tabLoading === 'COMPLETED' ? (
+                <Loader2 size={13} className="animate-spin text-blue-600" />
+              ) : null}
+              <span>Completed ({completedCount})</span>
             </button>
           </div>
 
@@ -166,9 +224,9 @@ export default function StudentCoursesPage() {
         {/* Course Cards Grid */}
         {isLoading && courses.length === 0 ? (
           <CourseGridLoadingSkeleton message="Loading enrolled courses..." />
-        ) : courses.length > 0 ? (
+        ) : filteredCourses.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {courses.map((course, idx) => {
+            {filteredCourses.map((course, idx) => {
               const gradient = idx % 2 === 0
                 ? 'from-blue-700 to-indigo-900'
                 : 'from-emerald-700 to-teal-900';
@@ -261,11 +319,21 @@ export default function StudentCoursesPage() {
                     {/* Action Button */}
                     <Link
                       href={`/student/courses/${course.courseId}`}
+                      onClick={() => setNavigatingId(course.courseId)}
                       className="w-full inline-flex items-center justify-center gap-2 bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-semibold py-2.5 px-4 rounded-xl shadow-sm transition group"
                     >
-                      <PlayCircle size={15} />
-                      <span>{isCompleted ? 'Review Course' : course.progressPct > 0 ? 'Continue Learning' : 'Start Course'}</span>
-                      <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                      {navigatingId === course.courseId ? (
+                        <>
+                          <Loader2 size={15} className="animate-spin text-white" />
+                          <span>Opening Course...</span>
+                        </>
+                      ) : (
+                        <>
+                          <PlayCircle size={15} />
+                          <span>{isCompleted ? 'Review Course' : course.progressPct > 0 ? 'Continue Learning' : 'Start Course'}</span>
+                          <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                        </>
+                      )}
                     </Link>
                   </div>
                 </div>
