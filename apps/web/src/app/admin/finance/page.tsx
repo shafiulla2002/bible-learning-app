@@ -34,6 +34,7 @@ import {
   X,
   Coins,
   Layers,
+  Loader2,
 } from 'lucide-react';
 
 const adminNav = [
@@ -70,6 +71,12 @@ export default function AdminFinancePage() {
   const [selectedInvoice, setSelectedInvoice] = useState<FinanceOverviewDto['invoices'][0] | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<FinanceOverviewDto['payments'][0] | null>(null);
   const [reversalForm, setReversalForm] = useState({ amountInRupees: 0, reason: '' });
+
+  // Action loading states
+  const [isCreatingStructure, setIsCreatingStructure] = useState(false);
+  const [isIssuingInvoice, setIsIssuingInvoice] = useState(false);
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const [isReversingPayment, setIsReversingPayment] = useState(false);
 
   // Form states
   const [structForm, setStructForm] = useState({
@@ -134,6 +141,7 @@ export default function AdminFinancePage() {
   const handleCreateStructure = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setIsCreatingStructure(true);
     try {
       await financeApi.createFeeStructure(instituteId, structForm);
       setSuccessMsg(`Fee structure "${structForm.name}" created in PostgreSQL.`);
@@ -148,12 +156,15 @@ export default function AdminFinancePage() {
       await loadFinanceData();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to create fee structure.');
+    } finally {
+      setIsCreatingStructure(false);
     }
   };
 
   const handleIssueInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setIsIssuingInvoice(true);
     try {
       await financeApi.issueInvoice(instituteId, invForm);
       setSuccessMsg('Student invoice generated and stored in PostgreSQL.');
@@ -161,6 +172,8 @@ export default function AdminFinancePage() {
       await loadFinanceData();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to issue invoice.');
+    } finally {
+      setIsIssuingInvoice(false);
     }
   };
 
@@ -168,6 +181,7 @@ export default function AdminFinancePage() {
     e.preventDefault();
     if (!selectedInvoice) return;
     setErrorMsg(null);
+    setIsRecordingPayment(true);
     try {
       await financeApi.recordPayment(instituteId, {
         invoiceId: selectedInvoice.id,
@@ -182,6 +196,8 @@ export default function AdminFinancePage() {
       await loadFinanceData();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to record payment.');
+    } finally {
+      setIsRecordingPayment(false);
     }
   };
 
@@ -189,6 +205,7 @@ export default function AdminFinancePage() {
     e.preventDefault();
     if (!selectedPayment || !instituteId) return;
     setErrorMsg(null);
+    setIsReversingPayment(true);
     try {
       await financeApi.reversePayment(instituteId, selectedPayment.id, {
         reversedAmountPaise: Math.round(Number(reversalForm.amountInRupees) * 100),
@@ -201,6 +218,8 @@ export default function AdminFinancePage() {
       await loadFinanceData();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to reverse payment.');
+    } finally {
+      setIsReversingPayment(false);
     }
   };
 
@@ -615,11 +634,30 @@ export default function AdminFinancePage() {
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-3">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setShowStructureModal(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isCreatingStructure}
+                    onClick={() => setShowStructureModal(false)}
+                  >
                     Cancel
                   </Button>
-                  <Button type="submit" variant="primary" size="sm">
-                    Save Fee Structure
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={isCreatingStructure}
+                    className="flex items-center gap-1.5"
+                  >
+                    {isCreatingStructure ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin text-white" />
+                        <span>Saving Fee Structure...</span>
+                      </>
+                    ) : (
+                      <span>Save Fee Structure</span>
+                    )}
                   </Button>
                 </div>
               </form>
@@ -681,11 +719,30 @@ export default function AdminFinancePage() {
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-3">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setShowInvoiceModal(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isIssuingInvoice}
+                    onClick={() => setShowInvoiceModal(false)}
+                  >
                     Cancel
                   </Button>
-                  <Button type="submit" variant="primary" size="sm">
-                    Issue Invoice
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={isIssuingInvoice}
+                    className="flex items-center gap-1.5"
+                  >
+                    {isIssuingInvoice ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin text-white" />
+                        <span>Issuing Invoice...</span>
+                      </>
+                    ) : (
+                      <span>Issue Invoice</span>
+                    )}
                   </Button>
                 </div>
               </form>
@@ -743,11 +800,30 @@ export default function AdminFinancePage() {
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-3">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setShowPaymentModal(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isRecordingPayment}
+                    onClick={() => setShowPaymentModal(false)}
+                  >
                     Cancel
                   </Button>
-                  <Button type="submit" variant="primary" size="sm">
-                    Confirm & Generate Receipt
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={isRecordingPayment}
+                    className="flex items-center gap-1.5"
+                  >
+                    {isRecordingPayment ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin text-white" />
+                        <span>Recording Payment...</span>
+                      </>
+                    ) : (
+                      <span>Confirm & Generate Receipt</span>
+                    )}
                   </Button>
                 </div>
               </form>
@@ -798,11 +874,30 @@ export default function AdminFinancePage() {
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-3">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setShowReversalModal(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isReversingPayment}
+                    onClick={() => setShowReversalModal(false)}
+                  >
                     Cancel
                   </Button>
-                  <Button type="submit" variant="primary" size="sm">
-                    Confirm Reversal
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={isReversingPayment}
+                    className="flex items-center gap-1.5"
+                  >
+                    {isReversingPayment ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin text-white" />
+                        <span>Reversing Payment...</span>
+                      </>
+                    ) : (
+                      <span>Confirm Reversal</span>
+                    )}
                   </Button>
                 </div>
               </form>
